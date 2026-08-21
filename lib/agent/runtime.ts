@@ -166,7 +166,7 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         status: "completed",
         completedAt,
         durationMs,
-        costUsd: sumCost(emissions, result),
+        costUsd: sumCost(result),
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
         model: result.model,
@@ -218,7 +218,12 @@ function titleFor(outputType: string, input: Record<string, string>): string {
   }
 }
 
-function sumCost(_emissions: { key: string; kind: string; value: number }[], result: SkillExecutionResult): number | undefined {
-  if (result.inputTokens == null) return undefined
-  return llmCostUsd(result.inputTokens, result.outputTokens ?? 0)
+/** The single authoritative cost calculation: real tokens x the active
+ * provider's real (or explicitly configured) rate. Returns undefined —
+ * not 0 — when no rate is configured for that provider, so the UI can
+ * tell "unmeasured" apart from "genuinely free". */
+function sumCost(result: SkillExecutionResult): number | undefined {
+  if (result.inputTokens == null || !result.provider) return undefined
+  const estimate = llmCostUsd(result.provider, result.inputTokens, result.outputTokens ?? 0)
+  return estimate.costUsd ?? undefined
 }

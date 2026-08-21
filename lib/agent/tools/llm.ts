@@ -1,115 +1,80 @@
 import "server-only"
 
 /* ================================================================== *
- * LLM TOOL — a real call to the Anthropic Messages API.
+ * LLM TOOL — provider dispatcher.
  *
- * No ANTHROPIC_API_KEY -> the tool reports NOT CONNECTED / blocked. It
- * never fabricates a completion. api.anthropic.com is reachable from
- * this environment's egress policy; only the credential is missing
- * until the operator supplies one.
+ * The external contract (isLlmConnected, callLlm, llmTool) is exactly
+ * what it was when this only talked to Anthropic — nothing downstream
+ * (trend-research.ts, runtime.ts) changed. What used to be a single
+ * hardcoded implementation is now a lookup: LLM_PROVIDER selects one
+ * LlmProvider from lib/agent/tools/llm-providers/, and this file only
+ * ever delegates to that one provider. No provider is ever silently
+ * substituted for another.
  * ================================================================== */
 
-import { llmCostUsd } from "@/lib/agent/cost"
+import { anthropicProvider } from "./llm-providers/anthropic"
+import { geminiProvider } from "./llm-providers/gemini"
+import type { LlmCallInput, LlmCallOutput, LlmProvider } from "./llm-providers/types"
 import type { ToolActionResult, ToolDefinition } from "@/lib/agent/types"
 
-const API_URL = (process.env.ANTHROPIC_BASE_URL_PUBLIC || "https://api.anthropic.com").replace(/\/$/, "") + "/v1/messages"
-const MODEL = process.env.LLM_MODEL || "claude-sonnet-5"
+export type { LlmCallInput, LlmCallOutput } from "./llm-providers/types"
 
-export interface LlmCallInput {
-  system: string
-  prompt: string
-  maxTokens?: number
+const PROVIDERS: Record<string, LlmProvider> = {
+  anthropic: anthropicProvider,
+  gemini: geminiProvider,
 }
 
-export interface LlmCallOutput {
-  text: string
-  model: string
-  inputTokens: number
-  outputTokens: number
+const DEFAULT_PROVIDER_ID = "anthropic"
+
+/** Resolves LLM_PROVIDER to a known provider, or reports exactly why it
+ * can't — an unrecognized value is a misconfiguration, never a silent
+ * fallback to a different provider's credentials. */
+function resolveProvider(): { provider: LlmProvider } | { error: string } {
+  const raw = (process.env.LLM_PROVIDER || DEFAULT_PROVIDER_ID).trim().toLowerCase()
+  const provider = PROVIDERS[raw]
+  if (!provider) {
+    return { error: `LLM_PROVIDER="${raw}" is not supported. Supported providers: ${Object.keys(PROVIDERS).join(", ")}.` }
+  }
+  return { provider }
 }
 
 export function isLlmConnected(): boolean {
-  return !!process.env.ANTHROPIC_API_KEY
+  const resolved = resolveProvider()
+  return "provider" in resolved && resolved.provider.isConfigured()
 }
 
-export const NOT_CONFIGURED_REASON = "Configure ANTHROPIC_API_KEY to run this worker."
+export function activeLlmProviderName(): string {
+  const resolved = resolveProvider()
+  return "provider" in resolved ? resolved.provider.displayName : "LLM"
+}
+
+function activeNotConfiguredReason(): string {
+  const resolved = resolveProvider()
+  return "error" in resolved ? resolved.error : resolved.provider.notConfiguredReason()
+}
 
 export async function callLlm(input: LlmCallInput): Promise<ToolActionResult<LlmCallOutput>> {
-  const started = Date.now()
-  const key = process.env.ANTHROPIC_API_KEY
-  if (!key) {
-    return {
-      ok: false,
-      blocked: true,
-      blockedReason: NOT_CONFIGURED_REASON,
-      durationMs: Date.now() - started,
-    }
+  const resolved = resolveProvider()
+  if ("error" in resolved) {
+    return { ok: false, blocked: true, blockedReason: resolved.error, durationMs: 0 }
   }
-
-  try {
-    const res = await fetch(API_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: input.maxTokens ?? 2000,
-        system: input.system,
-        messages: [{ role: "user", content: input.prompt }],
-      }),
-      signal: AbortSignal.timeout(60_000),
-    })
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => "")
-      // 401/403 with a key present means the provider rejected the
-      // credential itself — distinct from a 5xx/other provider fault.
-      const invalidCredential = res.status === 401 || res.status === 403
-      return {
-        ok: false,
-        errorCode: invalidCredential ? "invalid_credential" : "provider_error",
-        error: invalidCredential
-          ? `Anthropic rejected the configured API key (${res.status}).`
-          : `Anthropic API returned ${res.status}: ${body.slice(0, 300)}`,
-        durationMs: Date.now() - started,
-      }
-    }
-
-    const json = (await res.json()) as {
-      content: { type: string; text?: string }[]
-      model: string
-      usage: { input_tokens: number; output_tokens: number }
-    }
-    const text = json.content.find((c) => c.type === "text")?.text ?? ""
-    const inputTokens = json.usage?.input_tokens ?? 0
-    const outputTokens = json.usage?.output_tokens ?? 0
-
-    return {
-      ok: true,
-      data: { text, model: json.model ?? MODEL, inputTokens, outputTokens },
-      durationMs: Date.now() - started,
-      costUsd: llmCostUsd(inputTokens, outputTokens),
-    }
-  } catch (err) {
-    return {
-      ok: false,
-      errorCode: "provider_error",
-      error: err instanceof Error ? err.message : "LLM request failed",
-      durationMs: Date.now() - started,
-    }
+  if (!resolved.provider.isConfigured()) {
+    return { ok: false, blocked: true, blockedReason: resolved.provider.notConfiguredReason(), durationMs: 0 }
   }
+  return resolved.provider.call(input)
 }
 
 export const llmTool: ToolDefinition = {
   id: "tool_llm",
   name: "LLM",
-  provider: "Anthropic",
+  get provider() {
+    return activeLlmProviderName()
+  },
   description: "Reasons over collected information to analyze, rank and explain.",
   isConnected: isLlmConnected,
-  notConnectedReason: NOT_CONFIGURED_REASON,
+  get notConnectedReason() {
+    return activeNotConfiguredReason()
+  },
   actions: [
     {
       id: "analyze",

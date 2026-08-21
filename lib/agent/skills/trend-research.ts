@@ -107,7 +107,7 @@ export const trendResearchSkill: SkillDefinition = {
       if (llmResult.errorCode === "invalid_credential") throw new InvalidCredentialError(llmResult.error ?? "The configured LLM credential was rejected.")
       throw new ProviderError(llmResult.error ?? "LLM analysis failed.")
     }
-    const llmData = llmResult.data as { text: string; model: string; inputTokens: number; outputTokens: number }
+    const llmData = llmResult.data as { text: string; model: string; inputTokens: number; outputTokens: number; provider: string }
     ctx.emit("reasoning_completed", { durationMs: llmResult.durationMs, inputTokens: llmData.inputTokens, outputTokens: llmData.outputTokens })
 
     const parsed = parseTrends(llmData.text, query)
@@ -120,6 +120,7 @@ export const trendResearchSkill: SkillDefinition = {
       model: llmData.model,
       inputTokens: llmData.inputTokens,
       outputTokens: llmData.outputTokens,
+      provider: llmData.provider,
     }
   },
 

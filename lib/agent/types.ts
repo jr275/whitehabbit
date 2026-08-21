@@ -96,6 +96,10 @@ export interface SkillExecutionResult {
   model?: string
   inputTokens?: number
   outputTokens?: number
+  /** which LLM provider produced model/inputTokens/outputTokens — cost
+   * lookup keys off this so one provider's rate is never applied to
+   * another's tokens. */
+  provider?: string
 }
 
 export interface SkillEvaluation {

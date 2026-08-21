@@ -5,9 +5,11 @@ import "server-only"
 
 import { getTool } from "./registry"
 
-export function liveToolStatus(toolId: string): { connected: boolean; reason?: string } {
+export function liveToolStatus(toolId: string): { connected: boolean; reason?: string; provider: string } {
   const tool = getTool(toolId)
-  if (!tool) return { connected: false, reason: "Unknown tool." }
+  if (!tool) return { connected: false, reason: "Unknown tool.", provider: "Unknown" }
   const connected = tool.isConnected()
-  return { connected, reason: connected ? undefined : tool.notConnectedReason }
+  // tool.provider is a live getter for tool_llm (reflects LLM_PROVIDER),
+  // a plain string for everything else — read fresh either way.
+  return { connected, reason: connected ? undefined : tool.notConnectedReason, provider: tool.provider }
 }

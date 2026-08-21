@@ -16,7 +16,7 @@ export function OutputsHeader({ metrics }: { metrics: HeaderMetrics }) {
     { label: "Success rate", value: `${metrics.successRate}%` },
     { label: "Blocked tasks", value: String(metrics.blockedTasks), tone: metrics.blockedTasks > 0 ? "warn" : undefined },
     { label: "Failed tasks", value: String(metrics.failedTasks), tone: metrics.failedTasks > 0 ? "bad" : undefined },
-    { label: "AI cost today", value: metrics.totalCostUsd > 0 ? `$${metrics.totalCostUsd.toFixed(3)}` : "$0.00" },
+    { label: "AI cost today", value: metrics.totalCostUsd == null ? "Unavailable" : `$${metrics.totalCostUsd.toFixed(3)}` },
   ]
 
   return (

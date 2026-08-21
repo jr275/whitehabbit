@@ -64,7 +64,11 @@ export function credentialBlockers(worker: Worker): CredentialBlocker[] {
         skillName: skill.name,
         toolId: tool.id,
         toolName: tool.name,
-        title: tool.id === "tool_llm" ? "Anthropic API key required" : `${tool.name} not connected`,
+        // tool.provider is live-hydrated server-side (see lib/agent/
+        // hydrate.ts) — for tool_llm it reflects whichever provider
+        // LLM_PROVIDER actually selected, so this never says "Anthropic"
+        // when Gemini is configured, or vice versa.
+        title: tool.id === "tool_llm" ? `${tool.provider} API key required` : `${tool.name} not connected`,
         detail: tool.notConnectedReason ?? `Connect ${tool.name} to run this worker.`,
       })
     }
@@ -231,7 +235,11 @@ export interface HeaderMetrics {
   successRate: number
   blockedTasks: number
   failedTasks: number
-  totalCostUsd: number
+  /** null = at least one LLM call happened today but no provider rate
+   * was configured for it — genuinely unavailable, never rendered as
+   * $0 (which would claim it cost nothing). 0 only when nothing that
+   * consumed tokens ran today at all. */
+  totalCostUsd: number | null
 }
 
 export function headerMetrics(tasks: WorkerTask[], executions: WorkerExecution[], outputs: WorkerOutput[]): HeaderMetrics {
@@ -243,7 +251,11 @@ export function headerMetrics(tasks: WorkerTask[], executions: WorkerExecution[]
   const blocked = todaysTasks.filter((t) => t.status === "blocked").length
   const finished = completed + failed + blocked
   const successRate = finished ? Math.round((completed / finished) * 1000) / 10 : 100
-  const totalCostUsd = todaysExecutions.reduce((s, e) => s + (e.costUsd ?? 0), 0)
+
+  const costBearing = todaysExecutions.filter((e) => e.inputTokens != null)
+  const costed = costBearing.filter((e) => e.costUsd != null)
+  const totalCostUsd = costBearing.length === 0 ? 0 : costed.length === 0 ? null : costed.reduce((s, e) => s + (e.costUsd ?? 0), 0)
+
   return { tasksCompleted: completed, outputsProduced: todaysOutputs.length, successRate, blockedTasks: blocked, failedTasks: failed, totalCostUsd }
 }
 

@@ -73,6 +73,9 @@ export const TOOL_CATALOG: ToolTemplate[] = [
   { id: "tool_web_search", name: "Web Search", provider: "npm registry", description: "Searches real, current package activity as a signal for what's trending.", risk: "low", permission: "read" },
   { id: "tool_browser", name: "Browser", provider: "HTTP fetch", description: "Opens a real URL and extracts its page text.", risk: "low", permission: "read" },
   { id: "tool_analytics", name: "Analytics", provider: "Not connected", description: "Reads engagement and performance metrics from a connected provider.", risk: "low", permission: "read" },
+  // "provider" here is only the seed default — the server overwrites it
+  // live on every read (lib/agent/hydrate.ts) with whichever LLM_PROVIDER
+  // is actually configured (Anthropic or Gemini).
   { id: "tool_llm", name: "LLM", provider: "Anthropic", description: "Reasons over collected information to analyze, rank and explain.", risk: "low", permission: "read" },
 ]
 
