@@ -14,8 +14,8 @@ import type { FabricMode } from "@/lib/worker"
 
 const PLACEHOLDER: Record<FabricMode, string> = {
   outcome: "Ask about outcomes…",
-  fabric: "Command your worker — teach it, grow it…",
-  watch: "Find a task…",
+  fabric: "Ask your worker anything — why, what, teach, grow…",
+  watch: "Ask why · what it learned · what's next…",
   trace: "Search execution events…",
 }
 
@@ -26,6 +26,7 @@ export function CommandBar({
   onGrow,
   onTeach,
   onEvolve,
+  onExplain,
 }: {
   mode: FabricMode
   traceQuery: string
@@ -33,6 +34,7 @@ export function CommandBar({
   onGrow: () => void
   onTeach: (seed: string) => void
   onEvolve: () => void
+  onExplain: (q: string) => void
 }) {
   const [value, setValue] = useState("")
 
@@ -40,6 +42,9 @@ export function CommandBar({
     const v = value.trim()
     if (!v) return
     if (/^(add|grow|new capability)/i.test(v)) onGrow()
+    // questions & operational intents route into the explainability layer
+    else if (/^(why|what|how|explain|show me|stop|pause|halt|connect|improve|make it better|run a)/i.test(v))
+      onExplain(v)
     else onTeach(v)
     setValue("")
   }

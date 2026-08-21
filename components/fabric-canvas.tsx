@@ -89,6 +89,7 @@ export function FabricCanvas({
   capStates,
   dense,
   onSelectCapability,
+  onSelectCore,
   onUserCamera,
 }: {
   graph: Graph
@@ -107,6 +108,7 @@ export function FabricCanvas({
   /** rabbit-hole density (small type, brighter internals) */
   dense: boolean
   onSelectCapability: (id: CapabilityId | null) => void
+  onSelectCore?: () => void
   onUserCamera: () => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -433,6 +435,12 @@ export function FabricCanvas({
     const sx = e.clientX - rect.left
     const sy = e.clientY - rect.top
     const world = screenToWorld(sx, sy, rect.width, rect.height)
+    // core hit-test first — the core is the gateway into the worker
+    const core = graph.nodes.find((n) => n.kind === "core")
+    if (core && onSelectCore && Math.hypot(core.x - world.x, core.y - world.y) < core.radius + 8) {
+      onSelectCore()
+      return
+    }
     let hit: CapabilityId | null = null
     for (let i = 0; i < Math.min(revealRef.current, graph.nodes.length); i++) {
       const n = graph.nodes[i]

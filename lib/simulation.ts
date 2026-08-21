@@ -74,7 +74,18 @@ export interface QueuedTask {
   state: "running" | "queued"
 }
 
-type TaskKind = "qualify" | "decision_maker"
+/* A paused worker awaiting a human decision — the emotional centerpiece.
+ * The worker prepared something it is not permitted to send on its own. */
+export interface Approval {
+  taskId: number
+  company: string
+  summary: string
+  value: string
+  confidence: number
+  policy: string
+}
+
+type TaskKind = "qualify" | "decision_maker" | "contract"
 
 interface TaskDef {
   id: number
@@ -82,6 +93,8 @@ interface TaskDef {
   objective: string
   kind: TaskKind
   withError: boolean
+  /** beat index at which the worker must pause for human approval */
+  approvalAt?: number
 }
 
 interface Beat {
@@ -256,7 +269,49 @@ function decisionMakerBeats(t: TaskDef): Beat[] {
   ]
 }
 
-/* Infinite deterministic task plan: qualify -> decision-maker per company. */
+const CONTRACT_PATH: CapabilityId[] = ["research", "reasoning", "communication", "reliability", "execution", "memory"]
+const CONTRACT_VALUES = ["$128,000", "$96,500", "$212,000"]
+
+/* A task that reaches an action the worker is NOT permitted to take on
+ * its own. It prepares the contract, then PAUSES — status
+ * awaiting_approval — until a human approves. The approval gate is the
+ * beat right after MESSAGE_PREPARED (index tracked via approvalAt). */
+function contractBeats(t: TaskDef): Beat[] {
+  const C = t.company
+  const short = C.split(" ")[0]
+  const value = CONTRACT_VALUES[t.id % CONTRACT_VALUES.length]
+  return [
+    { dt: 0, kind: "task_created", from: "core", to: "research", label: "TASK_CREATED", detail: `#${t.id} · ${C}`, status: "info", narrative: "Task detected", execStatus: "researching", action: "Task detected" },
+    { dt: 700, kind: "task_started", from: "core", to: "reasoning", label: "TASK_STARTED", detail: "prepare contract", cap: "reasoning", execStatus: "reasoning", action: `Preparing contract for ${short}` },
+    { dt: 900, kind: "reasoning_started", from: "reasoning", to: "reasoning", label: "TERMS_COMPUTED", detail: `ACV ${value}`, cap: "reasoning", narrative: `Computing contract terms · ${value}`, metrics: { sources: 6, evidence: 9, confidence: 88 } },
+    { dt: 1000, kind: "communication_started", from: "reasoning", to: "communication", label: "COMMUNICATION_STARTED", detail: "drafting contract", cap: "communication", execStatus: "communicating", action: "Drafting contract", metrics: { confidence: 94 } },
+    { dt: 1000, kind: "message_prepared", from: "communication", to: "reliability", label: "CONTRACT_PREPARED", detail: `${short} · ${value}`, cap: "reliability", narrative: "Contract prepared — checking policy", flash: { cap: "communication", state: "success" } },
+    // ← approvalAt points here: the worker pauses instead of executing
+    { dt: 800, kind: "approval_requested", from: "reliability", to: "reliability", label: "APPROVAL_REQUESTED", detail: "policy: human approval required", status: "info", cap: "reliability", execStatus: "thinking", action: "Awaiting your approval", narrative: "Policy requires human approval to send" },
+    // --- everything below only runs after approve() ---
+    { dt: 900, kind: "execution_started", from: "reliability", to: "execution", label: "SENDING_CONTRACT", detail: "docusign envelope", cap: "execution", execStatus: "executing", action: "Sending contract" },
+    { dt: 1000, kind: "action_executed", from: "execution", to: "execution", label: "CONTRACT_SENT", detail: `${short} · ${value}`, status: "ok", cap: "execution", narrative: "Contract sent", flash: { cap: "execution", state: "success" } },
+    { dt: 900, kind: "memory_updated", from: "execution", to: "memory", label: "MEMORY_UPDATED", detail: `${short} · contract stage`, cap: "memory", action: "Writing to memory", narrative: `Memory updated · ${short} advanced to contract`, flash: { cap: "memory", state: "success" } },
+    { dt: 900, kind: "task_completed", from: "memory", to: "reliability", label: "TASK_COMPLETED", detail: "approved & executed", status: "ok", cap: "reliability", execStatus: "completed", action: "Task complete", narrative: "Task complete", flash: { cap: "reliability", state: "success" } },
+    {
+      dt: 700, kind: "outcome_created", from: "reliability", to: "reliability", label: "OUTCOME_CREATED", detail: "contract sent", cap: null, narrative: "Contract sent",
+      outcome: {
+        title: `${short} — Contract sent`,
+        kind: "Closed-won pending",
+        confidence: 94,
+        causal: [
+          { cap: "outcome", label: "Outcome", detail: `Contract sent · ${value}` },
+          { cap: "task", label: "Task", detail: `Prepare contract for ${short}` },
+          { cap: "reasoning", label: "Decision", detail: `Terms computed · ${value}` },
+          { cap: "research", label: "Research", detail: "9 evidence items" },
+        ],
+      },
+    },
+  ]
+}
+
+/* Infinite deterministic task plan: qualify -> decision-maker per
+ * company, with a periodic contract task that requires approval. */
 function planTasks(count: number): TaskDef[] {
   const tasks: TaskDef[] = []
   let id = 4281
@@ -264,12 +319,24 @@ function planTasks(count: number): TaskDef[] {
     const company = COMPANIES[i % COMPANIES.length]
     tasks.push({ id: id++, company, objective: `Research ${company} and determine enterprise fit`, kind: "qualify", withError: i === 1 })
     tasks.push({ id: id++, company, objective: `Identify decision maker at ${company}`, kind: "decision_maker", withError: false })
+    // every second company, a contract needs sign-off (pauses the worker)
+    if (i % 2 === 1) {
+      tasks.push({ id: id++, company, objective: `Prepare contract for ${company}`, kind: "contract", withError: false, approvalAt: 5 })
+    }
   }
   return tasks
 }
 
 function beatsFor(t: TaskDef): Beat[] {
-  return t.kind === "qualify" ? qualifyBeats(t) : decisionMakerBeats(t)
+  if (t.kind === "qualify") return qualifyBeats(t)
+  if (t.kind === "contract") return contractBeats(t)
+  return decisionMakerBeats(t)
+}
+
+function pathFor(t: TaskDef): CapabilityId[] {
+  if (t.kind === "qualify") return QUALIFY_PATH
+  if (t.kind === "contract") return CONTRACT_PATH
+  return DECISION_PATH
 }
 
 /* --------------------------- runtime ------------------------------- */
@@ -300,9 +367,12 @@ export interface RuntimeState {
   completedTasks: number
   lastOutcome: Outcome | null
   autonomyBanner: string | null
+  approval: Approval | null
   running: boolean
   runDemo: () => void
   reset: () => void
+  approve: () => void
+  reject: () => void
 }
 
 export function useSimulation(live: boolean): RuntimeState {
@@ -316,11 +386,14 @@ export function useSimulation(live: boolean): RuntimeState {
   const [completed, setCompleted] = useState(0)
   const [lastOutcome, setLastOutcome] = useState<Outcome | null>(null)
   const [autonomyBanner, setAutonomyBanner] = useState<string | null>(null)
+  const [approval, setApproval] = useState<Approval | null>(null)
   const [epoch, setEpoch] = useState(0) // bumping restarts the machine
 
   const evId = useRef(1)
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
   const flashTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  // continuation stored while paused at an approval gate
+  const resumeRef = useRef<((granted: boolean) => void) | null>(null)
 
   const clearTimers = useCallback(() => {
     timers.current.forEach(clearTimeout)
@@ -340,6 +413,8 @@ export function useSimulation(live: boolean): RuntimeState {
     setCompleted(0)
     setLastOutcome(null)
     setAutonomyBanner(null)
+    setApproval(null)
+    resumeRef.current = null
     evId.current = 1
     setEpoch((e) => e + 1)
   }, [clearTimers])
@@ -354,9 +429,25 @@ export function useSimulation(live: boolean): RuntimeState {
     setQueue([])
     setLastOutcome(null)
     setAutonomyBanner(null)
+    setApproval(null)
+    resumeRef.current = null
     setWorkerStatus("idle")
     setEpoch(0)
   }, [clearTimers])
+
+  // human decisions on a paused approval gate
+  const approve = useCallback(() => {
+    const r = resumeRef.current
+    resumeRef.current = null
+    setApproval(null)
+    r?.(true)
+  }, [])
+  const reject = useCallback(() => {
+    const r = resumeRef.current
+    resumeRef.current = null
+    setApproval(null)
+    r?.(false)
+  }, [])
 
   // start / stop with liveness
   useEffect(() => {
@@ -392,9 +483,127 @@ export function useSimulation(live: boolean): RuntimeState {
       }, state === "error" ? 1400 : 700)
     }
 
+    // emit a single beat's effects (event, activation, node states, exec)
+    const emitBeat = (task: TaskDef, b: Beat) => {
+      const ev: WorkerEvent = {
+        id: evId.current++,
+        t: Date.now(),
+        taskId: task.id,
+        kind: b.kind,
+        from: b.from,
+        to: b.to,
+        label: b.label,
+        detail: b.detail,
+        status: b.status,
+        narrative: b.narrative,
+        payload: b.payload,
+      }
+      setLatest(ev)
+      setLog((prev) => [ev, ...prev].slice(0, 200))
+      setActivation((prev) => ({ ...prev, [b.to]: 1 }))
+      if (b.cap !== undefined) {
+        setCapStates((prev) => {
+          const s = { ...prev }
+          if (b.cap) s[b.cap] = "active"
+          return s
+        })
+      }
+      if (b.flash) flash(b.flash.cap, b.flash.state)
+      setExec((prev) => {
+        if (!prev || prev.taskId !== task.id) return prev
+        return {
+          ...prev,
+          status: b.execStatus ?? prev.status,
+          currentCapability: b.cap !== undefined ? b.cap : prev.currentCapability,
+          currentAction: b.action ?? prev.currentAction,
+          metrics: { ...prev.metrics, ...b.metrics },
+          decision: b.decision ?? prev.decision,
+          outcome: b.outcome ?? prev.outcome,
+          completedAt: b.kind === "task_completed" ? Date.now() : prev.completedAt,
+          eventIds: [...prev.eventIds, ev.id],
+        }
+      })
+      if (b.outcome) setLastOutcome(b.outcome)
+    }
+
+    // synthetic (non-scripted) event — used for approval decisions
+    const emitSynthetic = (task: TaskDef, e: Partial<WorkerEvent> & { kind: EventKind; label: string; to: CapabilityId }) => {
+      const ev: WorkerEvent = {
+        id: evId.current++,
+        t: Date.now(),
+        taskId: task.id,
+        from: e.from ?? "core",
+        status: e.status ?? "info",
+        detail: e.detail,
+        narrative: e.narrative,
+        ...e,
+      }
+      setLatest(ev)
+      setLog((prev) => [ev, ...prev].slice(0, 200))
+      setActivation((prev) => ({ ...prev, [ev.to]: 1 }))
+    }
+
+    // schedule a slice of beats [startIdx..endIdx]; fire onComplete after
+    const scheduleSlice = (task: TaskDef, beats: Beat[], startIdx: number, endIdx: number, onComplete: () => void) => {
+      let elapsed = 0
+      for (let i = startIdx; i <= endIdx; i++) {
+        const b = beats[i]
+        elapsed += b.dt
+        at(elapsed, () => emitBeat(task, b))
+      }
+      at(elapsed + 20, onComplete)
+    }
+
+    // after a task finishes: complete -> think -> autonomously start next
+    const advance = (task: TaskDef) => {
+      at(200, () => setCompleted((c) => c + 1))
+      const next = tasks[ti + 1]
+      if (next) {
+        at(1400, () => {
+          setWorkerStatus("thinking")
+          setCapStates(idleStates())
+          setExec((prev) => (prev ? { ...prev, status: "thinking", currentCapability: null, currentAction: "Analyzing next best action…" } : prev))
+          emitSynthetic(task, { kind: "autonomous_action", to: "reasoning", label: "AUTONOMOUS_ACTION", detail: "next best action", narrative: "Analyzing next best action…" })
+        })
+        at(3000, () => {
+          const short = next.company.split(" ")[0]
+          setAutonomyBanner(
+            next.kind === "decision_maker"
+              ? `The worker chose to identify the decision maker at ${short}.`
+              : next.kind === "contract"
+                ? `The worker chose to prepare a contract for ${short}.`
+                : `The worker chose to research ${short}.`,
+          )
+          timers.current.push(setTimeout(() => setAutonomyBanner(null), 3600))
+        })
+        at(3200, () => {
+          ti += 1
+          playTask(next)
+        })
+      } else {
+        at(1400, () => {
+          setWorkerStatus("idle")
+          setCapStates(idleStates())
+        })
+      }
+    }
+
+    const buildApproval = (task: TaskDef): Approval => {
+      const short = task.company.split(" ")[0]
+      const value = CONTRACT_VALUES[task.id % CONTRACT_VALUES.length]
+      return {
+        taskId: task.id,
+        company: task.company,
+        summary: `I prepared a contract for ${short}.`,
+        value,
+        confidence: 94,
+        policy: "Human approval required",
+      }
+    }
+
     const playTask = (task: TaskDef) => {
       const beats = beatsFor(task)
-      const path = task.kind === "qualify" ? QUALIFY_PATH : DECISION_PATH
+      const path = pathFor(task)
       setQueueFor(ti)
       setWorkerStatus("working")
 
@@ -419,102 +628,35 @@ export function useSimulation(live: boolean): RuntimeState {
         return s
       })
 
-      let elapsed = 0
-      beats.forEach((b) => {
-        elapsed += b.dt
-        at(elapsed, () => {
-          const ev: WorkerEvent = {
-            id: evId.current++,
-            t: Date.now(),
-            taskId: task.id,
-            kind: b.kind,
-            from: b.from,
-            to: b.to,
-            label: b.label,
-            detail: b.detail,
-            status: b.status,
-            narrative: b.narrative,
-            payload: b.payload,
-          }
-          setLatest(ev)
-          setLog((prev) => [ev, ...prev].slice(0, 200))
-
-          // activation glow on the landing capability
-          setActivation((prev) => ({ ...prev, [b.to]: 1 }))
-
-          // current capability -> active node state
-          if (b.cap !== undefined) {
-            setCapStates((prev) => {
-              const s = { ...prev }
-              if (b.cap) s[b.cap] = "active"
-              return s
-            })
-          }
-          if (b.flash) flash(b.flash.cap, b.flash.state)
-
-          setExec((prev) => {
-            if (!prev || prev.taskId !== task.id) return prev
-            return {
-              ...prev,
-              status: b.execStatus ?? prev.status,
-              currentCapability: b.cap !== undefined ? b.cap : prev.currentCapability,
-              currentAction: b.action ?? prev.currentAction,
-              metrics: { ...prev.metrics, ...b.metrics },
-              decision: b.decision ?? prev.decision,
-              outcome: b.outcome ?? prev.outcome,
-              completedAt: b.kind === "task_completed" ? Date.now() : prev.completedAt,
-              eventIds: [...prev.eventIds, ev.id],
-            }
-          })
-
-          if (b.outcome) setLastOutcome(b.outcome)
-        })
-      })
-
-      // after the last beat: complete -> think -> autonomously start next
-      const done = elapsed
-      at(done + 200, () => setCompleted((c) => c + 1))
-
-      const next = tasks[ti + 1]
-      if (next) {
-        at(done + 1400, () => {
-          setWorkerStatus("thinking")
-          setCapStates(idleStates())
-          setExec((prev) => (prev ? { ...prev, status: "thinking", currentCapability: null, currentAction: "Analyzing next best action…" } : prev))
-          const think: WorkerEvent = {
-            id: evId.current++,
-            t: Date.now(),
-            taskId: task.id,
-            kind: "autonomous_action",
-            from: "core",
-            to: "reasoning",
-            label: "AUTONOMOUS_ACTION",
-            detail: "next best action",
-            status: "info",
-            narrative: "Analyzing next best action…",
-          }
-          setLatest(think)
-          setLog((prev) => [think, ...prev].slice(0, 200))
-          setActivation((prev) => ({ ...prev, reasoning: 1 }))
-        })
-        at(done + 3000, () => {
-          setAutonomyBanner(
-            next.kind === "decision_maker"
-              ? `The worker chose to identify the decision maker at ${next.company.split(" ")[0]}.`
-              : `The worker chose to research ${next.company.split(" ")[0]}.`,
-          )
-          timers.current.push(setTimeout(() => setAutonomyBanner(null), 3600))
-        })
-        at(done + 3200, () => {
-          ti += 1
-          playTask(next)
-        })
-      } else {
-        at(done + 1400, () => {
-          setWorkerStatus("idle")
-          setCapStates(idleStates())
-        })
+      const gate = task.approvalAt
+      if (gate === undefined) {
+        scheduleSlice(task, beats, 0, beats.length - 1, () => advance(task))
+        return
       }
+
+      // run up to & including the approval-request beat, then PAUSE
+      scheduleSlice(task, beats, 0, gate, () => {
+        setWorkerStatus("awaiting_approval")
+        setApproval(buildApproval(task))
+        setExec((prev) =>
+          prev && prev.taskId === task.id
+            ? { ...prev, status: "thinking", currentAction: "Awaiting your approval" }
+            : prev,
+        )
+        // the human decides — approve() / reject() invoke this continuation
+        resumeRef.current = (granted: boolean) => {
+          if (granted) {
+            setWorkerStatus("working")
+            emitSynthetic(task, { kind: "approval_granted", to: "execution", from: "reliability", status: "ok", label: "APPROVAL_GRANTED", detail: "human approved", narrative: "Approved — resuming" })
+            setExec((prev) => (prev && prev.taskId === task.id ? { ...prev, status: "executing", currentAction: "Resuming — executing" } : prev))
+            scheduleSlice(task, beats, gate + 1, beats.length - 1, () => advance(task))
+          } else {
+            emitSynthetic(task, { kind: "approval_rejected", to: "reliability", from: "reliability", status: "fail", label: "APPROVAL_REJECTED", detail: "human rejected", narrative: "Rejected — standing down" })
+            setExec((prev) => (prev && prev.taskId === task.id ? { ...prev, status: "completed", currentAction: "Action rejected — moved on" } : prev))
+            advance(task)
+          }
+        }
+      })
     }
 
     // continuous activation decay so idle capabilities go quiet
@@ -555,10 +697,13 @@ export function useSimulation(live: boolean): RuntimeState {
       completedTasks: completed,
       lastOutcome,
       autonomyBanner,
+      approval,
       running: live && epoch > 0,
       runDemo,
       reset,
+      approve,
+      reject,
     }),
-    [log, latest, exec, activation, capStates, workerStatus, queue, completed, lastOutcome, autonomyBanner, live, epoch, runDemo, reset],
+    [log, latest, exec, activation, capStates, workerStatus, queue, completed, lastOutcome, autonomyBanner, approval, live, epoch, runDemo, reset, approve, reject],
   )
 }
