@@ -1,150 +1,142 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { BuildPanel } from "@/components/studio/build-panel"
-import { FabricPanel } from "@/components/studio/fabric-panel"
-import { ResultPanel } from "@/components/studio/result-panel"
-import { StudioShell } from "@/components/studio/studio-shell"
-import { studioStore, useStudio } from "@/lib/worker/worker-state"
+import { useState } from "react"
+import { TopNav } from "@/components/studio/top-nav"
+import { ArchetypePanel } from "@/components/character/archetype-panel"
+import { IdentityHero } from "@/components/character/identity-hero"
+import { SkillTree } from "@/components/character/skill-tree"
+import { UpgradeMoment } from "@/components/character/upgrade-moment"
+import { ARCHETYPES } from "@/lib/character/character-data"
+import { characterStore } from "@/lib/character/character-store"
+import { useCharacter } from "@/lib/character/use-character"
 
-const OBJECTIVE_SUGGESTIONS = [
-  "Qualify inbound enterprise leads and book meetings with the best ones.",
-  "Monitor target accounts and alert me when buying signals appear.",
-  "Research competitors weekly and summarise what changed.",
-]
-
-/* Create state — shown when no worker exists yet. */
-function CreateWorker() {
-  const [objective, setObjective] = useState("")
-  const create = (value: string) => {
-    const v = value.trim()
-    if (!v) return
-    studioStore.createWorker(v)
-  }
+/* Dark hero shell — the character builder makes the Fabric the hero,
+   so it uses the app's immersive dark theme (not the light .studio-surface). */
+function BuilderShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-[calc(100vh-3.25rem)] items-center justify-center bg-grid-light px-6">
-      <div className="w-full max-w-xl">
-        <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Worker Studio</p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground text-balance">
-          What should your worker do?
-        </h1>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          Describe an objective. The studio will assemble a worker with the capabilities, tools and policies it needs —
-          then you can build it, release it, and watch it work.
-        </p>
-        <textarea
-          value={objective}
-          onChange={(e) => setObjective(e.target.value)}
-          rows={3}
-          placeholder="e.g. Qualify inbound enterprise leads and book meetings…"
-          className="modal-input mt-5 resize-none"
-          autoFocus
-        />
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {OBJECTIVE_SUGGESTIONS.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setObjective(s)}
-              className="rounded-full border border-border px-2.5 py-1 text-[11px] text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
-            >
-              {s.length > 42 ? `${s.slice(0, 42)}…` : s}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          onClick={() => create(objective)}
-          disabled={!objective.trim()}
-          className="mt-5 rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Create worker
-        </button>
-      </div>
+    <div className="min-h-dvh bg-background text-foreground">
+      <TopNav />
+      {children}
     </div>
   )
 }
 
-/* A slim toast for store notices (autonomy, evolution, teach). */
-function Notice({ text }: { text: string }) {
-  useEffect(() => {
-    const t = setTimeout(() => studioStore.dismissNotice(), 4000)
-    return () => clearTimeout(t)
-  }, [])
+/* Create state — birth a new character from an archetype. */
+function CreateCharacter() {
+  const [name, setName] = useState("")
+  const [archetype, setArchetype] = useState(ARCHETYPES[0]?.id ?? "")
+  const create = () => {
+    const n = name.trim() || "New Worker"
+    if (!archetype) return
+    characterStore.createWorker(n, archetype)
+  }
   return (
-    <div className="pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2">
-      <div className="pointer-events-auto flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5 shadow-lg">
-        <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-        <span className="text-[12px] text-foreground">{text}</span>
-        <button
-          type="button"
-          onClick={() => studioStore.dismissNotice()}
-          className="text-[12px] text-muted-foreground transition hover:text-foreground"
-        >
-          Dismiss
-        </button>
+    <div className="mx-auto flex min-h-[calc(100vh-3.25rem)] max-w-2xl flex-col justify-center px-6 py-12">
+      <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-primary">Worker Studio</p>
+      <h1 className="mt-2 text-balance text-3xl font-semibold tracking-tight text-foreground">
+        Create a new worker
+      </h1>
+      <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
+        Every worker is a character that grows. Give it a name and a class to start — you&apos;ll develop
+        its skills, watch its Fabric evolve, and send it to work.
+      </p>
+
+      <label className="mt-8 block font-mono text-[11px] uppercase tracking-[0.22em] text-foreground/70">
+        Name
+      </label>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="e.g. Atlas"
+        className="mt-2 w-full rounded-lg border border-border bg-card px-3.5 py-2.5 text-sm text-foreground outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25"
+        autoFocus
+      />
+
+      <p className="mt-6 font-mono text-[11px] uppercase tracking-[0.22em] text-foreground/70">Class</p>
+      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {ARCHETYPES.map((a) => {
+          const active = a.id === archetype
+          return (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => setArchetype(a.id)}
+              className={`rounded-xl border p-3 text-left transition-colors ${
+                active
+                  ? "border-primary bg-primary/10"
+                  : "border-border bg-secondary/30 hover:border-muted-foreground/40"
+              }`}
+            >
+              <span className="text-sm font-medium text-foreground">{a.name}</span>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{a.tagline}</p>
+            </button>
+          )
+        })}
       </div>
+
+      <button
+        type="button"
+        onClick={create}
+        className="mt-8 w-fit rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+      >
+        Create worker
+      </button>
     </div>
   )
 }
 
 export default function StudioPage() {
-  const s = useStudio()
+  const { hydrated, worker, performance, fabric, lastUpgrade } = useCharacter()
+  const [hoverCategory, setHoverCategory] = useState<
+    import("@/lib/character/character-model").SkillCategory | null
+  >(null)
 
-  // hydrate the store from localStorage once on mount
-  useEffect(() => {
-    studioStore.hydrate()
-  }, [])
-
-  // avoid hydration mismatch: render a stable shell until the store is ready
-  if (!s.hydrated) {
+  if (!hydrated) {
     return (
-      <StudioShell>
-        <div className="flex min-h-[calc(100vh-3.25rem)] items-center justify-center bg-grid-light">
-          <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Loading…</span>
+      <BuilderShell>
+        <div className="flex min-h-[calc(100vh-3.25rem)] items-center justify-center">
+          <span className="font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
+            Loading…
+          </span>
         </div>
-      </StudioShell>
+      </BuilderShell>
     )
   }
 
-  if (!s.worker) {
+  if (!worker || !performance || !fabric) {
     return (
-      <StudioShell>
-        <CreateWorker />
-        {s.notice && <Notice text={s.notice} />}
-      </StudioShell>
+      <BuilderShell>
+        <CreateCharacter />
+      </BuilderShell>
     )
   }
-
-  const running = s.worker.status === "working" || s.worker.status === "waiting"
 
   return (
-    <StudioShell>
-      {/* three zones: BUILD · FABRIC · LIVE RESULT */}
-      <div className="grid h-[calc(100vh-3.25rem)] grid-cols-1 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)_minmax(0,22rem)]">
-        <div className="min-h-0 overflow-hidden border-r border-border max-lg:h-auto max-lg:border-b">
-          <BuildPanel />
-        </div>
-        <div className="relative min-h-0 border-r border-border max-lg:h-[60vh] max-lg:border-b">
-          <FabricPanel
-            worker={s.worker}
-            activeCapability={s.activeCapability}
-            capPulse={s.capPulse}
-            activeRun={s.activeRun}
-            running={running}
-          />
-        </div>
-        <div className="min-h-0 overflow-hidden bg-background max-lg:h-[70vh]">
-          <ResultPanel
-            worker={s.worker}
-            activeRun={s.activeRun}
-            history={s.history}
-            showTrace={s.showTrace}
-            running={running}
-          />
+    <BuilderShell>
+      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+        {/* hero: the living character */}
+        <IdentityHero worker={worker} performance={performance} fabric={fabric} />
+
+        {/* the two build columns: who it is + how it grows */}
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+          <aside className="lg:sticky lg:top-[4.5rem] lg:self-start">
+            <div className="rounded-2xl border border-border bg-card/60 p-5">
+              <ArchetypePanel worker={worker} />
+            </div>
+          </aside>
+
+          <section>
+            <SkillTree worker={worker} performance={performance} />
+          </section>
         </div>
       </div>
-      {s.notice && <Notice text={s.notice} />}
-    </StudioShell>
+
+      {/* the upgrade moment */}
+      <UpgradeMoment
+        result={lastUpgrade}
+        workerName={worker.name}
+        onClose={() => characterStore.clearUpgrade()}
+      />
+    </BuilderShell>
   )
 }
