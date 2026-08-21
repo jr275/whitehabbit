@@ -3,7 +3,7 @@
  *
  * The factual definition of a worker: its identity, its capabilities,
  * the relationships between them, and the outcomes it has produced.
- * The simulation engine (lib/simulation.ts) emits events against this.
+ * The runtime (lib/simulation.ts) emits events against this.
  * The fabric renderer (components/fabric-canvas.tsx) draws it.
  * Nothing here knows about pixels.
  * ------------------------------------------------------------------ */
@@ -14,14 +14,58 @@ export type CapabilityId =
   | "communication"
   | "execution"
   | "reliability"
+  | "memory"
 
+/* Discrete lifecycle of a single event / capability during execution. */
 export type EventKind =
+  | "task_created"
   | "task_started"
   | "capability_activated"
-  | "tool_called"
+  | "research_started"
+  | "source_discovered"
+  | "evidence_extracted"
+  | "reasoning_started"
+  | "icp_analysis"
   | "decision_created"
-  | "action_executed"
+  | "communication_started"
+  | "message_prepared"
+  | "execution_started"
+  | "crm_updated"
+  | "action_failed"
+  | "action_retried"
+  | "memory_updated"
   | "task_completed"
+  | "outcome_created"
+  | "autonomous_action"
+  // legacy generic kinds kept for compatibility
+  | "tool_called"
+  | "action_executed"
+
+export type EventStatus = "start" | "ok" | "fail" | "info"
+
+/* Every capability node can be in one of these visual states. */
+export type NodeState =
+  | "idle"
+  | "queued"
+  | "active"
+  | "success"
+  | "warning"
+  | "error"
+  | "disabled"
+
+/* Where the worker is in a task. */
+export type ExecutionStatus =
+  | "idle"
+  | "researching"
+  | "reasoning"
+  | "communicating"
+  | "executing"
+  | "completed"
+  | "failed"
+  | "thinking"
+
+/* Top-level worker lifecycle status surfaced in the HUD. */
+export type WorkerStatus = "draft" | "ready" | "live" | "working" | "idle" | "thinking"
 
 export interface WorkerEvent {
   id: number
@@ -34,6 +78,11 @@ export interface WorkerEvent {
   to: CapabilityId
   label: string
   detail?: string
+  status?: EventStatus
+  /** a human line that unfolds in the narrative layer */
+  narrative?: string
+  /** arbitrary structured payload for the event inspector */
+  payload?: Record<string, string | number | string[]>
 }
 
 export interface Capability {
@@ -67,6 +116,7 @@ export const CAPABILITY_ORDER: CapabilityId[] = [
   "communication",
   "execution",
   "reliability",
+  "memory",
 ]
 
 export const CAPABILITY_META: Record<
@@ -78,6 +128,7 @@ export const CAPABILITY_META: Record<
   communication: { name: "Communication", blurb: "Drafts and speaks" },
   execution: { name: "Execution", blurb: "Acts on systems of record" },
   reliability: { name: "Reliability", blurb: "Guards every cycle" },
+  memory: { name: "Memory", blurb: "Accumulates context over time" },
 }
 
 export const ATLAS: Worker = {
@@ -90,6 +141,7 @@ export const ATLAS: Worker = {
     { id: "communication", name: "Communication", score: 73, warning: true, orbs: 1 },
     { id: "execution", name: "Execution", score: 96, orbs: 3 },
     { id: "reliability", name: "Reliability", score: 98, orbs: 2 },
+    { id: "memory", name: "Memory", score: 82, orbs: 2 },
   ],
 }
 
@@ -109,10 +161,13 @@ export const RELATIONS: [CapabilityId | "core", CapabilityId][] = [
   ["core", "communication"],
   ["core", "execution"],
   ["core", "reliability"],
+  ["core", "memory"],
   ["research", "reasoning"],
   ["reasoning", "communication"],
   ["communication", "execution"],
   ["execution", "reliability"],
+  ["execution", "memory"],
+  ["memory", "reasoning"],
 ]
 
 export const OUTCOMES: OutcomeMetric[] = [
@@ -144,12 +199,36 @@ export type Interaction = "none" | "grow" | "teach" | "evolve"
 
 export const KIND_META: Record<
   EventKind,
-  { label: string; tone: "alive" | "grow" | "warn" | "muted" }
+  { label: string; tone: "alive" | "grow" | "warn" | "muted" | "fail" }
 > = {
+  task_created: { label: "task", tone: "muted" },
   task_started: { label: "task", tone: "muted" },
   capability_activated: { label: "activate", tone: "alive" },
-  tool_called: { label: "tool", tone: "alive" },
+  research_started: { label: "research", tone: "alive" },
+  source_discovered: { label: "source", tone: "alive" },
+  evidence_extracted: { label: "evidence", tone: "alive" },
+  reasoning_started: { label: "reasoning", tone: "alive" },
+  icp_analysis: { label: "analysis", tone: "alive" },
   decision_created: { label: "decision", tone: "grow" },
-  action_executed: { label: "action", tone: "grow" },
+  communication_started: { label: "comms", tone: "alive" },
+  message_prepared: { label: "message", tone: "grow" },
+  execution_started: { label: "execute", tone: "alive" },
+  crm_updated: { label: "crm", tone: "grow" },
+  action_failed: { label: "failed", tone: "fail" },
+  action_retried: { label: "retry", tone: "warn" },
+  memory_updated: { label: "memory", tone: "grow" },
   task_completed: { label: "done", tone: "grow" },
+  outcome_created: { label: "outcome", tone: "grow" },
+  autonomous_action: { label: "autonomy", tone: "alive" },
+  tool_called: { label: "tool", tone: "alive" },
+  action_executed: { label: "action", tone: "grow" },
+}
+
+/* The causal chain of a qualification decision — read bottom-up: an
+ * OUTCOME exists because of a TASK, which rests on a DECISION, which
+ * rests on REASONING over RESEARCH. Powers the causality visual. */
+export interface CausalLink {
+  cap: CapabilityId | "outcome" | "task"
+  label: string
+  detail: string
 }

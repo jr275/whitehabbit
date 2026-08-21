@@ -20,15 +20,20 @@ const TONE: Record<string, string> = {
   alive: "text-primary",
   grow: "text-grow",
   warn: "text-warn",
+  fail: "text-destructive",
   muted: "text-muted-foreground",
 }
 
 export function RabbitHole({
   log,
   query,
+  selectedId,
+  onSelect,
 }: {
   log: WorkerEvent[]
   query: string
+  selectedId: number | null
+  onSelect: (e: WorkerEvent) => void
 }) {
   const filtered = query.trim()
     ? log.filter((e) =>
@@ -63,8 +68,15 @@ export function RabbitHole({
           )}
           {filtered.map((e) => {
             const meta = KIND_META[e.kind]
+            const selected = e.id === selectedId
             return (
-              <div key={e.id} className="border-b border-border/40 py-2">
+              <button
+                key={e.id}
+                onClick={() => onSelect(e)}
+                className={`block w-full border-b border-border/40 py-2 text-left transition-colors hover:bg-secondary/40 ${
+                  selected ? "bg-secondary/60" : ""
+                }`}
+              >
                 <div className="flex items-baseline gap-3">
                   <span className="text-muted-foreground">{ts(e.t)}</span>
                   <span className="text-muted-foreground/60">#{e.taskId}</span>
@@ -74,7 +86,7 @@ export function RabbitHole({
                   <span className="text-foreground">{e.label}</span>
                 </div>
                 {e.detail && <div className="mt-0.5 text-muted-foreground/80">{e.detail}</div>}
-              </div>
+              </button>
             )
           })}
         </div>

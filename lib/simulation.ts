@@ -1,156 +1,530 @@
 "use client"
 
 /* ------------------------------------------------------------------ *
- * WhiteHabbit — SIMULATION ENGINE
- * Emits a realistic event stream: discrete tasks that travel through
- * the worker's causal path (research -> reasoning -> communication ->
- * execution -> reliability). Only the relevant capability is active at
- * any moment, so the fabric stays calm and every pulse means something.
+ * WhiteHabbit — WORKER RUNTIME (deterministic execution simulator)
  *
- * Decoupled by design (section 27): this file knows nothing about the
- * renderer. It could be swapped for a WebSocket/SSE stream later.
+ * Not an animation timeline. A discrete event machine: each task is a
+ * scripted sequence of beats that move a signal through the worker's
+ * causal path (research -> reasoning -> communication -> execution ->
+ * memory -> reliability). Only the relevant capability is active at
+ * any moment. When a task completes the worker THINKS and autonomously
+ * starts the next one — the user can sit back and watch.
+ *
+ * Decoupled by design (section 30): this file knows nothing about the
+ * renderer. The beat stream could be replaced by SSE / WebSocket /
+ * a real agent runtime without touching the Fabric.
  * ------------------------------------------------------------------ */
 
-import { useEffect, useRef, useState } from "react"
-import type { CapabilityId, EventKind, WorkerEvent } from "./worker"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type {
+  CapabilityId,
+  CausalLink,
+  EventKind,
+  EventStatus,
+  ExecutionStatus,
+  NodeState,
+  WorkerEvent,
+  WorkerStatus,
+} from "./worker"
 
-const TARGETS = [
-  "Acme Corporation",
-  "Northwind Ltd",
-  "Initech",
-  "Globex",
-  "Umbrella Health",
-  "Soylent Foods",
-  "Hooli",
-  "Stark Industries",
-  "Wayne Enterprises",
-  "Cyberdyne",
-]
+/* ------------------------------ types ------------------------------ */
 
-interface StepDef {
+export interface TaskMetrics {
+  sources: number
+  evidence: number
+  confidence: number
+}
+
+export interface Decision {
+  verdict: string
+  confidence: number
+  evidence: number
+  signals: string[]
+  rationale: string
+}
+
+export interface Outcome {
+  title: string
+  kind: string
+  confidence: number
+  causal: CausalLink[]
+}
+
+export interface ExecutionState {
+  taskId: number
+  company: string
+  objective: string
+  kind: TaskKind
+  status: ExecutionStatus
+  currentCapability: CapabilityId | null
+  activePath: CapabilityId[]
+  metrics: TaskMetrics
+  currentAction: string
+  startedAt: number
+  completedAt?: number
+  decision?: Decision
+  outcome?: Outcome
+  eventIds: number[]
+}
+
+export interface QueuedTask {
+  id: number
+  company: string
+  objective: string
+  state: "running" | "queued"
+}
+
+type TaskKind = "qualify" | "decision_maker"
+
+interface TaskDef {
+  id: number
+  company: string
+  objective: string
+  kind: TaskKind
+  withError: boolean
+}
+
+interface Beat {
+  dt: number
+  kind: EventKind
   from: CapabilityId | "core"
   to: CapabilityId
-  kind: EventKind
   label: string
-  detail: (target: string) => string
+  detail?: string
+  status?: EventStatus
+  narrative?: string
+  payload?: Record<string, string | number | string[]>
+  /** the capability that becomes "current" at this beat */
+  cap?: CapabilityId | null
+  action?: string
+  execStatus?: ExecutionStatus
+  metrics?: Partial<TaskMetrics>
+  /** a brief non-idle node state (success / error) */
+  flash?: { cap: CapabilityId; state: NodeState }
+  decision?: Decision
+  outcome?: Outcome
 }
 
-/* One task's journey through the fabric. */
-const TASK_PATH: StepDef[] = [
-  { from: "core", to: "research", kind: "task_started", label: "TASK_STARTED", detail: (t) => t },
-  { from: "research", to: "research", kind: "tool_called", label: "WEB_SEARCH", detail: () => 'q="series-b hiring revops"' },
-  { from: "research", to: "research", kind: "tool_called", label: "SOURCE_RETRIEVED", detail: () => "12 signals · 3 verified" },
-  { from: "research", to: "reasoning", kind: "capability_activated", label: "EVIDENCE_EXTRACTED", detail: () => "funding + headcount delta" },
-  { from: "reasoning", to: "reasoning", kind: "decision_created", label: "SCORE_INTENT", detail: () => "model v4 · 0.81 conf" },
-  { from: "reasoning", to: "communication", kind: "decision_created", label: "QUALIFY_LEAD", detail: () => "fit 88 · VP Sales" },
-  { from: "communication", to: "communication", kind: "action_executed", label: "DRAFT_OUTREACH", detail: () => "persona: technical buyer" },
-  { from: "communication", to: "execution", kind: "action_executed", label: "SEND_EMAIL", detail: () => "thread #8842" },
-  { from: "execution", to: "execution", kind: "action_executed", label: "CRM_UPDATED", detail: () => "stage → meeting booked" },
-  { from: "execution", to: "reliability", kind: "task_completed", label: "TASK_COMPLETED", detail: () => "no retries · policy ok" },
+/* --------------------------- task plan ----------------------------- */
+
+const COMPANIES = ["Acme Corporation", "Northwind", "Initech", "Globex", "Umbrella Health"]
+
+const QUALIFY_PATH: CapabilityId[] = [
+  "research",
+  "reasoning",
+  "communication",
+  "execution",
+  "memory",
+  "reliability",
+]
+const DECISION_PATH: CapabilityId[] = ["research", "reasoning", "memory", "reliability"]
+
+/* Build the ordered beats for one task. Delays are cumulative-friendly
+ * (each dt is a gap from the previous beat). Tuned to feel intentional. */
+function qualifyBeats(t: TaskDef): Beat[] {
+  const C = t.company
+  const short = C.split(" ")[0]
+  const beats: Beat[] = [
+    { dt: 0, kind: "task_created", from: "core", to: "research", label: "TASK_CREATED", detail: `#${t.id} · ${C}`, status: "info", narrative: "Task detected", execStatus: "researching", action: "Task detected" },
+    { dt: 700, kind: "task_started", from: "core", to: "research", label: "TASK_STARTED", detail: C, cap: "research", execStatus: "researching", action: `Researching ${short}` },
+    { dt: 900, kind: "research_started", from: "research", to: "research", label: "RESEARCH_STARTED", detail: 'q="series-b hiring revops"', cap: "research", narrative: `Researching ${C}`, metrics: { sources: 0, evidence: 0, confidence: 32 } },
+    { dt: 900, kind: "source_discovered", from: "research", to: "research", label: "SOURCE_DISCOVERED", detail: "crunchbase · careers page", cap: "research", metrics: { sources: 3, confidence: 41 } },
+    { dt: 800, kind: "source_discovered", from: "research", to: "research", label: "SOURCE_DISCOVERED", detail: "eng blog · 10-K filing", cap: "research", metrics: { sources: 8, confidence: 52 } },
+    { dt: 800, kind: "source_discovered", from: "research", to: "research", label: "SOURCE_DISCOVERED", detail: "press · linkedin headcount", cap: "research", narrative: "14 sources discovered", metrics: { sources: 14, confidence: 58 } },
+    { dt: 1000, kind: "evidence_extracted", from: "research", to: "reasoning", label: "EVIDENCE_EXTRACTED", detail: "funding + headcount delta", cap: "reasoning", execStatus: "reasoning", action: "Analyzing evidence", metrics: { evidence: 6, confidence: 63 }, flash: { cap: "research", state: "success" } },
+    { dt: 900, kind: "reasoning_started", from: "reasoning", to: "reasoning", label: "REASONING_STARTED", detail: "model v4", cap: "reasoning", narrative: "Analyzing evidence", metrics: { evidence: 11, confidence: 71 } },
+    { dt: 1000, kind: "icp_analysis", from: "reasoning", to: "reasoning", label: "ICP_ANALYSIS", detail: "enterprise size · tech stack · hiring", cap: "reasoning", action: "Evaluating ICP", metrics: { evidence: 14, confidence: 84 } },
+    {
+      dt: 1100,
+      kind: "decision_created",
+      from: "reasoning",
+      to: "communication",
+      label: "DECISION_CREATED",
+      detail: "qualified · fit 92",
+      cap: "communication",
+      execStatus: "communicating",
+      action: "Preparing outreach",
+      narrative: "Enterprise fit detected · confidence 92%",
+      metrics: { confidence: 92 },
+      flash: { cap: "reasoning", state: "success" },
+      decision: {
+        verdict: "Qualified enterprise prospect",
+        confidence: 92,
+        evidence: 14,
+        signals: ["Enterprise size", "Modern tech stack", "Active hiring in RevOps"],
+        rationale: "Strong ICP match: funding stage, headcount growth and stack all align with the ideal customer profile.",
+      },
+    },
+    { dt: 1000, kind: "communication_started", from: "communication", to: "communication", label: "COMMUNICATION_STARTED", detail: "persona: technical buyer", cap: "communication", narrative: "Preparing outreach" },
+    { dt: 1000, kind: "message_prepared", from: "communication", to: "execution", label: "MESSAGE_PREPARED", detail: "thread #8842 drafted", cap: "execution", execStatus: "executing", action: "Updating CRM", flash: { cap: "communication", state: "success" } },
+    { dt: 900, kind: "execution_started", from: "execution", to: "execution", label: "EXECUTION_STARTED", detail: "salesforce · opportunity", cap: "execution", narrative: "Updating CRM" },
+  ]
+
+  if (t.withError) {
+    beats.push(
+      { dt: 1000, kind: "action_failed", from: "execution", to: "execution", label: "CRM_UPDATE_FAILED", detail: "502 · upstream timeout", status: "fail", cap: "execution", execStatus: "failed", action: "Action failed — retrying", narrative: "Action failed — retrying", flash: { cap: "execution", state: "error" } },
+      { dt: 1100, kind: "action_retried", from: "execution", to: "execution", label: "RETRYING", detail: "attempt 2 · backoff 1.1s", status: "info", cap: "execution", execStatus: "executing", action: "Retrying CRM update" },
+      { dt: 1000, kind: "crm_updated", from: "execution", to: "execution", label: "CRM_UPDATED", detail: "stage → meeting booked", status: "ok", cap: "execution", narrative: "CRM updated", flash: { cap: "execution", state: "success" } },
+    )
+  } else {
+    beats.push({ dt: 1000, kind: "crm_updated", from: "execution", to: "execution", label: "CRM_UPDATED", detail: "stage → meeting booked", status: "ok", cap: "execution", narrative: "CRM updated", flash: { cap: "execution", state: "success" } })
+  }
+
+  beats.push(
+    { dt: 900, kind: "memory_updated", from: "execution", to: "memory", label: "MEMORY_UPDATED", detail: `${short} · enterprise prospect · 92%`, cap: "memory", action: "Writing to memory", narrative: `Memory updated · ${short} enterprise prospect`, flash: { cap: "memory", state: "success" } },
+    { dt: 900, kind: "task_completed", from: "memory", to: "reliability", label: "TASK_COMPLETED", detail: "no policy violations", status: "ok", cap: "reliability", execStatus: "completed", action: "Task complete", narrative: "Task complete", flash: { cap: "reliability", state: "success" } },
+    {
+      dt: 700,
+      kind: "outcome_created",
+      from: "reliability",
+      to: "reliability",
+      label: "OUTCOME_CREATED",
+      detail: "qualified prospect",
+      cap: null,
+      narrative: "Qualified prospect",
+      outcome: {
+        title: `${short} — Qualified`,
+        kind: "Enterprise fit",
+        confidence: 92,
+        causal: [
+          { cap: "outcome", label: "Outcome", detail: "Qualified enterprise prospect" },
+          { cap: "task", label: "Task", detail: `Research ${C}` },
+          { cap: "reasoning", label: "Decision", detail: "Fit 92 · qualified" },
+          { cap: "reasoning", label: "Reasoning", detail: "ICP match across 3 signals" },
+          { cap: "research", label: "Research", detail: "14 sources · 14 evidence" },
+        ],
+      },
+    },
+  )
+  return beats
+}
+
+function decisionMakerBeats(t: TaskDef): Beat[] {
+  const C = t.company
+  const short = C.split(" ")[0]
+  return [
+    { dt: 0, kind: "task_created", from: "core", to: "research", label: "TASK_CREATED", detail: `#${t.id} · ${C}`, status: "info", narrative: "Task detected", execStatus: "researching", action: "Task detected" },
+    { dt: 700, kind: "task_started", from: "core", to: "research", label: "TASK_STARTED", detail: t.objective, cap: "research", execStatus: "researching", action: "Identifying decision maker" },
+    { dt: 900, kind: "research_started", from: "research", to: "research", label: "RESEARCH_STARTED", detail: 'q="VP Sales OR CRO"', cap: "research", narrative: `Mapping org chart at ${short}`, metrics: { sources: 0, evidence: 0, confidence: 30 } },
+    { dt: 900, kind: "source_discovered", from: "research", to: "research", label: "SOURCE_DISCOVERED", detail: "linkedin · org chart", cap: "research", metrics: { sources: 4, confidence: 44 } },
+    { dt: 800, kind: "source_discovered", from: "research", to: "research", label: "SOURCE_DISCOVERED", detail: "press · exec bios", cap: "research", narrative: "6 profiles discovered", metrics: { sources: 6, confidence: 55 } },
+    { dt: 1000, kind: "evidence_extracted", from: "research", to: "reasoning", label: "EVIDENCE_EXTRACTED", detail: "seniority + ownership", cap: "reasoning", execStatus: "reasoning", action: "Ranking contacts", metrics: { evidence: 5, confidence: 68 }, flash: { cap: "research", state: "success" } },
+    { dt: 1000, kind: "reasoning_started", from: "reasoning", to: "reasoning", label: "RANK_CONTACTS", detail: "authority score", cap: "reasoning", metrics: { confidence: 79 } },
+    {
+      dt: 1100,
+      kind: "decision_created",
+      from: "reasoning",
+      to: "memory",
+      label: "DECISION_CREATED",
+      detail: "VP Sales · Dana Whitfield",
+      cap: "memory",
+      action: "Writing to memory",
+      narrative: "Decision maker identified · Dana Whitfield, VP Sales",
+      metrics: { confidence: 88 },
+      flash: { cap: "reasoning", state: "success" },
+      decision: {
+        verdict: "Primary contact: Dana Whitfield (VP Sales)",
+        confidence: 88,
+        evidence: 5,
+        signals: ["Budget authority", "Owns RevOps", "Recently expanded team"],
+        rationale: "Highest authority score among mapped contacts with direct ownership of the buying area.",
+      },
+    },
+    { dt: 900, kind: "memory_updated", from: "reasoning", to: "memory", label: "MEMORY_UPDATED", detail: `${short} · contact linked`, cap: "memory", narrative: "Memory updated · contact linked to account", flash: { cap: "memory", state: "success" } },
+    { dt: 900, kind: "task_completed", from: "memory", to: "reliability", label: "TASK_COMPLETED", detail: "no policy violations", status: "ok", cap: "reliability", execStatus: "completed", action: "Task complete", narrative: "Task complete", flash: { cap: "reliability", state: "success" } },
+    {
+      dt: 700,
+      kind: "outcome_created",
+      from: "reliability",
+      to: "reliability",
+      label: "OUTCOME_CREATED",
+      detail: "decision maker mapped",
+      cap: null,
+      narrative: "Decision maker mapped",
+      outcome: {
+        title: `${short} — Contact mapped`,
+        kind: "Decision maker",
+        confidence: 88,
+        causal: [
+          { cap: "outcome", label: "Outcome", detail: "Dana Whitfield · VP Sales" },
+          { cap: "task", label: "Task", detail: `Identify decision maker at ${short}` },
+          { cap: "reasoning", label: "Decision", detail: "Highest authority score" },
+          { cap: "research", label: "Research", detail: "6 profiles mapped" },
+        ],
+      },
+    },
+  ]
+}
+
+/* Infinite deterministic task plan: qualify -> decision-maker per company. */
+function planTasks(count: number): TaskDef[] {
+  const tasks: TaskDef[] = []
+  let id = 4281
+  for (let i = 0; i < count; i++) {
+    const company = COMPANIES[i % COMPANIES.length]
+    tasks.push({ id: id++, company, objective: `Research ${company} and determine enterprise fit`, kind: "qualify", withError: i === 1 })
+    tasks.push({ id: id++, company, objective: `Identify decision maker at ${company}`, kind: "decision_maker", withError: false })
+  }
+  return tasks
+}
+
+function beatsFor(t: TaskDef): Beat[] {
+  return t.kind === "qualify" ? qualifyBeats(t) : decisionMakerBeats(t)
+}
+
+/* --------------------------- runtime ------------------------------- */
+
+const CAP_IDS: CapabilityId[] = [
+  "research",
+  "reasoning",
+  "communication",
+  "execution",
+  "reliability",
+  "memory",
 ]
 
-export interface ActiveTask {
-  id: number
-  target: string
-  step: number
-  total: number
-  capability: CapabilityId
-}
+const emptyAct = (): Record<CapabilityId, number> =>
+  ({ research: 0, reasoning: 0, communication: 0, execution: 0, reliability: 0, memory: 0 })
 
-export interface SimState {
+const idleStates = (): Record<CapabilityId, NodeState> =>
+  ({ research: "idle", reasoning: "idle", communication: "idle", execution: "idle", reliability: "idle", memory: "idle" })
+
+export interface RuntimeState {
   log: WorkerEvent[]
   latest: WorkerEvent | null
-  activeTask: ActiveTask | null
-  /** 0-1 activation per capability, decays over time */
+  exec: ExecutionState | null
   activation: Record<CapabilityId, number>
+  capStates: Record<CapabilityId, NodeState>
+  workerStatus: WorkerStatus
+  queue: QueuedTask[]
   completedTasks: number
+  lastOutcome: Outcome | null
+  autonomyBanner: string | null
   running: boolean
+  runDemo: () => void
+  reset: () => void
 }
 
-const EMPTY_ACT: Record<CapabilityId, number> = {
-  research: 0,
-  reasoning: 0,
-  communication: 0,
-  execution: 0,
-  reliability: 0,
-}
-
-export function useSimulation(running: boolean): SimState {
+export function useSimulation(live: boolean): RuntimeState {
   const [log, setLog] = useState<WorkerEvent[]>([])
   const [latest, setLatest] = useState<WorkerEvent | null>(null)
-  const [activeTask, setActiveTask] = useState<ActiveTask | null>(null)
-  const [activation, setActivation] = useState<Record<CapabilityId, number>>(EMPTY_ACT)
+  const [exec, setExec] = useState<ExecutionState | null>(null)
+  const [activation, setActivation] = useState(emptyAct)
+  const [capStates, setCapStates] = useState(idleStates)
+  const [workerStatus, setWorkerStatus] = useState<WorkerStatus>("idle")
+  const [queue, setQueue] = useState<QueuedTask[]>([])
   const [completed, setCompleted] = useState(0)
+  const [lastOutcome, setLastOutcome] = useState<Outcome | null>(null)
+  const [autonomyBanner, setAutonomyBanner] = useState<string | null>(null)
+  const [epoch, setEpoch] = useState(0) // bumping restarts the machine
 
   const evId = useRef(1)
-  const taskId = useRef(4281)
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
+  const flashTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
+  const clearTimers = useCallback(() => {
+    timers.current.forEach(clearTimeout)
+    timers.current = []
+    Object.values(flashTimers.current).forEach(clearTimeout)
+    flashTimers.current = {}
+  }, [])
+
+  const runDemo = useCallback(() => {
+    clearTimers()
+    setLog([])
+    setLatest(null)
+    setExec(null)
+    setActivation(emptyAct())
+    setCapStates(idleStates())
+    setQueue([])
+    setCompleted(0)
+    setLastOutcome(null)
+    setAutonomyBanner(null)
+    evId.current = 1
+    setEpoch((e) => e + 1)
+  }, [clearTimers])
+
+  const reset = useCallback(() => {
+    clearTimers()
+    setLog([])
+    setLatest(null)
+    setExec(null)
+    setActivation(emptyAct())
+    setCapStates(idleStates())
+    setQueue([])
+    setLastOutcome(null)
+    setAutonomyBanner(null)
+    setWorkerStatus("idle")
+    setEpoch(0)
+  }, [clearTimers])
+
+  // start / stop with liveness
   useEffect(() => {
-    if (!running) return
-    let stepIdx = 0
-    let target = TARGETS[Math.floor(Math.random() * TARGETS.length)]
-    let currentTask = taskId.current
+    if (live) setEpoch((e) => (e === 0 ? 1 : e))
+    else reset()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live])
 
-    const clearAll = () => {
-      timers.current.forEach(clearTimeout)
-      timers.current = []
+  // the machine itself — re-created whenever epoch changes (demo restart)
+  useEffect(() => {
+    if (!live || epoch === 0) return
+    const tasks = planTasks(60)
+    let ti = 0
+
+    const at = (ms: number, fn: () => void) => {
+      timers.current.push(setTimeout(fn, ms))
     }
 
-    const runStep = () => {
-      const def = TASK_PATH[stepIdx]
-      const ev: WorkerEvent = {
-        id: evId.current++,
-        t: Date.now(),
-        taskId: currentTask,
-        kind: def.kind,
-        from: def.from,
-        to: def.to,
-        label: def.label,
-        detail: def.detail(target),
+    const setQueueFor = (index: number) => {
+      const view: QueuedTask[] = []
+      for (let k = index; k < Math.min(index + 3, tasks.length); k++) {
+        const tk = tasks[k]
+        view.push({ id: tk.id, company: tk.company, objective: tk.objective, state: k === index ? "running" : "queued" })
       }
-      setLatest(ev)
-      setLog((prev) => [ev, ...prev].slice(0, 120))
-      setActivation((prev) => ({ ...prev, [def.to]: 1 }))
-      setActiveTask({
-        id: currentTask,
-        target,
-        step: stepIdx + 1,
-        total: TASK_PATH.length,
-        capability: def.to,
+      setQueue(view)
+    }
+
+    const flash = (cap: CapabilityId, state: NodeState) => {
+      setCapStates((prev) => ({ ...prev, [cap]: state }))
+      if (flashTimers.current[cap]) clearTimeout(flashTimers.current[cap])
+      flashTimers.current[cap] = setTimeout(() => {
+        setCapStates((prev) => ({ ...prev, [cap]: "idle" }))
+      }, state === "error" ? 1400 : 700)
+    }
+
+    const playTask = (task: TaskDef) => {
+      const beats = beatsFor(task)
+      const path = task.kind === "qualify" ? QUALIFY_PATH : DECISION_PATH
+      setQueueFor(ti)
+      setWorkerStatus("working")
+
+      // seed the execution state
+      setExec({
+        taskId: task.id,
+        company: task.company,
+        objective: task.objective,
+        kind: task.kind,
+        status: "researching",
+        currentCapability: null,
+        activePath: path,
+        metrics: { sources: 0, evidence: 0, confidence: 0 },
+        currentAction: "Task detected",
+        startedAt: Date.now(),
+        eventIds: [],
+      })
+      // queue-state the path so unrelated nodes read as disabled
+      setCapStates(() => {
+        const s = idleStates()
+        for (const id of CAP_IDS) s[id] = path.includes(id) ? "queued" : "disabled"
+        return s
       })
 
-      stepIdx += 1
-      if (stepIdx < TASK_PATH.length) {
-        const gap = 620 + Math.random() * 640
-        timers.current.push(setTimeout(runStep, gap))
+      let elapsed = 0
+      beats.forEach((b) => {
+        elapsed += b.dt
+        at(elapsed, () => {
+          const ev: WorkerEvent = {
+            id: evId.current++,
+            t: Date.now(),
+            taskId: task.id,
+            kind: b.kind,
+            from: b.from,
+            to: b.to,
+            label: b.label,
+            detail: b.detail,
+            status: b.status,
+            narrative: b.narrative,
+            payload: b.payload,
+          }
+          setLatest(ev)
+          setLog((prev) => [ev, ...prev].slice(0, 200))
+
+          // activation glow on the landing capability
+          setActivation((prev) => ({ ...prev, [b.to]: 1 }))
+
+          // current capability -> active node state
+          if (b.cap !== undefined) {
+            setCapStates((prev) => {
+              const s = { ...prev }
+              if (b.cap) s[b.cap] = "active"
+              return s
+            })
+          }
+          if (b.flash) flash(b.flash.cap, b.flash.state)
+
+          setExec((prev) => {
+            if (!prev || prev.taskId !== task.id) return prev
+            return {
+              ...prev,
+              status: b.execStatus ?? prev.status,
+              currentCapability: b.cap !== undefined ? b.cap : prev.currentCapability,
+              currentAction: b.action ?? prev.currentAction,
+              metrics: { ...prev.metrics, ...b.metrics },
+              decision: b.decision ?? prev.decision,
+              outcome: b.outcome ?? prev.outcome,
+              completedAt: b.kind === "task_completed" ? Date.now() : prev.completedAt,
+              eventIds: [...prev.eventIds, ev.id],
+            }
+          })
+
+          if (b.outcome) setLastOutcome(b.outcome)
+        })
+      })
+
+      // after the last beat: complete -> think -> autonomously start next
+      const done = elapsed
+      at(done + 200, () => setCompleted((c) => c + 1))
+
+      const next = tasks[ti + 1]
+      if (next) {
+        at(done + 1400, () => {
+          setWorkerStatus("thinking")
+          setCapStates(idleStates())
+          setExec((prev) => (prev ? { ...prev, status: "thinking", currentCapability: null, currentAction: "Analyzing next best action…" } : prev))
+          const think: WorkerEvent = {
+            id: evId.current++,
+            t: Date.now(),
+            taskId: task.id,
+            kind: "autonomous_action",
+            from: "core",
+            to: "reasoning",
+            label: "AUTONOMOUS_ACTION",
+            detail: "next best action",
+            status: "info",
+            narrative: "Analyzing next best action…",
+          }
+          setLatest(think)
+          setLog((prev) => [think, ...prev].slice(0, 200))
+          setActivation((prev) => ({ ...prev, reasoning: 1 }))
+        })
+        at(done + 3000, () => {
+          setAutonomyBanner(
+            next.kind === "decision_maker"
+              ? `The worker chose to identify the decision maker at ${next.company.split(" ")[0]}.`
+              : `The worker chose to research ${next.company.split(" ")[0]}.`,
+          )
+          timers.current.push(setTimeout(() => setAutonomyBanner(null), 3600))
+        })
+        at(done + 3200, () => {
+          ti += 1
+          playTask(next)
+        })
       } else {
-        // task done — increment, rest, then start a fresh task (calm gap)
-        setCompleted((c) => c + 1)
-        stepIdx = 0
-        taskId.current += Math.floor(2 + Math.random() * 6)
-        currentTask = taskId.current
-        target = TARGETS[Math.floor(Math.random() * TARGETS.length)]
-        timers.current.push(
-          setTimeout(() => {
-            setActiveTask(null)
-            timers.current.push(setTimeout(runStep, 900))
-          }, 1600),
-        )
+        at(done + 1400, () => {
+          setWorkerStatus("idle")
+          setCapStates(idleStates())
+        })
       }
     }
 
-    // gentle start
-    timers.current.push(setTimeout(runStep, 700))
-
-    // continuous decay of activation so idle capabilities go quiet
+    // continuous activation decay so idle capabilities go quiet
     const decay = setInterval(() => {
       setActivation((prev) => {
-        const next = { ...prev }
         let changed = false
-        for (const k of Object.keys(next) as CapabilityId[]) {
+        const next = { ...prev }
+        for (const k of CAP_IDS) {
           if (next[k] > 0) {
-            next[k] = Math.max(0, next[k] - 0.06)
+            next[k] = Math.max(0, next[k] - 0.05)
             changed = true
           }
         }
@@ -159,11 +533,32 @@ export function useSimulation(running: boolean): SimState {
     }, 90)
     timers.current.push(decay as unknown as ReturnType<typeof setTimeout>)
 
+    // gentle start
+    at(600, () => playTask(tasks[0]))
+
     return () => {
-      clearAll()
+      clearTimers()
       clearInterval(decay)
     }
-  }, [running])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [epoch, live])
 
-  return { log, latest, activeTask, activation, completedTasks: completed, running }
+  return useMemo(
+    () => ({
+      log,
+      latest,
+      exec,
+      activation,
+      capStates,
+      workerStatus,
+      queue,
+      completedTasks: completed,
+      lastOutcome,
+      autonomyBanner,
+      running: live && epoch > 0,
+      runDemo,
+      reset,
+    }),
+    [log, latest, exec, activation, capStates, workerStatus, queue, completed, lastOutcome, autonomyBanner, live, epoch, runDemo, reset],
+  )
 }

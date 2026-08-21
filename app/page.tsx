@@ -3,25 +3,32 @@
 /* ------------------------------------------------------------------ *
  * WhiteHabbit — WORKER (orchestrator)
  * Not a dashboard. A single spatial environment where you create a
- * worker, watch it live, and shape it. Everything is contextual and
- * driven by real state; the fabric is always the hero.
+ * worker, watch it work, and shape it. The Fabric is always the hero;
+ * the live execution flows across it in real time and the worker keeps
+ * working on its own — the user can sit back and watch.
  * ------------------------------------------------------------------ */
 
-import { AnimatePresence } from "framer-motion"
-import { useCallback, useMemo, useState } from "react"
+import { AnimatePresence, motion } from "framer-motion"
+import { Sparkles } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { CommandBar } from "@/components/command-bar"
 import { CreateOverlay, ASSEMBLY_STEPS } from "@/components/create-overlay"
+import { EventInspector } from "@/components/event-inspector"
 import { EvolveDrawer } from "@/components/evolve-drawer"
 import { FabricCanvas } from "@/components/fabric-canvas"
 import { Hud } from "@/components/hud"
 import { ModeSwitcher } from "@/components/mode-switcher"
+import { OutcomeCard } from "@/components/outcome-card"
 import { OutcomeOverlay } from "@/components/outcome-overlay"
 import { RabbitHole } from "@/components/rabbit-hole"
+import { TaskHud } from "@/components/task-hud"
+import { TaskQueue } from "@/components/task-queue"
 import { TeachDrawer } from "@/components/teach-drawer"
 import {
   addOrb,
   buildGraph,
   type Camera,
+  getNodePos,
   setCapabilityScore,
 } from "@/lib/fabric-graph"
 import { useSimulation } from "@/lib/simulation"
@@ -31,6 +38,7 @@ import {
   type CapabilityId,
   type FabricMode,
   type Interaction,
+  type WorkerEvent,
 } from "@/lib/worker"
 
 type Phase = "create" | "assembling" | "live"
@@ -54,12 +62,16 @@ export default function Page() {
   const [teachSeed, setTeachSeed] = useState("")
   const [traceQuery, setTraceQuery] = useState("")
   const [focusCap, setFocusCap] = useState<CapabilityId | null>(null)
+  const [selectedEvent, setSelectedEvent] = useState<WorkerEvent | null>(null)
+  const [queueOpen, setQueueOpen] = useState(false)
 
   // live worker capability state (mutated by teach/evolve/grow)
   const [caps, setCaps] = useState<Capability[]>(ATLAS.capabilities)
 
-  // camera control: mode framing unless the user has taken over
+  // camera control: mode framing, follow-the-signal, or user takeover
+  const [autoFollow, setAutoFollow] = useState(true)
   const [userCamera, setUserCamera] = useState<Camera | null>(null)
+  const [followCam, setFollowCam] = useState<Camera | null>(null)
   const [cameraKey, setCameraKey] = useState(0)
 
   // one graph instance for the whole session (physics mutates it in place)
@@ -73,6 +85,20 @@ export default function Page() {
   )
   const worker = useMemo(() => ({ ...ATLAS, capabilities: caps }), [caps])
 
+  const activePath = sim.exec?.activePath ?? []
+  const activeCount = sim.queue.filter((q) => q.state === "running").length
+
+  // progressive narrative for the current task (oldest -> newest)
+  const narrative = useMemo(() => {
+    if (!sim.exec) return []
+    const tid = sim.exec.taskId
+    return sim.log
+      .filter((e) => e.taskId === tid && e.narrative)
+      .slice(0, 5)
+      .reverse()
+      .map((e) => ({ id: e.id, text: e.narrative as string }))
+  }, [sim.log, sim.exec])
+
   /* -------------------- CREATE -> cinematic birth -------------------- */
   const handleAssemble = useCallback((obj: string) => {
     setObjective(obj)
@@ -80,7 +106,6 @@ export default function Page() {
     setAssemblyStep(0)
     setRevealCount(0)
 
-    // step through assembly copy while revealing graph nodes in order
     ASSEMBLY_STEPS.forEach((s, i) => {
       setTimeout(() => {
         setAssemblyStep(i)
@@ -92,7 +117,7 @@ export default function Page() {
     setTimeout(() => {
       setRevealCount(999)
       setPhase("live")
-      setMode("fabric")
+      setMode("watch")
     }, total + 500)
   }, [])
 
@@ -132,7 +157,6 @@ export default function Page() {
   )
 
   const handleGrow = useCallback(() => {
-    // "grow" adds mass to the strongest capability — a new skill
     const strongest = [...caps].sort((a, b) => b.score - a.score)[0]
     addOrb(graph, strongest.id)
     setCaps((prev) =>
@@ -144,14 +168,52 @@ export default function Page() {
   const changeMode = useCallback((m: FabricMode) => {
     setMode(m)
     setUserCamera(null)
+    setSelectedEvent(null)
     setCameraKey((k) => k + 1)
     if (m !== "trace") setTraceQuery("")
   }, [])
 
-  const cameraTarget = userCamera ?? MODE_CAMERA[mode]
+  // follow the active capability while auto-follow is on (watch / fabric)
+  useEffect(() => {
+    if (!autoFollow || (mode !== "watch" && mode !== "fabric")) {
+      setFollowCam(null)
+      return
+    }
+    const cap = sim.exec?.currentCapability
+    if (!cap) {
+      setFollowCam({ x: 0, y: 0, zoom: mode === "watch" ? 1.15 : 1 })
+    } else {
+      const pos = getNodePos(graph, cap)
+      if (pos) {
+        // ease toward the node but keep the core partly in frame
+        setFollowCam({ x: pos.x * 0.68, y: pos.y * 0.68, zoom: mode === "watch" ? 1.4 : 1.12 })
+      }
+    }
+    setCameraKey((k) => k + 1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sim.exec?.currentCapability, autoFollow, mode])
 
-  const activeCount = sim.activeTask ? 1 : 0
+  const toggleFollow = useCallback(() => {
+    setAutoFollow((v) => !v)
+    setUserCamera(null)
+    setCameraKey((k) => k + 1)
+  }, [])
+
+  const recenter = useCallback(() => {
+    setUserCamera(null)
+    setCameraKey((k) => k + 1)
+  }, [])
+
+  const onUserCamera = useCallback((cam: Camera) => {
+    setAutoFollow(false)
+    setUserCamera(cam)
+  }, [])
+
+  const cameraTarget = userCamera ?? followCam ?? MODE_CAMERA[mode]
+
   const showFabricControls = phase === "live"
+  const showTaskHud = phase === "live" && (mode === "fabric" || mode === "watch")
+  const currentOutcome = sim.exec?.outcome ?? null
 
   return (
     <main className="relative h-dvh w-full overflow-hidden bg-background bg-substrate">
@@ -166,9 +228,11 @@ export default function Page() {
           cameraKey={`${mode}-${cameraKey}`}
           focusCapId={focusCap}
           warnCaps={warnCaps}
+          activePath={activePath}
+          capStates={sim.capStates}
           dense={mode === "trace"}
           onSelectCapability={setFocusCap}
-          onUserCamera={() => setUserCamera(cameraTarget)}
+          onUserCamera={() => onUserCamera(cameraTarget)}
         />
       )}
 
@@ -186,14 +250,101 @@ export default function Page() {
           <OutcomeOverlay key="outcome" worker={worker} />
         )}
         {phase === "live" && mode === "trace" && (
-          <RabbitHole key="trace" log={sim.log} query={traceQuery} />
+          <RabbitHole
+            key="trace"
+            log={sim.log}
+            query={traceQuery}
+            selectedId={selectedEvent?.id ?? null}
+            onSelect={setSelectedEvent}
+          />
         )}
       </AnimatePresence>
 
-      {/* minimal HUD — hidden in the immersive Rabbit Hole */}
+      {/* minimal top HUD — hidden in the immersive Rabbit Hole */}
       {phase === "live" && mode !== "trace" && (
-        <Hud worker={worker} activeCount={activeCount} live={sim.running} />
+        <Hud
+          worker={worker}
+          activeCount={activeCount}
+          status={sim.workerStatus}
+          queueOpen={queueOpen}
+          onActiveClick={() => setQueueOpen((v) => !v)}
+        />
       )}
+
+      {/* live task HUD — floats top-left over the fabric */}
+      <div className="pointer-events-none absolute left-5 top-[68px] z-30 sm:left-7">
+        <AnimatePresence>
+          {showTaskHud && (
+            <TaskHud
+              key="taskhud"
+              exec={sim.exec}
+              workerStatus={sim.workerStatus}
+              narrative={narrative}
+              autoFollow={autoFollow}
+              onToggleFollow={toggleFollow}
+              onRecenter={recenter}
+              onRunDemo={sim.runDemo}
+              onReset={sim.reset}
+            />
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* task queue — opens under the Active indicator */}
+      <div className="pointer-events-none absolute right-5 top-[68px] z-30 sm:right-7">
+        <AnimatePresence>
+          {phase === "live" && mode !== "trace" && queueOpen && (
+            <TaskQueue key="queue" queue={sim.queue} />
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* outcome card — earned by the execution sequence */}
+      <div className="pointer-events-none absolute bottom-28 right-5 z-30 sm:bottom-32 sm:right-7">
+        <AnimatePresence>
+          {phase === "live" && mode !== "trace" && mode !== "outcome" && currentOutcome && (
+            <OutcomeCard key={currentOutcome.title} outcome={currentOutcome} />
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* autonomy banner — intelligent, not aggressive */}
+      <div className="pointer-events-none absolute inset-x-0 top-20 z-30 flex justify-center px-5">
+        <AnimatePresence>
+          {phase === "live" && sim.autonomyBanner && (
+            <motion.div
+              key={sim.autonomyBanner}
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.4 }}
+              className="flex items-center gap-2 rounded-full border border-primary/30 bg-card/80 px-4 py-2 backdrop-blur-md"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
+                Autonomous action
+              </span>
+              <span className="hidden text-[12px] text-muted-foreground sm:inline">
+                {sim.autonomyBanner}
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* event inspector — click an event in the Rabbit Hole */}
+      <div className="pointer-events-none absolute left-5 top-[68px] z-40 sm:left-7">
+        <AnimatePresence>
+          {mode === "trace" && selectedEvent && (
+            <EventInspector
+              key={selectedEvent.id}
+              event={selectedEvent}
+              decision={sim.exec?.decision ?? null}
+              onClose={() => setSelectedEvent(null)}
+            />
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* bottom control cluster: mode switcher + command bar */}
       {showFabricControls && (

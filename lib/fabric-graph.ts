@@ -177,6 +177,12 @@ export function setCapabilityScore(graph: Graph, capId: CapabilityId, score: num
   if (cap) cap.radius = 15 + (score / 100) * 9
 }
 
+/** Current world position of a capability node — used for follow-camera. */
+export function getNodePos(graph: Graph, capId: CapabilityId): { x: number; y: number } | null {
+  const cap = graph.nodes.find((n) => n.id === `cap:${capId}`)
+  return cap ? { x: cap.x, y: cap.y } : null
+}
+
 const REPULSION = 26000
 const DAMPING = 0.86
 const CENTERING = 0.0016

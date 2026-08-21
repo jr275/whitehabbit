@@ -16,12 +16,13 @@ import {
   stepPhysics,
   worldToScreen,
 } from "@/lib/fabric-graph"
-import type { CapabilityId, WorkerEvent } from "@/lib/worker"
+import type { CapabilityId, NodeState, WorkerEvent } from "@/lib/worker"
 
 const C = {
   alive: [96, 118, 255] as const,
   grow: [86, 196, 128] as const,
   warn: [230, 176, 82] as const,
+  fail: [226, 96, 96] as const,
   dim: [96, 110, 150] as const,
   core: [150, 170, 255] as const,
 }
@@ -84,6 +85,8 @@ export function FabricCanvas({
   cameraKey,
   focusCapId,
   warnCaps,
+  activePath,
+  capStates,
   dense,
   onSelectCapability,
   onUserCamera,
@@ -97,6 +100,10 @@ export function FabricCanvas({
   focusCapId: CapabilityId | null
   /** capabilities currently flagged weak (amber) — data-driven */
   warnCaps: CapabilityId[]
+  /** capabilities on the currently executing task's path (others quiet) */
+  activePath: CapabilityId[]
+  /** discrete visual state per capability (active/success/error/…) */
+  capStates: Record<CapabilityId, NodeState>
   /** rabbit-hole density (small type, brighter internals) */
   dense: boolean
   onSelectCapability: (id: CapabilityId | null) => void
@@ -124,6 +131,10 @@ export function FabricCanvas({
   revealRef.current = revealCount
   const warnRef = useRef(warnCaps)
   warnRef.current = warnCaps
+  const pathRef = useRef(activePath)
+  pathRef.current = activePath
+  const stateRef = useRef(capStates)
+  stateRef.current = capStates
 
   // camera command: whenever cameraKey changes, lerp toward the new target
   useEffect(() => {
@@ -190,6 +201,11 @@ export function FabricCanvas({
       const focus = focusRef.current
       const isDense = denseRef.current
       const act = activationRef.current
+      const path = pathRef.current
+      const states = stateRef.current
+      const pathActive = path.length > 0
+      const offPath = (cap?: CapabilityId | "core") =>
+        pathActive && !!cap && cap !== "core" && !path.includes(cap)
 
       // camera lerp toward command target
       if (lerpingRef.current) {
@@ -235,9 +251,11 @@ export function FabricCanvas({
         const pa = worldToScreen(a.x, a.y, camRef.current, w, h)
         const pb = worldToScreen(b.x, b.y, camRef.current, w, h)
         const capActive = e.capB ? act[e.capB] ?? 0 : 0
-        const dimmed = focus && e.capB && e.capB !== focus && e.capA !== focus
+        const focusDim = focus && e.capB && e.capB !== focus && e.capA !== focus
+        const pathDim = offPath(e.capB) || offPath(e.capA)
+        const dimmed = focusDim || pathDim
         const baseA = e.flow ? 0.16 : 0.1
-        const alpha = Math.min(0.6, baseA + capActive * 0.5) * (dimmed ? 0.25 : 1)
+        const alpha = Math.min(0.6, baseA + capActive * 0.5) * (dimmed ? 0.16 : 1)
         ctx.strokeStyle = rgba(C.dim, alpha)
         ctx.lineWidth = (e.flow ? 1 : 0.75) + capActive * 1.4
         ctx.beginPath()
@@ -281,7 +299,10 @@ export function FabricCanvas({
         const s = worldToScreen(node.x, node.y, camRef.current, w, h)
         const z = cam.zoom
         const a = node.capId ? act[node.capId] ?? 0 : 0
-        const dimmed = focus && node.capId && node.capId !== focus
+        const nodeState: NodeState = node.capId ? states[node.capId] ?? "idle" : "idle"
+        const focusDim = focus && node.capId && node.capId !== focus
+        const pathDim = offPath(node.capId) || nodeState === "disabled"
+        const dimmed = focusDim || pathDim
 
         if (node.kind === "core") {
           const R = node.radius * z
@@ -326,8 +347,18 @@ export function FabricCanvas({
         // capability node — ring + core orb + halo when active
         const R = node.radius * z
         const warn = node.capId ? warnRef.current.includes(node.capId) : false
-        const col = warn ? C.warn : a > 0.05 ? C.alive : C.dim
-        const baseAlpha = dimmed ? 0.28 : 1
+        const col =
+          nodeState === "error"
+            ? C.fail
+            : nodeState === "success"
+              ? C.grow
+              : warn
+                ? C.warn
+                : nodeState === "active" || a > 0.05
+                  ? C.alive
+                  : C.dim
+        // errors always break through the dimming so failure is legible
+        const baseAlpha = nodeState === "error" ? 1 : dimmed ? 0.24 : 1
 
         // activation halo
         if (a > 0.02 && !dimmed) {

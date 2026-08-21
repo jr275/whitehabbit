@@ -7,17 +7,31 @@
  * ------------------------------------------------------------------ */
 
 import { motion } from "framer-motion"
-import type { Worker } from "@/lib/worker"
+import type { Worker, WorkerStatus } from "@/lib/worker"
+
+const STATUS_LABEL: Record<WorkerStatus, string> = {
+  draft: "Draft",
+  ready: "Ready",
+  live: "Live",
+  working: "Working",
+  idle: "Idle",
+  thinking: "Thinking",
+}
 
 export function Hud({
   worker,
   activeCount,
-  live,
+  status,
+  onActiveClick,
+  queueOpen,
 }: {
   worker: Worker
   activeCount: number
-  live: boolean
+  status: WorkerStatus
+  onActiveClick: () => void
+  queueOpen: boolean
 }) {
+  const busy = status === "working" || status === "thinking"
   return (
     <motion.header
       initial={{ opacity: 0, y: -10 }}
@@ -39,18 +53,31 @@ export function Hud({
         </div>
         <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
           <span
-            className={`h-1.5 w-1.5 rounded-full ${live ? "animate-blink bg-grow" : "bg-muted-foreground"}`}
+            className={`h-1.5 w-1.5 rounded-full ${
+              status === "working"
+                ? "animate-blink bg-grow"
+                : status === "thinking"
+                  ? "animate-pulse bg-primary"
+                  : "bg-muted-foreground"
+            }`}
           />
-          {live ? "Live" : "Idle"}
+          {STATUS_LABEL[status]}
           <span className="text-border">/</span>
           <span>Lvl {worker.level}</span>
         </div>
       </div>
 
-      {/* right — active tasks */}
-      <div className="text-right font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
-        <span className="text-foreground">Active {activeCount}</span>
-      </div>
+      {/* right — active tasks (click to open the queue) */}
+      <button
+        onClick={onActiveClick}
+        aria-expanded={queueOpen}
+        className="pointer-events-auto rounded-md px-1.5 py-1 text-right font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <span className={`inline-flex items-center gap-1.5 ${busy ? "text-foreground" : ""}`}>
+          <span className={`h-1.5 w-1.5 rounded-full ${busy ? "bg-grow animate-blink" : "bg-muted-foreground/50"}`} />
+          Active {activeCount}
+        </span>
+      </button>
     </motion.header>
   )
 }
