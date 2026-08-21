@@ -1,49 +1,71 @@
 "use client"
 
 /* ------------------------------------------------------------------ *
- * Output drawer — two modes over the same panel:
- *   LIST   — every output behind a clicked number or table row
- *   DETAIL — one output, fully inspected: status, quality, confidence,
- *            input/output, and execution metadata. No chain-of-thought,
- *            only concise decision summaries.
+ * Output drawer — resolves a filter (every output of a type, or one
+ * specific execution) against the real ledger and shows either a list
+ * or the one real detail behind it: status, quality breakdown, real
+ * sources, and real execution metadata (duration, model, tokens,
+ * cost). A blocked or failed execution has no output row — the drawer
+ * shows the real reason instead of pretending one exists.
  * ------------------------------------------------------------------ */
 
 import { ArrowLeft, X } from "lucide-react"
 import { useEffect, useState } from "react"
-import type { Worker, WorkerOutput } from "@/lib/workforce/model"
-import { OUTPUT_STATUS_META, OUTPUT_TYPE_META } from "@/lib/workforce/model"
-import { timeOfDay } from "@/lib/workforce/selectors"
+import { SKILL_CATALOG, TOOL_CATALOG } from "@/lib/workforce/catalog"
+import type { Worker, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
+import { EXECUTION_STATUS_META, OUTPUT_TYPE_META } from "@/lib/workforce/model"
+import { isToday, timeOfDay } from "@/lib/workforce/selectors"
+
+export type DrawerFilter = { kind: "type"; workerId: string; type: string; title: string } | { kind: "execution"; executionId: string }
 
 export function OutputDrawer({
+  filter,
+  workers,
+  tasks,
+  executions,
   outputs,
-  worker,
-  title,
   onClose,
 }: {
+  filter: DrawerFilter
+  workers: Worker[]
+  tasks: WorkerTask[]
+  executions: WorkerExecution[]
   outputs: WorkerOutput[]
-  worker?: Worker
-  title: string
   onClose: () => void
 }) {
-  const [selected, setSelected] = useState<WorkerOutput | null>(outputs.length === 1 ? outputs[0] : null)
+  const list =
+    filter.kind === "type"
+      ? outputs.filter((o) => o.workerId === filter.workerId && o.type === filter.type && isToday(o.createdAt))
+      : outputs.filter((o) => o.executionId === filter.executionId)
 
+  const singleExecution = filter.kind === "execution" ? executions.find((e) => e.id === filter.executionId) : undefined
+  const singleTask = singleExecution ? tasks.find((t) => t.id === singleExecution.taskId) : undefined
+  const worker = filter.kind === "type" ? workers.find((w) => w.id === filter.workerId) : workers.find((w) => w.id === singleExecution?.workerId)
+  const title = filter.kind === "type" ? filter.title : (singleTask?.title ?? "Execution")
+
+  const [selected, setSelected] = useState<WorkerOutput | null>(list.length === 1 ? list[0] : null)
   useEffect(() => {
-    setSelected(outputs.length === 1 ? outputs[0] : null)
-  }, [outputs])
+    setSelected(list.length === 1 ? list[0] : null)
+  }, [filter.kind === "type" ? `${filter.workerId}:${filter.type}` : filter.executionId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const showBlockedDetail = filter.kind === "execution" && singleExecution && singleExecution.status !== "completed" && list.length === 0
+  const activeOutput = selected
+  const activeExecution = activeOutput ? executions.find((e) => e.id === activeOutput.executionId) : singleExecution
+  const activeTask = activeOutput ? tasks.find((t) => t.id === activeOutput.taskId) : singleTask
 
   return (
     <>
       <div className="fixed inset-0 z-40 bg-foreground/10 backdrop-blur-[1px]" onClick={onClose} />
       <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-border bg-card shadow-2xl">
         <div className="flex items-center gap-2 border-b border-border px-5 py-4">
-          {selected && outputs.length > 1 && (
+          {activeOutput && list.length > 1 && (
             <button onClick={() => setSelected(null)} className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground">
               <ArrowLeft className="h-4 w-4" />
             </button>
           )}
           <div className="min-w-0 flex-1">
             <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{worker?.identity.name ?? "Outputs"}</p>
-            <h2 className="truncate text-[15px] font-semibold text-foreground">{selected ? OUTPUT_TYPE_META[selected.type].label : title}</h2>
+            <h2 className="truncate text-[15px] font-semibold text-foreground">{activeOutput ? (OUTPUT_TYPE_META[activeOutput.type]?.label ?? activeOutput.type) : title}</h2>
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground">
             <X className="h-4 w-4" />
@@ -51,29 +73,25 @@ export function OutputDrawer({
         </div>
 
         <div className="thin-scroll-light flex-1 overflow-y-auto">
-          {!selected ? (
+          {showBlockedDetail && singleExecution ? (
+            <BlockedDetail execution={singleExecution} task={singleTask} />
+          ) : !activeOutput ? (
             <ul className="divide-y divide-border">
-              {outputs.map((o) => {
-                const status = OUTPUT_STATUS_META[o.status]
-                return (
-                  <li key={o.id}>
-                    <button onClick={() => setSelected(o)} className="flex w-full flex-col items-start gap-1 px-5 py-3 text-left transition-colors hover:bg-secondary/50">
-                      <div className="flex w-full items-center justify-between gap-2">
-                        <span className="truncate text-[13px] font-medium text-foreground">{o.title}</span>
-                        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{timeOfDay(o.createdAt)}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <StatusDot tone={status.tone} label={status.label} />
-                        {o.qualityScore != null && <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{o.qualityScore}%</span>}
-                      </div>
-                    </button>
-                  </li>
-                )
-              })}
-              {outputs.length === 0 && <p className="px-5 py-8 text-center text-[13px] text-muted-foreground">No outputs to show.</p>}
+              {list.map((o) => (
+                <li key={o.id}>
+                  <button onClick={() => setSelected(o)} className="flex w-full flex-col items-start gap-1 px-5 py-3 text-left transition-colors hover:bg-secondary/50">
+                    <div className="flex w-full items-center justify-between gap-2">
+                      <span className="truncate text-[13px] font-medium text-foreground">{o.title}</span>
+                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{timeOfDay(o.createdAt)}</span>
+                    </div>
+                    {o.qualityScore != null && <span className="font-mono text-[11px] tabular-nums text-muted-foreground">Quality {o.qualityScore}%</span>}
+                  </button>
+                </li>
+              ))}
+              {list.length === 0 && <p className="px-5 py-8 text-center text-[13px] text-muted-foreground">No outputs to show.</p>}
             </ul>
           ) : (
-            <DetailView output={selected} />
+            <DetailView output={activeOutput} execution={activeExecution} task={activeTask} />
           )}
         </div>
       </div>
@@ -81,83 +99,102 @@ export function OutputDrawer({
   )
 }
 
-function DetailView({ output }: { output: WorkerOutput }) {
-  const status = OUTPUT_STATUS_META[output.status]
+function BlockedDetail({ execution, task }: { execution: WorkerExecution; task?: WorkerTask }) {
+  const meta = EXECUTION_STATUS_META[execution.status]
+  return (
+    <div className="flex flex-col gap-4 px-5 py-5">
+      <div className="rounded-lg border border-warn/30 bg-warn/5 p-4">
+        <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-warn">{meta.label}</p>
+        <p className="mt-2 text-[13px] leading-relaxed text-foreground">{execution.blockedReason ?? "No reason recorded."}</p>
+      </div>
+      <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">
+        <MetaRow k="Task" v={task?.title ?? "—"} />
+        <MetaRow k="Started" v={timeOfDay(execution.startedAt)} />
+        {execution.completedAt && <MetaRow k="Ended" v={timeOfDay(execution.completedAt)} />}
+      </dl>
+      <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+        This is the real reason the task did not complete — nothing was substituted for a result.
+      </p>
+    </div>
+  )
+}
+
+function DetailView({ output, execution, task }: { output: WorkerOutput; execution?: WorkerExecution; task?: WorkerTask }) {
+  const template = task ? SKILL_CATALOG.find((s) => s.id === task.skillId) : undefined
+  const toolNames = template?.requiredTools.map((id) => TOOL_CATALOG.find((t) => t.id === id)?.name ?? id).join(", ")
+
   return (
     <div className="flex flex-col gap-5 px-5 py-5">
       <div>
         <h3 className="text-pretty text-[16px] font-semibold leading-snug text-foreground">{output.title}</h3>
         <div className="mt-2 grid grid-cols-2 gap-3">
           <Field label="Status">
-            <StatusDot tone={status.tone} label={status.label} />
+            <span className={`font-mono text-[12px] ${output.status === "failed" ? "text-destructive" : "text-grow"}`}>{output.status === "failed" ? "Failed" : "Completed"}</span>
           </Field>
           <Field label="Quality">
             <span className="font-mono text-[13px] tabular-nums text-foreground">{output.qualityScore ?? "—"}%</span>
           </Field>
-          <Field label="Confidence">
-            <span className="font-mono text-[13px] tabular-nums text-foreground">{output.confidenceScore ?? "—"}%</span>
-          </Field>
-          <Field label="Channel">
-            <span className="text-[13px] capitalize text-foreground">{output.channel ?? "—"}</span>
-          </Field>
         </div>
       </div>
 
-      {output.input && (
+      {task && (
         <div>
-          <SectionLabel>Input</SectionLabel>
-          <p className="rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-[12.5px] leading-relaxed text-foreground">
-            &ldquo;{output.input}&rdquo;
-          </p>
+          <SectionLabel>Task</SectionLabel>
+          <p className="rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-[12.5px] leading-relaxed text-foreground">{task.title}</p>
         </div>
       )}
 
       <div>
         <SectionLabel>Output</SectionLabel>
-        <p className="whitespace-pre-line rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-[12.5px] leading-relaxed text-foreground">
-          {output.content}
-        </p>
+        <p className="whitespace-pre-line rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-[12.5px] leading-relaxed text-foreground">{output.content}</p>
       </div>
 
-      {/* quality breakdown */}
-      <div>
-        <SectionLabel>Output quality</SectionLabel>
-        <div className="grid grid-cols-2 gap-2">
-          <QualityBar label="Quality" value={output.qualityScore} />
-          <QualityBar label="Task success" value={output.taskSuccess} />
-          <QualityBar label="Policy compliance" value={output.policyCompliance} />
-          <QualityBar label="Brand adherence" value={output.brandAdherence} />
-          <QualityBar label="Factuality" value={output.factuality} />
+      {output.sources && output.sources.length > 0 && (
+        <div>
+          <SectionLabel>Real sources used ({output.sources.length})</SectionLabel>
+          <ul className="flex flex-col gap-1.5">
+            {output.sources.map((s, i) => (
+              <li key={i} className="rounded-lg border border-border bg-card px-3 py-2">
+                <a href={s.url} target="_blank" rel="noreferrer" className="block truncate text-[12px] font-medium text-primary hover:underline">
+                  {s.title}
+                </a>
+                {s.snippet && <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{s.snippet}</p>}
+              </li>
+            ))}
+          </ul>
         </div>
-      </div>
+      )}
 
-      {/* execution metadata */}
+      {output.evaluation && (
+        <div>
+          <SectionLabel>Evaluation — real, structural checks</SectionLabel>
+          <div className="flex flex-col gap-2">
+            {output.evaluation.breakdown.map((b) => (
+              <div key={b.label} className="rounded-lg border border-border bg-card p-2.5">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[11px] text-muted-foreground">{b.label}</span>
+                  <span className="font-mono text-[12px] font-medium tabular-nums text-foreground">{b.score}</span>
+                </div>
+                <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-secondary">
+                  <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, b.score)}%` }} />
+                </div>
+                <p className="mt-1 text-[10.5px] text-muted-foreground">{b.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div>
         <SectionLabel>Execution metadata</SectionLabel>
         <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">
           <MetaRow k="Timestamp" v={new Date(output.createdAt).toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" })} />
-          <MetaRow k="Duration" v={output.durationMs ? `${Math.round(output.durationMs / 1000)}s` : "—"} />
-          <MetaRow k="Model" v={output.model ?? "—"} />
-          <MetaRow k="Tools used" v={output.toolsUsed?.length ? output.toolsUsed.join(", ") : "none"} />
-          <MetaRow k="Knowledge used" v={output.knowledgeUsed?.length ? output.knowledgeUsed.join(", ") : "none"} />
-          <MetaRow k="Policy checks" v={output.policyChecks?.length ? output.policyChecks.join(" · ") : "none"} />
-          <MetaRow k="Approval" v={output.approval === "pending" ? "Pending" : output.approval === "approved" ? "Approved" : "Not required"} />
+          <MetaRow k="Duration" v={execution?.durationMs ? `${Math.round(execution.durationMs / 1000)}s` : "—"} />
+          <MetaRow k="Model" v={execution?.model ?? "—"} />
+          <MetaRow k="Tokens" v={execution?.inputTokens != null ? `${execution.inputTokens} in / ${execution.outputTokens ?? 0} out` : "—"} />
+          <MetaRow k="Cost" v={execution?.costUsd != null ? `$${execution.costUsd.toFixed(4)}` : "—"} />
+          <MetaRow k="Tools used" v={toolNames || "—"} />
         </dl>
-      </div>
-    </div>
-  )
-}
-
-function QualityBar({ label, value }: { label: string; value?: number }) {
-  const v = value ?? 0
-  return (
-    <div className="rounded-lg border border-border bg-card p-2.5">
-      <div className="flex items-baseline justify-between">
-        <span className="text-[11px] text-muted-foreground">{label}</span>
-        <span className="font-mono text-[12px] font-medium tabular-nums text-foreground">{value ?? "—"}</span>
-      </div>
-      <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-secondary">
-        <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, v)}%` }} />
       </div>
     </div>
   )
@@ -182,16 +219,5 @@ function MetaRow({ k, v }: { k: string; v: string }) {
       <dt className="shrink-0 text-[11.5px] text-muted-foreground">{k}</dt>
       <dd className="truncate text-right text-[11.5px] text-foreground">{v}</dd>
     </div>
-  )
-}
-
-function StatusDot({ tone, label }: { tone: "good" | "info" | "warn" | "bad" | "muted"; label: string }) {
-  const dot = tone === "good" ? "bg-grow" : tone === "info" ? "bg-primary" : tone === "warn" ? "bg-warn" : tone === "bad" ? "bg-destructive" : "bg-muted-foreground/50"
-  const text = tone === "good" ? "text-grow" : tone === "info" ? "text-primary" : tone === "warn" ? "text-warn" : tone === "bad" ? "text-destructive" : "text-muted-foreground"
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
-      <span className={`font-mono text-[11px] tracking-tight ${text}`}>{label}</span>
-    </span>
   )
 }

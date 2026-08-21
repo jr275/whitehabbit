@@ -70,8 +70,8 @@ export function WorkerOutputCard({
         <MiniStat value={String(summary.tasks)} label="Tasks" />
         <MiniStat value={String(summary.completed)} label="Completed" tone="good" />
         <MiniStat value={String(summary.failed)} label="Failed" tone={summary.failed > 0 ? "bad" : undefined} />
-        <MiniStat value={String(summary.escalated)} label="Escalated" tone={summary.escalated > 0 ? "warn" : undefined} />
-        <MiniStat value={summary.quality ? `${summary.quality}%` : "—"} label="Quality" />
+        <MiniStat value={String(summary.blocked)} label="Blocked" tone={summary.blocked > 0 ? "warn" : undefined} />
+        <MiniStat value={summary.quality != null ? `${summary.quality}%` : "—"} label="Quality" />
       </div>
     </article>
   )

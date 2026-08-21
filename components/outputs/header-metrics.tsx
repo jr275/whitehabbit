@@ -1,6 +1,8 @@
 /* ------------------------------------------------------------------ *
  * Outputs Hub header — "What did my Workers actually do?" answered in
- * six numbers before anything else on the page.
+ * real numbers before anything else on the page. Cost is real (token
+ * usage x a configured rate); everything else is a real count from
+ * the task/execution ledger.
  * ------------------------------------------------------------------ */
 
 import type { HeaderMetrics } from "@/lib/workforce/selectors"
@@ -12,9 +14,9 @@ export function OutputsHeader({ metrics }: { metrics: HeaderMetrics }) {
     { label: "Tasks completed", value: String(metrics.tasksCompleted) },
     { label: "Outputs produced", value: String(metrics.outputsProduced) },
     { label: "Success rate", value: `${metrics.successRate}%` },
-    { label: "Human approvals", value: String(metrics.humanApprovals), tone: metrics.humanApprovals > 0 ? "warn" : undefined },
-    { label: "Escalations", value: String(metrics.escalations), tone: metrics.escalations > 0 ? "warn" : undefined },
+    { label: "Blocked tasks", value: String(metrics.blockedTasks), tone: metrics.blockedTasks > 0 ? "warn" : undefined },
     { label: "Failed tasks", value: String(metrics.failedTasks), tone: metrics.failedTasks > 0 ? "bad" : undefined },
+    { label: "AI cost today", value: metrics.totalCostUsd > 0 ? `$${metrics.totalCostUsd.toFixed(3)}` : "$0.00" },
   ]
 
   return (

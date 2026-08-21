@@ -2,31 +2,28 @@
 
 /* ------------------------------------------------------------------ *
  * Output table — the dense operational ledger: Worker | Task | Output
- * | Channel | Status | Quality | Time. One row per batch (an
- * execution), because that's how the work actually happened; clicking
- * a row opens every individual output inside it.
+ * | Tools | Status | Quality | Time. One row per real execution.
+ * Clicking a row opens the real output it produced (or the real
+ * reason it didn't).
  * ------------------------------------------------------------------ */
 
 import { useMemo, useState } from "react"
-import { SKILL_CATALOG } from "@/lib/workforce/catalog"
+import { SKILL_CATALOG, TOOL_CATALOG } from "@/lib/workforce/catalog"
 import type { Worker, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
-import { OUTPUT_TYPE_META } from "@/lib/workforce/model"
+import { EXECUTION_STATUS_META, OUTPUT_TYPE_META } from "@/lib/workforce/model"
 import { isToday, timeOfDay } from "@/lib/workforce/selectors"
 
 interface Row {
   execution: WorkerExecution
   worker: Worker
   task: WorkerTask
-  unit: string
-  channel: string
-  status: string
-  statusTone: "good" | "info" | "warn" | "bad"
-  quality: number | null
-  time: number
+  output?: WorkerOutput
+  tools: string
   filterGroup: string
+  time: number
 }
 
-const STATUSES = ["Completed", "Published", "In progress", "Awaiting approval", "Failed"] as const
+const STATUSES = ["running", "completed", "blocked", "failed"] as const
 
 export function OutputTable({
   workers,
@@ -43,7 +40,7 @@ export function OutputTable({
 }) {
   const [category, setCategory] = useState("All")
   const [workerFilter, setWorkerFilter] = useState("all")
-  const [statusFilter, setStatusFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState<string>("all")
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = []
@@ -53,41 +50,16 @@ export function OutputTable({
       const task = tasks.find((t) => t.id === e.taskId)
       if (!worker || !task) continue
       const template = SKILL_CATALOG.find((t) => t.id === task.skillId)
-      const matching = outputs.filter((o) => o.executionId === e.id)
-      const channel = matching[0]?.channel ?? "—"
-      const failedCount = matching.filter((o) => o.status === "failed").length
-      const pendingApproval = matching.some((o) => o.approval === "pending")
-      const publishedMost = matching.length > 0 && matching.filter((o) => o.status === "published").length >= matching.length / 2
-
-      let status = "Completed"
-      let statusTone: Row["statusTone"] = "good"
-      if (e.status === "running") {
-        status = "In progress"
-        statusTone = "info"
-      } else if (pendingApproval) {
-        status = "Awaiting approval"
-        statusTone = "warn"
-      } else if (failedCount > 0 && failedCount === matching.length) {
-        status = "Failed"
-        statusTone = "bad"
-      } else if (publishedMost) {
-        status = "Published"
-        statusTone = "good"
-      }
-
-      const quality = matching.length ? Math.round(matching.reduce((s, o) => s + (o.qualityScore ?? 0), 0) / matching.length) : null
-
+      const output = outputs.find((o) => o.executionId === e.id)
+      const tools = template?.requiredTools.map((id) => TOOL_CATALOG.find((t) => t.id === id)?.name ?? id).join(" + ") ?? "—"
       out.push({
         execution: e,
         worker,
         task,
-        unit: template ? `${e.done} ${e.done === 1 ? template.unit.replace(/s$/, "") : template.unit}` : `${e.done}`,
-        channel: String(channel),
-        status,
-        statusTone,
-        quality,
+        output,
+        tools,
+        filterGroup: template ? OUTPUT_TYPE_META[template.outputType]?.filter ?? "Other" : "Other",
         time: e.completedAt ?? e.startedAt,
-        filterGroup: template ? OUTPUT_TYPE_META[template.produces].filter : "Other",
       })
     }
     return out.sort((a, b) => b.time - a.time)
@@ -99,7 +71,7 @@ export function OutputTable({
     (r) =>
       (category === "All" || r.filterGroup === category) &&
       (workerFilter === "all" || r.worker.id === workerFilter) &&
-      (statusFilter === "all" || r.status === statusFilter),
+      (statusFilter === "all" || r.execution.status === statusFilter),
   )
 
   return (
@@ -130,7 +102,7 @@ export function OutputTable({
           <option value="all">All statuses</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
-              {s}
+              {EXECUTION_STATUS_META[s].label}
             </option>
           ))}
         </select>
@@ -141,7 +113,7 @@ export function OutputTable({
         <table className="w-full min-w-[640px] border-collapse text-left">
           <thead>
             <tr className="border-b border-border bg-secondary/40">
-              {["Worker", "Task", "Output", "Channel", "Status", "Quality", "Time"].map((h) => (
+              {["Worker", "Task", "Output", "Tools", "Status", "Quality", "Time"].map((h) => (
                 <th key={h} className="px-4 py-2.5 font-mono text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                   {h}
                 </th>
@@ -162,13 +134,15 @@ export function OutputTable({
                   </span>
                 </td>
                 <td className="px-4 py-2.5 text-[13px] text-foreground">{r.task.title}</td>
-                <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[12.5px] text-foreground">{r.unit}</td>
-                <td className="whitespace-nowrap px-4 py-2.5 text-[12.5px] capitalize text-muted-foreground">{r.channel}</td>
+                <td className="max-w-xs truncate px-4 py-2.5 text-[12.5px] text-foreground">
+                  {r.output?.title ?? (r.execution.status === "running" ? "…" : r.execution.blockedReason ? "No output" : "—")}
+                </td>
+                <td className="whitespace-nowrap px-4 py-2.5 text-[12px] text-muted-foreground">{r.tools}</td>
                 <td className="whitespace-nowrap px-4 py-2.5">
-                  <StatusPill tone={r.statusTone} label={r.status} />
+                  <StatusPill status={r.execution.status} />
                 </td>
                 <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[12.5px] tabular-nums text-foreground">
-                  {r.quality != null ? `${r.quality}%` : "—"}
+                  {r.output?.qualityScore != null ? `${r.output.qualityScore}%` : "—"}
                 </td>
                 <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[12px] text-muted-foreground">{timeOfDay(r.time)}</td>
               </tr>
@@ -176,7 +150,7 @@ export function OutputTable({
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-[13px] text-muted-foreground">
-                  No outputs match these filters.
+                  No executions match these filters.
                 </td>
               </tr>
             )}
@@ -187,8 +161,9 @@ export function OutputTable({
   )
 }
 
-function StatusPill({ tone, label }: { tone: "good" | "info" | "warn" | "bad"; label: string }) {
+function StatusPill({ status }: { status: WorkerExecution["status"] }) {
+  const meta = EXECUTION_STATUS_META[status]
   const cls =
-    tone === "good" ? "text-grow bg-grow/10" : tone === "info" ? "text-primary bg-primary/10" : tone === "warn" ? "text-warn bg-warn/10" : "text-destructive bg-destructive/10"
-  return <span className={`inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${cls}`}>{label}</span>
+    meta.tone === "good" ? "text-grow bg-grow/10" : meta.tone === "info" ? "text-primary bg-primary/10" : meta.tone === "warn" ? "text-warn bg-warn/10" : "text-destructive bg-destructive/10"
+  return <span className={`inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${cls}`}>{meta.label}</span>
 }

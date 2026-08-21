@@ -3,36 +3,43 @@
 /* ------------------------------------------------------------------ *
  * WORKER CANVAS (center zone) — the living worker, structurally.
  * Not a node editor: the worker's skill categories, how ready it is,
- * and — the moment you click Run Worker — real, watchable execution
- * streams. This is the hero of Studio.
+ * and — the moment you click Run Worker — the real execution stage as
+ * it actually happens (not a fake percentage tick).
  * ------------------------------------------------------------------ */
 
 import { Loader2, Play } from "lucide-react"
 import { SKILL_CATALOG } from "@/lib/workforce/catalog"
-import { SKILL_CATEGORIES, SKILL_CATEGORY_LABEL, type SkillCategory, type Worker, type WorkerExecution } from "@/lib/workforce/model"
-import { computeReadiness } from "@/lib/workforce/selectors"
+import { SKILL_CATEGORIES, SKILL_CATEGORY_LABEL, type SkillCategory, type Worker, type WorkerEvent, type WorkerExecution, type WorkerTask } from "@/lib/workforce/model"
+import { activeWork, computeReadiness } from "@/lib/workforce/selectors"
 import { workforceStore } from "@/lib/workforce/store"
 
 const CATEGORY_HINT: Record<SkillCategory, string> = {
-  research: "Finds and verifies signal",
-  content: "Writes and creates",
-  communication: "Replies and converses",
+  research: "Finds and verifies real signal",
+  content: "Analyzes what's actually working",
+  communication: "Reads real audience response",
   sales: "Scores and advances pipeline",
 }
 
 export function WorkerCanvas({
   worker,
+  tasks,
   executions,
+  events,
   running,
 }: {
   worker: Worker
+  tasks: WorkerTask[]
   executions: WorkerExecution[]
+  events: WorkerEvent[]
   running: boolean
 }) {
   const readiness = computeReadiness(worker)
   const released = worker.status !== "draft"
+  // a real blocker is shown as context, not a reason to prevent the
+  // attempt — running anyway is how the user sees the real, honest
+  // BLOCKED state instead of being told about it secondhand.
   const canRun = released && !running && worker.skills.some((s) => s.enabled)
-  const activeExecutions = executions.filter((e) => e.workerId === worker.id && e.status === "running")
+  const active = activeWork([worker], executions, tasks, events).filter((a) => a.workerId === worker.id)
 
   return (
     <div className="flex h-full flex-col">
@@ -57,12 +64,9 @@ export function WorkerCanvas({
         <div className="relative mx-auto mt-10 max-w-xl">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {SKILL_CATEGORIES.map((cat) => {
-              const skills = worker.skills.filter((s) => s.category === cat)
-              const enabledCount = skills.filter((s) => s.enabled).length
-              const categoryTaskTitles = new Set(
-                skills.filter((s) => s.enabled).map((s) => SKILL_CATALOG.find((t) => t.id === s.id)?.taskTitle),
-              )
-              const streamActive = activeExecutions.some((e) => categoryTaskTitles.has(e.label))
+              const catSkills = worker.skills.filter((s) => s.category === cat)
+              const enabledCount = catSkills.filter((s) => s.enabled).length
+              const streamActive = active.some((a) => catSkills.some((s) => s.enabled && SKILL_CATALOG.find((t) => t.id === s.id)?.taskTitle === a.taskTitle))
               return (
                 <div
                   key={cat}
@@ -104,27 +108,33 @@ export function WorkerCanvas({
               </div>
             ))}
           </dl>
+          {readiness.blockers.length > 0 && (
+            <div className="mt-3 rounded-lg border border-warn/30 bg-warn/5 px-3 py-2">
+              <p className="font-mono text-[9.5px] uppercase tracking-wider text-warn">Cannot run</p>
+              {readiness.blockers.map((b) => (
+                <p key={b} className="mt-1 text-[11.5px] text-foreground">
+                  {b}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* live execution streams */}
-        {activeExecutions.length > 0 && (
+        {/* live execution — the real stage, not a fake percentage */}
+        {active.length > 0 && (
           <div className="mx-auto mt-6 max-w-xl rounded-xl border border-primary/25 bg-primary/[0.03] p-4">
             <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-primary">
               <Loader2 className="h-3 w-3 animate-spin" />
               {worker.identity.name} is working…
             </div>
             <div className="mt-3 flex flex-col gap-3">
-              {activeExecutions.map((e) => (
-                <div key={e.id}>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-[12.5px] text-foreground">{e.label}</span>
-                    <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                      {e.done} / {e.target}
-                    </span>
+              {active.map((a) => (
+                <div key={a.executionId} className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[12.5px] text-foreground">{a.taskTitle}</p>
+                    <p className="text-[11px] text-muted-foreground">{a.stage}</p>
                   </div>
-                  <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
-                    <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${e.progress}%` }} />
-                  </div>
+                  <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{a.elapsedSeconds}s</span>
                 </div>
               ))}
             </div>

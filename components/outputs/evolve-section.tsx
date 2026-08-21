@@ -2,31 +2,32 @@
 
 /* ------------------------------------------------------------------ *
  * Evolve — capabilities (what a worker CAN do) vs. outputs (what it
- * DID) stay strictly separate here. The recommendation below is
- * computed live from real output history, never a hand-typed insight.
+ * DID) stay strictly separate. Both read the real `metrics` table; a
+ * category with no real executions yet reports as unmeasured, never
+ * as an invented number or a silent zero.
  * ------------------------------------------------------------------ */
 
 import { Check, Dna } from "lucide-react"
 import { useState } from "react"
 import { capabilityScores, recommendEvolution } from "@/lib/workforce/evolution"
-import type { Worker, WorkerOutput } from "@/lib/workforce/model"
+import type { MetricRecord, Worker } from "@/lib/workforce/model"
 
-export function EvolveSection({ workers, outputs }: { workers: Worker[]; outputs: WorkerOutput[] }) {
+export function EvolveSection({ workers, metrics }: { workers: Worker[]; metrics: MetricRecord[] }) {
   return (
     <section>
       <h2 className="mb-3 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-foreground">Evolve</h2>
       <div className="grid gap-4 lg:grid-cols-2">
         {workers.map((w) => (
-          <WorkerEvolveCard key={w.id} worker={w} outputs={outputs} />
+          <WorkerEvolveCard key={w.id} worker={w} metrics={metrics} />
         ))}
       </div>
     </section>
   )
 }
 
-function WorkerEvolveCard({ worker, outputs }: { worker: Worker; outputs: WorkerOutput[] }) {
-  const capabilities = capabilityScores(worker, outputs)
-  const evolution = recommendEvolution(worker, outputs)
+function WorkerEvolveCard({ worker, metrics }: { worker: Worker; metrics: MetricRecord[] }) {
+  const capabilities = capabilityScores(worker, metrics)
+  const evolution = recommendEvolution(worker, metrics)
   const [trained, setTrained] = useState(false)
 
   return (
@@ -38,40 +39,40 @@ function WorkerEvolveCard({ worker, outputs }: { worker: Worker; outputs: Worker
         <span className="text-[13px] font-semibold text-foreground">{worker.identity.name}</span>
       </div>
 
-      {/* capabilities — what it CAN do */}
+      {/* capabilities — what it CAN do, only shown when real data exists */}
       <div className="mt-3">
         <p className="mb-1.5 font-mono text-[9.5px] uppercase tracking-wider text-muted-foreground">Capabilities</p>
-        <div className="flex flex-col gap-1.5">
-          {capabilities.map((c) => (
-            <div key={c.label} className="flex items-center gap-2">
-              <span className="w-24 shrink-0 text-[11.5px] text-muted-foreground">{c.label}</span>
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary">
-                <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, c.score)}%` }} />
+        {capabilities.length === 0 ? (
+          <p className="text-[11.5px] text-muted-foreground">No enabled skills yet.</p>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {capabilities.map((c) => (
+              <div key={c.label} className="flex items-center gap-2">
+                <span className="w-24 shrink-0 text-[11.5px] text-muted-foreground">{c.label}</span>
+                {c.score == null ? (
+                  <span className="flex-1 text-[10.5px] italic text-muted-foreground/70">Not yet measured — run this worker</span>
+                ) : (
+                  <>
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, c.score)}%` }} />
+                    </div>
+                    <span className="w-7 shrink-0 text-right font-mono text-[11px] tabular-nums text-foreground">{c.score}</span>
+                  </>
+                )}
               </div>
-              <span className="w-7 shrink-0 text-right font-mono text-[11px] tabular-nums text-foreground">{c.score}</span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* evolution opportunity — from output performance */}
+      {/* evolution opportunity — from real, sufficient output history only */}
       {evolution ? (
         <div className="mt-4 rounded-lg border border-primary/25 bg-primary/[0.04] p-3.5">
           <p className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-primary">Evolution opportunity</p>
           <p className="mt-1.5 text-[13px] font-medium text-foreground">{evolution.label}</p>
-          <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-            {evolution.completed} {evolution.label.toLowerCase()} tasks completed
-          </p>
-          <div className="mt-2.5 grid grid-cols-2 gap-2 text-[11.5px]">
-            <span className="text-muted-foreground">
-              Average quality <span className="font-mono text-foreground">{evolution.avgQuality}%</span>
-            </span>
-            <span className="text-muted-foreground">
-              Failure rate <span className="font-mono text-foreground">{evolution.failureRate}%</span>
-            </span>
-          </div>
+          <p className="mt-0.5 text-[11.5px] text-muted-foreground">{evolution.sampleSize} real executions measured</p>
           <p className="mt-2 text-[11.5px] text-muted-foreground">
-            Most common issue: <span className="text-foreground">{evolution.issue}</span>
+            Average quality <span className="font-mono text-foreground">{evolution.avgQuality}%</span>
           </p>
           <p className="mt-1 text-[11.5px] text-muted-foreground">
             Recommended training: <span className="text-foreground">{evolution.training}</span>
@@ -96,7 +97,9 @@ function WorkerEvolveCard({ worker, outputs }: { worker: Worker; outputs: Worker
           </button>
         </div>
       ) : (
-        <p className="mt-4 text-[11.5px] text-muted-foreground">No evolution opportunities right now — every capability is performing well.</p>
+        <p className="mt-4 text-[11.5px] text-muted-foreground">
+          {capabilities.some((c) => c.score != null) ? "Every measured capability is performing well." : "Run this worker a few times to unlock evolution recommendations."}
+        </p>
       )}
     </article>
   )

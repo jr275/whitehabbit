@@ -19,7 +19,10 @@ export function ActivityTimeline({ entries, onOpen }: { entries: TimelineEntry[]
             <li key={e.id}>
               <button onClick={() => onOpen(e.executionId)} className="flex w-full items-center gap-4 px-4 py-2.5 text-left transition-colors hover:bg-secondary/40">
                 <span className="w-14 shrink-0 font-mono text-[11.5px] tabular-nums text-muted-foreground">{timeOfDay(e.ts)}</span>
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: e.accent }} />
+                <span
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${e.tone === "bad" ? "bg-destructive" : e.tone === "warn" ? "bg-warn" : ""}`}
+                  style={e.tone === "good" ? { backgroundColor: e.accent } : undefined}
+                />
                 <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{e.text}</span>
               </button>
             </li>

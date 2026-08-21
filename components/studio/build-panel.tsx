@@ -16,7 +16,7 @@ import { Check, Loader2, Plus, Rocket, Trash2, X } from "lucide-react"
 import { useState } from "react"
 import { BEHAVIOR_PRESETS, CHANNEL_CATALOG, KNOWLEDGE_TEMPLATES, SKILL_CATALOG, TONE_PRESETS, TOOL_CATALOG } from "@/lib/workforce/catalog"
 import type { Autonomy, ChannelId, SkillCategory, Worker } from "@/lib/workforce/model"
-import { SKILL_CATEGORIES, SKILL_CATEGORY_LABEL } from "@/lib/workforce/model"
+import { OUTCOME_PRESETS, SKILL_CATEGORIES, SKILL_CATEGORY_LABEL } from "@/lib/workforce/model"
 import { computeReadiness } from "@/lib/workforce/selectors"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
@@ -287,7 +287,73 @@ function MissionStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => v
           className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
         />
       </div>
+
+      <OutcomeEditor worker={worker} />
+
       <Continue onClick={onAdvance} />
+    </div>
+  )
+}
+
+/* ---- what outcome should this worker produce? ---- */
+function OutcomeEditor({ worker }: { worker: Worker }) {
+  const [secondary, setSecondary] = useState("")
+  return (
+    <div className="rounded-lg border border-border bg-card p-3">
+      <SmallLabel>What outcome should this worker produce?</SmallLabel>
+      <div className="flex flex-wrap gap-1.5">
+        {OUTCOME_PRESETS.map((p) => {
+          const active = worker.outcome.primaryKPI === p.primaryKPI
+          return (
+            <button
+              key={p.vertical}
+              onClick={() => workforceStore.setOutcome(worker.id, { primaryKPI: p.primaryKPI, secondaryKPIs: p.secondaryKPIs })}
+              className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
+                active ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {p.vertical} · {p.primaryKPI}
+            </button>
+          )
+        })}
+      </div>
+      <div className="mt-2.5 flex flex-col gap-1.5">
+        <Field label="Primary KPI">
+          <input
+            value={worker.outcome.primaryKPI}
+            onChange={(e) => workforceStore.setOutcome(worker.id, { primaryKPI: e.target.value })}
+            placeholder="Qualified Leads"
+            className="modal-input"
+          />
+        </Field>
+        <Field label="Secondary KPIs">
+          <div className="flex flex-wrap gap-1.5">
+            {worker.outcome.secondaryKPIs.map((kpi) => (
+              <span key={kpi} className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary px-2 py-1 text-[11px] text-foreground">
+                {kpi}
+                <button
+                  onClick={() => workforceStore.setOutcome(worker.id, { secondaryKPIs: worker.outcome.secondaryKPIs.filter((k) => k !== kpi) })}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+            <input
+              value={secondary}
+              onChange={(e) => setSecondary(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && secondary.trim()) {
+                  workforceStore.setOutcome(worker.id, { secondaryKPIs: [...worker.outcome.secondaryKPIs, secondary.trim()] })
+                  setSecondary("")
+                }
+              }}
+              placeholder="Add a KPI…"
+              className="min-w-[6rem] flex-1 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground"
+            />
+          </div>
+        </Field>
+      </div>
     </div>
   )
 }
@@ -375,7 +441,10 @@ function SkillsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => vo
   )
 }
 
-/* ---- 05 Tools ---- */
+/* ---- 05 Tools — `enabled` is a permission the user grants; `connected`
+ * is a REAL fact the server computes (env var / credential present).
+ * Toggling the switch never fakes a connection — a tool the worker is
+ * permitted to use can still show "Not connected" until it really is. */
 function ToolsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => void }) {
   return (
     <div className="flex flex-col gap-2">
@@ -384,29 +453,16 @@ function ToolsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => voi
         return (
           <div key={tool.id} className="rounded-lg border border-border bg-card px-2.5 py-2">
             <button onClick={() => workforceStore.toggleTool(worker.id, tool.id)} className="flex w-full items-center gap-2">
-              <Switch on={tool.connected} />
-              <span className={`flex-1 text-left text-[12.5px] font-medium ${tool.connected ? "text-foreground" : "text-muted-foreground"}`}>
+              <Switch on={tool.enabled} />
+              <span className={`flex-1 text-left text-[12.5px] font-medium ${tool.enabled ? "text-foreground" : "text-muted-foreground"}`}>
                 {tool.name}
               </span>
               <RiskTag risk={tool.risk} />
             </button>
-            {tool.connected && (
-              <div className="mt-2 flex flex-col gap-1 border-t border-border/70 pt-2">
-                {tool.actions.map((a) => (
-                  <button
-                    key={a.id}
-                    onClick={() => workforceStore.toggleToolAction(worker.id, tool.id, a.id)}
-                    className="flex items-center gap-1.5 text-[11.5px]"
-                  >
-                    <Check className={`h-3 w-3 ${a.enabled ? "text-grow" : "text-muted-foreground/30"}`} />
-                    <span className={a.enabled ? "text-foreground" : "text-muted-foreground"}>{a.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            {!tool.connected && template && (
-              <p className="mt-1 pl-[1.625rem] text-[11px] text-muted-foreground">{template.actions.join(" · ")}</p>
-            )}
+            <div className="mt-1.5 flex items-center justify-between pl-[1.625rem]">
+              <p className="text-[11px] text-muted-foreground">{template?.description}</p>
+              <ConnectionTag connected={tool.connected} reason={tool.notConnectedReason} />
+            </div>
           </div>
         )
       })}
@@ -415,8 +471,23 @@ function ToolsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => voi
   )
 }
 
-function RiskTag({ risk }: { risk: "low" | "medium" | "high" }) {
-  const cls = risk === "high" ? "text-destructive bg-destructive/10" : risk === "medium" ? "text-warn bg-warn/10" : "text-grow bg-grow/10"
+function ConnectionTag({ connected, reason }: { connected: boolean; reason?: string }) {
+  if (connected) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[9px] uppercase tracking-wider text-grow">
+        <Check className="h-2.5 w-2.5" /> Connected
+      </span>
+    )
+  }
+  return (
+    <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-warn" title={reason}>
+      Not connected
+    </span>
+  )
+}
+
+function RiskTag({ risk }: { risk: "low" | "medium" | "high" | "critical" }) {
+  const cls = risk === "critical" || risk === "high" ? "text-destructive bg-destructive/10" : risk === "medium" ? "text-warn bg-warn/10" : "text-grow bg-grow/10"
   return <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider ${cls}`}>{risk}</span>
 }
 

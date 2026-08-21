@@ -14,3 +14,7 @@ node_modules
 .next/
 .DS_Store
 *.tsbuildinfo
+
+# Local SQLite persistence
+data/
+*.sqlite3
