@@ -10,11 +10,13 @@
 
 import { AnimatePresence, motion } from "framer-motion"
 import { Sparkles } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { studioStore } from "@/lib/worker/worker-state"
 import { ApprovalPanel } from "@/components/approval-panel"
 import { CapabilityPanel } from "@/components/capability-panel"
 import { CommandBar } from "@/components/command-bar"
-import { CreateOverlay, ASSEMBLY_STEPS } from "@/components/create-overlay"
+import { CreateOverlay } from "@/components/create-overlay"
 import { EventInspector } from "@/components/event-inspector"
 import { EvolveDrawer } from "@/components/evolve-drawer"
 import { ExplainPanel } from "@/components/explain-panel"
@@ -59,6 +61,7 @@ const MODE_CAMERA: Record<FabricMode, Camera> = {
 }
 
 export default function Page() {
+  const router = useRouter()
   const [phase, setPhase] = useState<Phase>("create")
   const [objective, setObjective] = useState("")
   const [assemblyStep, setAssemblyStep] = useState(0)
@@ -111,27 +114,17 @@ export default function Page() {
       .map((e) => ({ id: e.id, text: e.narrative as string }))
   }, [sim.log, sim.exec])
 
-  /* -------------------- CREATE -> cinematic birth -------------------- */
-  const handleAssemble = useCallback((obj: string) => {
-    setObjective(obj)
-    setPhase("assembling")
-    setAssemblyStep(0)
-    setRevealCount(0)
-
-    ASSEMBLY_STEPS.forEach((s, i) => {
-      setTimeout(() => {
-        setAssemblyStep(i)
-        setRevealCount(s.reveal === 999 ? 999 : s.reveal + 1)
-      }, 500 + i * 460)
-    })
-
-    const total = 500 + ASSEMBLY_STEPS.length * 460
-    setTimeout(() => {
-      setRevealCount(999)
-      setPhase("live")
-      setMode("watch")
-    }, total + 500)
-  }, [])
+  /* -------------------- CREATE -> real Worker Studio -------------------- *
+   * The objective becomes a real Worker in the store, then we transition
+   * into the Studio (/studio). No fake in-place assembly — the worker is
+   * built, released, and run for real over there. */
+  const handleAssemble = useCallback(
+    (obj: string) => {
+      studioStore.createWorker(obj)
+      router.push("/studio")
+    },
+    [router],
+  )
 
   /* ------------------------- interactions ---------------------------- */
   const openTeach = useCallback((seed: string) => {

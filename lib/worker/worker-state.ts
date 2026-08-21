@@ -167,6 +167,7 @@ class StudioStore {
       createdAt: Date.now(),
     }
     this.set({
+      hydrated: true,
       worker,
       buildStatus: "idle",
       buildSteps: [],
