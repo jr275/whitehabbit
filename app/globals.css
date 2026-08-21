@@ -243,6 +243,26 @@
   .text-balance {
     text-wrap: balance;
   }
+  /* shared field style for operational-surface inputs & textareas */
+  .modal-input {
+    width: 100%;
+    border-radius: calc(var(--radius) - 2px);
+    border: 1px solid var(--border);
+    background-color: var(--card);
+    color: var(--foreground);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .modal-input::placeholder {
+    color: var(--muted-foreground);
+  }
+  .modal-input:focus-visible {
+    border-color: var(--ring);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 18%, transparent);
+  }
 }
 
 /* thin dark scrollbars for the trace log */
