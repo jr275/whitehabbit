@@ -43,6 +43,7 @@ import {
   explain,
   type ExplainAnswer,
   type FabricMode,
+  IDENTITY,
   type Interaction,
   type WorkerEvent,
 } from "@/lib/worker"
@@ -420,11 +421,13 @@ export default function Page() {
           {phase === "live" && identityOpen && (
             <WorkerIdentity
               key="identity"
-              worker={worker}
+              status={sim.workerStatus}
+              activeCount={activeCount}
+              autonomy={IDENTITY.autonomy}
               onClose={() => setIdentityOpen(false)}
-              onInspectCapability={(id) => {
+              onTeach={() => {
                 setIdentityOpen(false)
-                handleSelectCapability(id)
+                openTeach("")
               }}
               onEvolve={() => {
                 setIdentityOpen(false)
@@ -436,9 +439,17 @@ export default function Page() {
             <CapabilityPanel
               key={`cap-${inspectCap}`}
               capId={inspectCap}
-              cap={caps.find((c) => c.id === inspectCap)!}
+              cap={caps.find((c) => c.id === inspectCap)}
               onClose={() => handleSelectCapability(null)}
+              onTeach={(id) => {
+                handleSelectCapability(null)
+                openTeach(`Improve ${caps.find((c) => c.id === id)?.name ?? "capability"}: `)
+              }}
               onEvolve={() => jumpToEvolve(inspectCap)}
+              onTrace={() => {
+                handleSelectCapability(null)
+                changeMode("trace")
+              }}
             />
           )}
           {phase === "live" && explainAnswer && (
@@ -457,15 +468,25 @@ export default function Page() {
         </AnimatePresence>
       </div>
 
-      {/* APPROVAL — the worker pauses and waits for its manager */}
+      {/* APPROVAL — the worker pauses and waits for its manager.
+          A centered spotlight with a soft backdrop; the fabric dims
+          behind it so the whole environment defers to the decision. */}
       <AnimatePresence>
         {phase === "live" && sim.approval && (
-          <ApprovalPanel
-            key={sim.approval.taskId}
-            approval={sim.approval}
-            onApprove={sim.approve}
-            onReject={sim.reject}
-          />
+          <motion.div
+            key="approval-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="absolute inset-0 z-50 flex items-center justify-center bg-background/40 px-5 backdrop-blur-[2px]"
+          >
+            <ApprovalPanel
+              approval={sim.approval}
+              onApprove={sim.approve}
+              onReject={sim.reject}
+            />
+          </motion.div>
         )}
       </AnimatePresence>
 
