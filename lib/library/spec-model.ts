@@ -131,6 +131,26 @@ export function countSkills(clusters: SkillCluster[]): number {
   return clusters.reduce((n, c) => n + c.skills.length, 0)
 }
 
+/** Human labels for customizable dot-paths (WORKER READY summary). */
+export const FIELD_LABELS: Record<string, string> = {
+  codename: "Worker name",
+  role: "Role",
+  mission: "Mission",
+  industry: "Industry focus",
+  businessModel: "Business model",
+  targetAudience: "Target audience",
+  brandVoice: "Brand voice",
+  communicationStyle: "Communication style",
+  activeSpecializationId: "Specialization",
+  specializations: "Focus skills",
+  knowledgeSources: "Knowledge sources",
+  tools: "Tool permissions",
+  kpis: "Success metrics",
+  autonomy: "Autonomy level",
+  approvalPolicy: "Approval policy",
+  riskPolicy: "Risk policy",
+}
+
 export const AUTONOMY_COPY: Record<Autonomy, { label: string; blurb: string }> = {
   low: { label: "Recommend only", blurb: "Proposes; a human executes everything" },
   medium: { label: "Act with approval", blurb: "Acts on low-risk work, asks before consequential moves" },
