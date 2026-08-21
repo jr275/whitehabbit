@@ -115,7 +115,12 @@ export default function StudioPage() {
     <BuilderShell>
       <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
         {/* hero: the living character */}
-        <IdentityHero worker={worker} performance={performance} fabric={fabric} />
+        <IdentityHero
+          worker={worker}
+          performance={performance}
+          fabric={fabric}
+          highlightCategory={hoverCategory}
+        />
 
         {/* the two build columns: who it is + how it grows */}
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
@@ -126,7 +131,13 @@ export default function StudioPage() {
           </aside>
 
           <section>
-            <SkillTree worker={worker} performance={performance} />
+            <SkillTree
+              worker={worker}
+              onHoverCategory={setHoverCategory}
+              onUpgrade={() => {
+                /* store opens the upgrade moment via lastUpgrade */
+              }}
+            />
           </section>
         </div>
       </div>

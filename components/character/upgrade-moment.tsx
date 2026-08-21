@@ -131,9 +131,9 @@ export function UpgradeMoment({
                   <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-grow">
                     new ability unlocked
                   </p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{result.newCapability.name}</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">{result.newCapability.capability}</p>
                   <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                    {result.newCapability.description}
+                    {result.newCapability.abilities.join(" · ")}
                   </p>
                 </motion.div>
               )}
