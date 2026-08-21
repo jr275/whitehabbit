@@ -29,8 +29,9 @@ export function EvolveDrawer({
   const [stage, setStage] = useState<Stage>("analyzing")
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
 
-  // weakest capability is the evolution candidate
-  const target = [...caps].sort((a, b) => a.score - b.score)[0]
+  // weakest capability is the evolution candidate — frozen on open so the
+  // proposal and the applied confirmation always describe the same target
+  const [target] = useState(() => [...caps].sort((a, b) => a.score - b.score)[0])
   const nextScore = Math.min(100, target.score + GAIN)
 
   useEffect(() => {
