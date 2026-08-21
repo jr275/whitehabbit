@@ -85,12 +85,13 @@ export function updateTaskStatus(id: string, status: WorkerTask["status"]) {
 export function insertExecution(exec: WorkerExecution) {
   const db = getDb()
   db.prepare(
-    "INSERT INTO executions (id, worker_id, task_id, status, blocked_reason, started_at, completed_at, duration_ms, cost_usd, input_tokens, output_tokens, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO executions (id, worker_id, task_id, status, reason_code, blocked_reason, started_at, completed_at, duration_ms, cost_usd, input_tokens, output_tokens, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     exec.id,
     exec.workerId,
     exec.taskId,
     exec.status,
+    exec.reasonCode ?? null,
     exec.blockedReason ?? null,
     exec.startedAt,
     exec.completedAt ?? null,
@@ -106,6 +107,7 @@ export function finalizeExecution(
   id: string,
   patch: {
     status: WorkerExecution["status"]
+    reasonCode?: WorkerExecution["reasonCode"]
     blockedReason?: string
     completedAt: number
     durationMs: number
@@ -117,9 +119,10 @@ export function finalizeExecution(
 ) {
   const db = getDb()
   db.prepare(
-    "UPDATE executions SET status = ?, blocked_reason = ?, completed_at = ?, duration_ms = ?, cost_usd = ?, input_tokens = ?, output_tokens = ?, model = ? WHERE id = ?",
+    "UPDATE executions SET status = ?, reason_code = ?, blocked_reason = ?, completed_at = ?, duration_ms = ?, cost_usd = ?, input_tokens = ?, output_tokens = ?, model = ? WHERE id = ?",
   ).run(
     patch.status,
+    patch.reasonCode ?? null,
     patch.blockedReason ?? null,
     patch.completedAt,
     patch.durationMs,
@@ -225,6 +228,7 @@ export function getBootstrapState(orgId: string = DEFAULT_ORG_ID): BootstrapStat
     workerId: r.worker_id,
     taskId: r.task_id,
     status: r.status,
+    reasonCode: r.reason_code ?? undefined,
     blockedReason: r.blocked_reason ?? undefined,
     startedAt: r.started_at,
     completedAt: r.completed_at ?? null,

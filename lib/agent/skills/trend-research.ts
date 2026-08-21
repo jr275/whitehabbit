@@ -14,7 +14,7 @@ import "server-only"
  * ================================================================== */
 
 import type { SkillDefinition, SkillEvaluation, SkillExecutionResult } from "@/lib/agent/types"
-import { SkillBlockedError } from "@/lib/agent/types"
+import { InvalidCredentialError, ProviderError, SkillBlockedError } from "@/lib/agent/types"
 
 interface TrendItem {
   name: string
@@ -91,7 +91,7 @@ export const trendResearchSkill: SkillDefinition = {
     const searchResult = await searchAction.run({ query, limit: 10 }, toolCtx)
     if (!searchResult.ok) {
       if (searchResult.blocked) throw new SkillBlockedError(searchResult.blockedReason ?? "Web Search is blocked.")
-      throw new Error(searchResult.error ?? "Web search failed.")
+      throw new ProviderError(searchResult.error ?? "Web search failed.")
     }
     const searchData = searchResult.data as { results: { title: string; url: string; provider: string; snippet?: string }[] }
     ctx.emit("tool_completed", { tool: search.id, durationMs: searchResult.durationMs, resultCount: searchData.results.length })
@@ -104,7 +104,8 @@ export const trendResearchSkill: SkillDefinition = {
     const llmResult = await analyzeAction.run({ system: SYSTEM_PROMPT, prompt: buildPrompt(query, searchData.results), maxTokens: 2000 }, toolCtx)
     if (!llmResult.ok) {
       if (llmResult.blocked) throw new SkillBlockedError(llmResult.blockedReason ?? "LLM is blocked.")
-      throw new Error(llmResult.error ?? "LLM analysis failed.")
+      if (llmResult.errorCode === "invalid_credential") throw new InvalidCredentialError(llmResult.error ?? "The configured LLM credential was rejected.")
+      throw new ProviderError(llmResult.error ?? "LLM analysis failed.")
     }
     const llmData = llmResult.data as { text: string; model: string; inputTokens: number; outputTokens: number }
     ctx.emit("reasoning_completed", { durationMs: llmResult.durationMs, inputTokens: llmData.inputTokens, outputTokens: llmData.outputTokens })

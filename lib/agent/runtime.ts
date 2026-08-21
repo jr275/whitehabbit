@@ -22,8 +22,8 @@ import { randomUUID } from "node:crypto"
 import { llmCostUsd } from "@/lib/agent/cost"
 import { getSkill } from "@/lib/agent/skills/registry"
 import { toolsMap } from "@/lib/agent/tools/registry"
-import type { RuntimeEventType, SkillExecutionResult } from "@/lib/agent/types"
-import { SkillBlockedError } from "@/lib/agent/types"
+import type { ExecutionReasonCode, RuntimeEventType, SkillExecutionResult } from "@/lib/agent/types"
+import { InvalidCredentialError, ProviderError, SkillBlockedError } from "@/lib/agent/types"
 import * as repo from "@/lib/db/repo"
 import type {
   MetricRecord,
@@ -176,15 +176,20 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
     } catch (err) {
       const completedAt = Date.now()
       const durationMs = completedAt - execution.startedAt
+      // structured, distinguishable failure — never a swallowed generic
+      // error. `reasonCode` is what the UI branches on to decide between
+      // "credential required" vs "the provider failed" vs "this run's
+      // own logic broke" — never inferred from string-matching a message.
       if (err instanceof SkillBlockedError) {
-        repo.finalizeExecution(execution.id, { status: "blocked", blockedReason: err.reason, completedAt, durationMs })
+        repo.finalizeExecution(execution.id, { status: "blocked", reasonCode: err.code, blockedReason: err.reason, completedAt, durationMs })
         repo.updateTaskStatus(task.id, "blocked")
-        emit("task_blocked", { reason: err.reason })
+        emit("task_blocked", { reason: err.reason, reasonCode: err.code })
       } else {
+        const reasonCode: ExecutionReasonCode = err instanceof InvalidCredentialError || err instanceof ProviderError ? err.code : "execution_error"
         const message = err instanceof Error ? err.message : "Task failed for an unknown reason."
-        repo.finalizeExecution(execution.id, { status: "failed", blockedReason: message, completedAt, durationMs })
+        repo.finalizeExecution(execution.id, { status: "failed", reasonCode, blockedReason: message, completedAt, durationMs })
         repo.updateTaskStatus(task.id, "failed")
-        emit("task_failed", { reason: message })
+        emit("task_failed", { reason: message, reasonCode })
       }
     } finally {
       queue.close()

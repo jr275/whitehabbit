@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS executions (
   worker_id TEXT NOT NULL REFERENCES workers(id),
   task_id TEXT NOT NULL REFERENCES tasks(id),
   status TEXT NOT NULL,          -- running | completed | failed | blocked
+  reason_code TEXT,              -- missing_credential | invalid_credential | provider_error | execution_error
   blocked_reason TEXT,
   started_at INTEGER NOT NULL,
   completed_at INTEGER,

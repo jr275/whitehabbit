@@ -32,6 +32,8 @@ export function isLlmConnected(): boolean {
   return !!process.env.ANTHROPIC_API_KEY
 }
 
+export const NOT_CONFIGURED_REASON = "Configure ANTHROPIC_API_KEY to run this worker."
+
 export async function callLlm(input: LlmCallInput): Promise<ToolActionResult<LlmCallOutput>> {
   const started = Date.now()
   const key = process.env.ANTHROPIC_API_KEY
@@ -39,7 +41,7 @@ export async function callLlm(input: LlmCallInput): Promise<ToolActionResult<Llm
     return {
       ok: false,
       blocked: true,
-      blockedReason: "LLM API key not configured — set ANTHROPIC_API_KEY to enable real analysis.",
+      blockedReason: NOT_CONFIGURED_REASON,
       durationMs: Date.now() - started,
     }
   }
@@ -63,9 +65,15 @@ export async function callLlm(input: LlmCallInput): Promise<ToolActionResult<Llm
 
     if (!res.ok) {
       const body = await res.text().catch(() => "")
+      // 401/403 with a key present means the provider rejected the
+      // credential itself — distinct from a 5xx/other provider fault.
+      const invalidCredential = res.status === 401 || res.status === 403
       return {
         ok: false,
-        error: `Anthropic API returned ${res.status}: ${body.slice(0, 300)}`,
+        errorCode: invalidCredential ? "invalid_credential" : "provider_error",
+        error: invalidCredential
+          ? `Anthropic rejected the configured API key (${res.status}).`
+          : `Anthropic API returned ${res.status}: ${body.slice(0, 300)}`,
         durationMs: Date.now() - started,
       }
     }
@@ -88,6 +96,7 @@ export async function callLlm(input: LlmCallInput): Promise<ToolActionResult<Llm
   } catch (err) {
     return {
       ok: false,
+      errorCode: "provider_error",
       error: err instanceof Error ? err.message : "LLM request failed",
       durationMs: Date.now() - started,
     }
@@ -100,7 +109,7 @@ export const llmTool: ToolDefinition = {
   provider: "Anthropic",
   description: "Reasons over collected information to analyze, rank and explain.",
   isConnected: isLlmConnected,
-  notConnectedReason: "LLM API key not configured — set ANTHROPIC_API_KEY to enable real analysis.",
+  notConnectedReason: NOT_CONFIGURED_REASON,
   actions: [
     {
       id: "analyze",

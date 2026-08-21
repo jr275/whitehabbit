@@ -52,7 +52,7 @@ export async function webSearch(input: WebSearchInput): Promise<ToolActionResult
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(15_000) })
     if (!res.ok) {
-      return { ok: false, error: `npm registry search returned ${res.status}`, durationMs: Date.now() - started }
+      return { ok: false, errorCode: "provider_error", error: `npm registry search returned ${res.status}`, durationMs: Date.now() - started }
     }
     const json = (await res.json()) as NpmSearchResponse
     const results: SourceRecord[] = json.objects.map((o) => ({
@@ -65,6 +65,7 @@ export async function webSearch(input: WebSearchInput): Promise<ToolActionResult
   } catch (err) {
     return {
       ok: false,
+      errorCode: "provider_error",
       error: err instanceof Error ? err.message : "Web search request failed",
       durationMs: Date.now() - started,
     }

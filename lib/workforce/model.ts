@@ -125,11 +125,16 @@ export interface WorkerTask {
   createdAt: number
 }
 
+/** Mirrors lib/agent/types.ts ExecutionReasonCode — redeclared here so
+ * client components can import it without pulling in server-only code. */
+export type ExecutionReasonCode = "missing_credential" | "invalid_credential" | "provider_error" | "execution_error"
+
 export interface WorkerExecution {
   id: string
   workerId: string
   taskId: string
   status: "running" | "completed" | "failed" | "blocked"
+  reasonCode?: ExecutionReasonCode
   blockedReason?: string
   startedAt: number
   completedAt: number | null

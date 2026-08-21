@@ -30,21 +30,54 @@ export function computeReadiness(worker: Worker): { steps: ReadinessStep[]; perc
     { key: "outcome", label: "Outcome", done: !!worker.outcome.primaryKPI, detail: worker.outcome.primaryKPI || "Not set" },
   ]
 
-  // the real reason each enabled skill cannot execute right now, if any
-  const blockers: string[] = []
-  for (const skill of enabledSkills) {
+  const blockers = credentialBlockers(worker).map((b) => `${b.skillName} needs ${b.toolName} — ${b.detail}`)
+
+  const percent = Math.round((steps.filter((s) => s.done).length / steps.length) * 100)
+  return { steps, percent, blockers: Array.from(new Set(blockers)) }
+}
+
+/* ---- credential state — the worker's explicit READY / NOT_CONFIGURED
+ * state (section 3). Computed the same way everywhere a tool's real
+ * `connected` flag matters, so the readiness card, the canvas, and the
+ * Live Outputs empty state can never drift from each other. ---- */
+export interface CredentialBlocker {
+  skillId: string
+  skillName: string
+  toolId: string
+  toolName: string
+  /** what the UI shows as the headline, e.g. "Anthropic API key required" */
+  title: string
+  /** what the UI shows as the explanation, e.g. "Configure ANTHROPIC_API_KEY to run this worker." */
+  detail: string
+}
+
+export function credentialBlockers(worker: Worker): CredentialBlocker[] {
+  const out: CredentialBlocker[] = []
+  for (const skill of worker.skills.filter((s) => s.enabled)) {
     const template = SKILL_CATALOG.find((s) => s.id === skill.id)
     if (!template) continue
     for (const toolId of template.requiredTools) {
       const tool = worker.tools.find((t) => t.id === toolId)
-      if (tool && !tool.connected) {
-        blockers.push(`${skill.name} needs ${tool.name}${tool.notConnectedReason ? ` — ${tool.notConnectedReason}` : " (not connected)"}`)
-      }
+      if (!tool || tool.connected) continue
+      out.push({
+        skillId: skill.id,
+        skillName: skill.name,
+        toolId: tool.id,
+        toolName: tool.name,
+        title: tool.id === "tool_llm" ? "Anthropic API key required" : `${tool.name} not connected`,
+        detail: tool.notConnectedReason ?? `Connect ${tool.name} to run this worker.`,
+      })
     }
   }
+  return out
+}
 
-  const percent = Math.round((steps.filter((s) => s.done).length / steps.length) * 100)
-  return { steps, percent, blockers: Array.from(new Set(blockers)) }
+export type WorkerCredentialState = "ready" | "not_configured"
+
+export function workerCredentialState(worker: Worker): WorkerCredentialState {
+  const hasEnabledSkill = worker.skills.some((s) => s.enabled)
+  if (!hasEnabledSkill) return "not_configured"
+  return credentialBlockers(worker).length === 0 ? "ready" : "not_configured"
 }
 
 /* ---- time helpers ---- */

@@ -7,10 +7,10 @@
  * it actually happens (not a fake percentage tick).
  * ------------------------------------------------------------------ */
 
-import { Loader2, Play } from "lucide-react"
+import { AlertTriangle, KeyRound, Loader2, Play, XCircle } from "lucide-react"
 import { SKILL_CATALOG } from "@/lib/workforce/catalog"
 import { SKILL_CATEGORIES, SKILL_CATEGORY_LABEL, type SkillCategory, type Worker, type WorkerEvent, type WorkerExecution, type WorkerTask } from "@/lib/workforce/model"
-import { activeWork, computeReadiness } from "@/lib/workforce/selectors"
+import { activeWork, computeReadiness, credentialBlockers, workerCredentialState } from "@/lib/workforce/selectors"
 import { workforceStore } from "@/lib/workforce/store"
 
 const CATEGORY_HINT: Record<SkillCategory, string> = {
@@ -18,6 +18,29 @@ const CATEGORY_HINT: Record<SkillCategory, string> = {
   content: "Analyzes what's actually working",
   communication: "Reads real audience response",
   sales: "Scores and advances pipeline",
+}
+
+interface FinishedRunResult {
+  icon: typeof KeyRound
+  title: string
+  detail: string
+}
+
+/** Translates a real, structured execution outcome into the exact copy
+ * the UI shows — never a generic "something went wrong". */
+function describeFinishedRun(worker: Worker, task: WorkerTask, execution: WorkerExecution): FinishedRunResult {
+  if (execution.status === "blocked") {
+    const blocker = credentialBlockers(worker).find((b) => b.skillId === task.skillId)
+    return { icon: KeyRound, title: blocker?.title ?? "Credential required", detail: blocker?.detail ?? execution.blockedReason ?? "A required credential is not configured." }
+  }
+  switch (execution.reasonCode) {
+    case "invalid_credential":
+      return { icon: KeyRound, title: "The configured API key was rejected", detail: execution.blockedReason ?? "Check the credential and try again." }
+    case "provider_error":
+      return { icon: AlertTriangle, title: "A tool call failed", detail: execution.blockedReason ?? "The external service did not respond successfully." }
+    default:
+      return { icon: XCircle, title: "The run failed", detail: execution.blockedReason ?? "See the execution timeline in Outputs Hub for details." }
+  }
 }
 
 export function WorkerCanvas({
@@ -40,6 +63,19 @@ export function WorkerCanvas({
   // BLOCKED state instead of being told about it secondhand.
   const canRun = released && !running && worker.skills.some((s) => s.enabled)
   const active = activeWork([worker], executions, tasks, events).filter((a) => a.workerId === worker.id)
+  const credentialState = workerCredentialState(worker)
+
+  // the most recent finished (not running) execution for this worker —
+  // used only to surface a real blocked/failed result right after a
+  // Run Worker click; a completed run is already shown in Live Outputs.
+  const lastExecution = executions
+    .filter((e) => e.workerId === worker.id && e.status !== "running")
+    .sort((a, b) => b.startedAt - a.startedAt)[0]
+  const lastTask = lastExecution ? tasks.find((t) => t.id === lastExecution.taskId) : undefined
+  const lastResult =
+    active.length === 0 && lastExecution && lastTask && (lastExecution.status === "blocked" || lastExecution.status === "failed")
+      ? describeFinishedRun(worker, lastTask, lastExecution)
+      : null
 
   return (
     <div className="flex h-full flex-col">
@@ -141,6 +177,20 @@ export function WorkerCanvas({
           </div>
         )}
 
+        {/* last run result — the structured, honest outcome of the most
+         * recent click, shown until a new run replaces it */}
+        {lastResult && (
+          <div className="mx-auto mt-6 max-w-xl rounded-xl border border-warn/30 bg-warn/5 p-4">
+            <div className="flex items-start gap-2.5">
+              <lastResult.icon className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+              <div>
+                <p className="text-[13.5px] font-medium text-foreground">{lastResult.title}</p>
+                <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{lastResult.detail}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {!released && (
           <p className="mx-auto mt-6 max-w-xs text-center text-[12px] leading-relaxed text-muted-foreground">
             Build through the steps on the left, then release {worker.identity.name || "the worker"} to run it.
@@ -150,6 +200,12 @@ export function WorkerCanvas({
 
       {/* run worker */}
       <div className="border-t border-border bg-card/60 p-4">
+        {released && (
+          <div className="mb-2.5 flex items-center justify-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em]">
+            <span className={`h-1.5 w-1.5 rounded-full ${credentialState === "ready" ? "bg-grow" : "bg-warn"}`} />
+            <span className={credentialState === "ready" ? "text-grow" : "text-warn"}>{credentialState === "ready" ? "Ready" : "Not configured"}</span>
+          </div>
+        )}
         <button
           onClick={() => workforceStore.runWorker(worker.id)}
           disabled={!canRun}

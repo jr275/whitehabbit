@@ -16,7 +16,7 @@ import { AlertTriangle, ArrowRight, Sparkles } from "lucide-react"
 import { useMemo } from "react"
 import { SKILL_CATALOG } from "@/lib/workforce/catalog"
 import { OUTPUT_TYPE_META, type Worker, type WorkerOutput } from "@/lib/workforce/model"
-import { timeAgo } from "@/lib/workforce/selectors"
+import { credentialBlockers, timeAgo } from "@/lib/workforce/selectors"
 
 export function LiveOutputsPanel({ worker, outputs, running }: { worker: Worker; outputs: WorkerOutput[]; running: boolean }) {
   const real = useMemo(
@@ -63,33 +63,35 @@ function EmptyState({ worker }: { worker: Worker }) {
       <p className="text-[11.5px] text-muted-foreground">
         No outputs yet — nothing is fabricated here. Run {worker.identity.name || "this worker"} to see its real result.
       </p>
-      {enabledSkills.map((s) => {
-        const template = SKILL_CATALOG.find((t) => t.id === s.id)
-        if (!template) return null
-        const blockedTools = template.requiredTools
-          .map((id) => worker.tools.find((t) => t.id === id))
-          .filter((t) => t && !t.connected)
-        return (
-          <div key={s.id} className="rounded-xl border border-border bg-card p-3.5">
-            <div className="flex items-center gap-1.5">
-              <ArrowRight className="h-3.5 w-3.5 text-primary" />
-              <span className="text-[12.5px] font-medium text-foreground">{template.name}</span>
-            </div>
-            <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-              Will produce a {OUTPUT_TYPE_META[template.outputType]?.label.toLowerCase() ?? "result"} using {template.requiredTools.length} real tool
-              {template.requiredTools.length === 1 ? "" : "s"}: {template.requiredTools.map((id) => worker.tools.find((t) => t.id === id)?.name ?? id).join(", ")}.
-            </p>
-            {blockedTools.length > 0 && (
-              <div className="mt-2 flex items-start gap-1.5 rounded-lg border border-warn/30 bg-warn/5 px-2.5 py-1.5">
-                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-warn" />
-                <p className="text-[11px] text-foreground">
-                  {blockedTools.map((t) => t?.notConnectedReason ?? `${t?.name} not connected`).join(" · ")}
-                </p>
+      {(() => {
+        const blockers = credentialBlockers(worker)
+        return enabledSkills.map((s) => {
+          const template = SKILL_CATALOG.find((t) => t.id === s.id)
+          if (!template) return null
+          const skillBlockers = blockers.filter((b) => b.skillId === s.id)
+          return (
+            <div key={s.id} className="rounded-xl border border-border bg-card p-3.5">
+              <div className="flex items-center gap-1.5">
+                <ArrowRight className="h-3.5 w-3.5 text-primary" />
+                <span className="text-[12.5px] font-medium text-foreground">{template.name}</span>
               </div>
-            )}
-          </div>
-        )
-      })}
+              <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
+                Will produce a {OUTPUT_TYPE_META[template.outputType]?.label.toLowerCase() ?? "result"} using {template.requiredTools.length} real tool
+                {template.requiredTools.length === 1 ? "" : "s"}: {template.requiredTools.map((id) => worker.tools.find((t) => t.id === id)?.name ?? id).join(", ")}.
+              </p>
+              {skillBlockers.map((b) => (
+                <div key={b.toolId} className="mt-2 flex items-start gap-1.5 rounded-lg border border-warn/30 bg-warn/5 px-2.5 py-1.5">
+                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-warn" />
+                  <div>
+                    <p className="text-[11px] font-medium text-foreground">{b.title}</p>
+                    <p className="text-[11px] text-muted-foreground">{b.detail}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        })
+      })()}
     </div>
   )
 }

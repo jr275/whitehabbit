@@ -21,11 +21,22 @@ import type { SkillCategory } from "@/lib/workforce/model"
 export type ToolPermission = "read" | "write" | "publish" | "delete" | "financial" | "external_communication"
 export type RiskLevel = "low" | "medium" | "high" | "critical"
 
+/* ---- structured, distinguishable failure reasons — never swallowed
+ * into one generic "it failed" string. Threaded from a tool's result,
+ * through the skill that called it, onto the persisted Execution row,
+ * and out to the client via the WorkerEvent payload. */
+export type ExecutionReasonCode =
+  | "missing_credential" // a required credential was never configured
+  | "invalid_credential" // a credential is configured but the provider rejected it
+  | "provider_error" // the external system reached out and failed (network, 5xx, timeout)
+  | "execution_error" // the skill's own logic failed (e.g. unparseable model output)
+
 /* ---- tools: real, invocable capabilities ---- */
 export interface ToolActionResult<T = unknown> {
   ok: boolean
   data?: T
   error?: string
+  errorCode?: Exclude<ExecutionReasonCode, "missing_credential">
   blocked?: boolean
   blockedReason?: string
   /** real, measurable facts about this call — never estimated */
@@ -141,9 +152,34 @@ export type RuntimeEventType =
   | "task_failed"
   | "task_blocked"
 
+/** A required credential/tool was never configured. Maps to execution
+ * status "blocked" — the NOT_CONFIGURED state. Thrown before any
+ * external call is attempted for the missing capability. */
 export class SkillBlockedError extends Error {
+  readonly code: ExecutionReasonCode = "missing_credential"
   constructor(public reason: string) {
     super(reason)
     this.name = "SkillBlockedError"
+  }
+}
+
+/** A credential was present but the provider rejected it (401/403).
+ * Maps to execution status "failed", reasonCode "invalid_credential". */
+export class InvalidCredentialError extends Error {
+  readonly code: ExecutionReasonCode = "invalid_credential"
+  constructor(message: string) {
+    super(message)
+    this.name = "InvalidCredentialError"
+  }
+}
+
+/** The external system was reached but failed (network error, 5xx,
+ * timeout) — not a credential problem. Maps to execution status
+ * "failed", reasonCode "provider_error". */
+export class ProviderError extends Error {
+  readonly code: ExecutionReasonCode = "provider_error"
+  constructor(message: string) {
+    super(message)
+    this.name = "ProviderError"
   }
 }

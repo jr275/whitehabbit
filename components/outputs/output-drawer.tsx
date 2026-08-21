@@ -18,6 +18,13 @@ import { isToday, timeOfDay } from "@/lib/workforce/selectors"
 
 export type DrawerFilter = { kind: "type"; workerId: string; type: string; title: string } | { kind: "execution"; executionId: string }
 
+const REASON_CODE_LABEL: Record<NonNullable<WorkerExecution["reasonCode"]>, string> = {
+  missing_credential: "Missing credential",
+  invalid_credential: "Invalid credential",
+  provider_error: "Provider error",
+  execution_error: "Execution error",
+}
+
 export function OutputDrawer({
   filter,
   workers,
@@ -109,6 +116,7 @@ function BlockedDetail({ execution, task }: { execution: WorkerExecution; task?:
       </div>
       <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">
         <MetaRow k="Task" v={task?.title ?? "—"} />
+        {execution.reasonCode && <MetaRow k="Reason" v={REASON_CODE_LABEL[execution.reasonCode]} />}
         <MetaRow k="Started" v={timeOfDay(execution.startedAt)} />
         {execution.completedAt && <MetaRow k="Ended" v={timeOfDay(execution.completedAt)} />}
       </dl>

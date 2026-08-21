@@ -459,9 +459,11 @@ function ToolsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => voi
               </span>
               <RiskTag risk={tool.risk} />
             </button>
-            <div className="mt-1.5 flex items-center justify-between pl-[1.625rem]">
-              <p className="text-[11px] text-muted-foreground">{template?.description}</p>
-              <ConnectionTag connected={tool.connected} reason={tool.notConnectedReason} />
+            <div className="mt-1.5 flex items-start justify-between gap-2 pl-[1.625rem]">
+              <p className={`text-[11px] leading-relaxed ${tool.connected ? "text-muted-foreground" : "text-warn"}`}>
+                {tool.connected ? template?.description : (tool.notConnectedReason ?? "Not connected")}
+              </p>
+              <ConnectionTag connected={tool.connected} />
             </div>
           </div>
         )
@@ -471,7 +473,7 @@ function ToolsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => voi
   )
 }
 
-function ConnectionTag({ connected, reason }: { connected: boolean; reason?: string }) {
+function ConnectionTag({ connected }: { connected: boolean }) {
   if (connected) {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[9px] uppercase tracking-wider text-grow">
@@ -479,11 +481,7 @@ function ConnectionTag({ connected, reason }: { connected: boolean; reason?: str
       </span>
     )
   }
-  return (
-    <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-warn" title={reason}>
-      Not connected
-    </span>
-  )
+  return <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-warn">Not connected</span>
 }
 
 function RiskTag({ risk }: { risk: "low" | "medium" | "high" | "critical" }) {

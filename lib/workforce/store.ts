@@ -429,11 +429,14 @@ class WorkforceStore {
 
     if (event.type === "task_completed" || event.type === "task_blocked" || event.type === "task_failed") {
       const status = event.type === "task_completed" ? "completed" : event.type === "task_blocked" ? "blocked" : "failed"
+      const reasonCode = event.payload.reasonCode as WorkerExecution["reasonCode"] | undefined
       this.set({
         events,
         tasks: this.state.tasks.map((t) => (t.id === event.taskId ? { ...t, status } : t)),
         executions: this.state.executions.map((e) =>
-          e.id === event.executionId ? { ...e, status, completedAt: event.timestamp, blockedReason: (event.payload.reason as string) ?? e.blockedReason } : e,
+          e.id === event.executionId
+            ? { ...e, status, completedAt: event.timestamp, reasonCode: reasonCode ?? e.reasonCode, blockedReason: (event.payload.reason as string) ?? e.blockedReason }
+            : e,
         ),
       })
       return status
