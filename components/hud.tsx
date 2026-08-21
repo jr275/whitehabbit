@@ -11,11 +11,17 @@ import type { Worker, WorkerStatus } from "@/lib/worker"
 
 const STATUS_LABEL: Record<WorkerStatus, string> = {
   draft: "Draft",
+  building: "Building",
   ready: "Ready",
   live: "Live",
   working: "Working",
   idle: "Idle",
   thinking: "Thinking",
+  waiting: "Waiting",
+  blocked: "Blocked",
+  awaiting_approval: "Approval",
+  evolving: "Evolving",
+  error: "Error",
 }
 
 export function Hud({
@@ -32,6 +38,16 @@ export function Hud({
   queueOpen: boolean
 }) {
   const busy = status === "working" || status === "thinking"
+  const centerDot =
+    status === "working"
+      ? "animate-blink bg-grow"
+      : status === "thinking"
+        ? "animate-pulse bg-primary"
+        : status === "awaiting_approval"
+          ? "animate-blink bg-warn"
+          : status === "error"
+            ? "bg-destructive"
+            : "bg-muted-foreground"
   return (
     <motion.header
       initial={{ opacity: 0, y: -10 }}
@@ -52,15 +68,7 @@ export function Hud({
           </span>
         </div>
         <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${
-              status === "working"
-                ? "animate-blink bg-grow"
-                : status === "thinking"
-                  ? "animate-pulse bg-primary"
-                  : "bg-muted-foreground"
-            }`}
-          />
+          <span className={`h-1.5 w-1.5 rounded-full ${centerDot}`} />
           {STATUS_LABEL[status]}
           <span className="text-border">/</span>
           <span>Lvl {worker.level}</span>

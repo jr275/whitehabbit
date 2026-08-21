@@ -11,10 +11,13 @@
 import { AnimatePresence, motion } from "framer-motion"
 import { Sparkles } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { ApprovalPanel } from "@/components/approval-panel"
+import { CapabilityPanel } from "@/components/capability-panel"
 import { CommandBar } from "@/components/command-bar"
 import { CreateOverlay, ASSEMBLY_STEPS } from "@/components/create-overlay"
 import { EventInspector } from "@/components/event-inspector"
 import { EvolveDrawer } from "@/components/evolve-drawer"
+import { ExplainPanel } from "@/components/explain-panel"
 import { FabricCanvas } from "@/components/fabric-canvas"
 import { Hud } from "@/components/hud"
 import { ModeSwitcher } from "@/components/mode-switcher"
@@ -24,6 +27,7 @@ import { RabbitHole } from "@/components/rabbit-hole"
 import { TaskHud } from "@/components/task-hud"
 import { TaskQueue } from "@/components/task-queue"
 import { TeachDrawer } from "@/components/teach-drawer"
+import { WorkerIdentity } from "@/components/worker-identity"
 import {
   addOrb,
   buildGraph,
@@ -36,6 +40,8 @@ import {
   ATLAS,
   type Capability,
   type CapabilityId,
+  explain,
+  type ExplainAnswer,
   type FabricMode,
   type Interaction,
   type WorkerEvent,
@@ -64,6 +70,11 @@ export default function Page() {
   const [focusCap, setFocusCap] = useState<CapabilityId | null>(null)
   const [selectedEvent, setSelectedEvent] = useState<WorkerEvent | null>(null)
   const [queueOpen, setQueueOpen] = useState(false)
+
+  // OS layers — surfaced contextually, never a permanent sidebar
+  const [identityOpen, setIdentityOpen] = useState(false)
+  const [inspectCap, setInspectCap] = useState<CapabilityId | null>(null)
+  const [explainAnswer, setExplainAnswer] = useState<ExplainAnswer | null>(null)
 
   // live worker capability state (mutated by teach/evolve/grow)
   const [caps, setCaps] = useState<Capability[]>(ATLAS.capabilities)
@@ -164,6 +175,46 @@ export default function Page() {
     )
   }, [caps, graph])
 
+  /* ------------------- OS layers (contextual) ----------------------- */
+  // clicking the CORE opens the worker's identity — the gateway inward
+  const openIdentity = useCallback(() => {
+    setInspectCap(null)
+    setExplainAnswer(null)
+    setIdentityOpen(true)
+  }, [])
+
+  // clicking a CAPABILITY node opens its inspection layer
+  const handleSelectCapability = useCallback((id: CapabilityId | null) => {
+    setFocusCap(id)
+    if (id) {
+      setIdentityOpen(false)
+      setExplainAnswer(null)
+      setInspectCap(id)
+    } else {
+      setInspectCap(null)
+    }
+  }, [])
+
+  // asking the worker a question — routes into the explainability layer
+  const handleExplain = useCallback((q: string) => {
+    const ans = explain(q)
+    if (!ans) return
+    setIdentityOpen(false)
+    setInspectCap(null)
+    setExplainAnswer(ans)
+    // spotlight the capabilities behind the answer
+    if (ans.spotlight && ans.spotlight.length) {
+      setFocusCap(ans.spotlight[0])
+      setAutoFollow(false)
+    }
+  }, [])
+
+  const jumpToEvolve = useCallback((capId?: CapabilityId) => {
+    setExplainAnswer(null)
+    if (capId) setFocusCap(capId)
+    setInteraction("evolve")
+  }, [])
+
   /* --------------------------- camera -------------------------------- */
   const changeMode = useCallback((m: FabricMode) => {
     setMode(m)
@@ -231,7 +282,8 @@ export default function Page() {
           activePath={activePath}
           capStates={sim.capStates}
           dense={mode === "trace"}
-          onSelectCapability={setFocusCap}
+          onSelectCapability={handleSelectCapability}
+          onSelectCore={openIdentity}
           onUserCamera={() => onUserCamera(cameraTarget)}
         />
       )}
@@ -357,9 +409,65 @@ export default function Page() {
             onGrow={handleGrow}
             onTeach={openTeach}
             onEvolve={() => setInteraction("evolve")}
+            onExplain={handleExplain}
           />
         </div>
       )}
+
+      {/* OS layers — contextual panels reached by clicking into the worker */}
+      <div className="pointer-events-none absolute right-5 top-[68px] z-40 sm:right-7">
+        <AnimatePresence>
+          {phase === "live" && identityOpen && (
+            <WorkerIdentity
+              key="identity"
+              worker={worker}
+              onClose={() => setIdentityOpen(false)}
+              onInspectCapability={(id) => {
+                setIdentityOpen(false)
+                handleSelectCapability(id)
+              }}
+              onEvolve={() => {
+                setIdentityOpen(false)
+                setInteraction("evolve")
+              }}
+            />
+          )}
+          {phase === "live" && !identityOpen && inspectCap && (
+            <CapabilityPanel
+              key={`cap-${inspectCap}`}
+              capId={inspectCap}
+              cap={caps.find((c) => c.id === inspectCap)!}
+              onClose={() => handleSelectCapability(null)}
+              onEvolve={() => jumpToEvolve(inspectCap)}
+            />
+          )}
+          {phase === "live" && explainAnswer && (
+            <ExplainPanel
+              key={explainAnswer.title}
+              answer={explainAnswer}
+              onClose={() => setExplainAnswer(null)}
+              onCta={() => {
+                if (/evolve/i.test(explainAnswer.cta ?? "")) jumpToEvolve(explainAnswer.spotlight?.[0])
+                else if (/memory/i.test(explainAnswer.cta ?? "")) openIdentity()
+                else if (explainAnswer.spotlight?.[0]) handleSelectCapability(explainAnswer.spotlight[0])
+                setExplainAnswer(null)
+              }}
+            />
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* APPROVAL — the worker pauses and waits for its manager */}
+      <AnimatePresence>
+        {phase === "live" && sim.approval && (
+          <ApprovalPanel
+            key={sim.approval.taskId}
+            approval={sim.approval}
+            onApprove={sim.approve}
+            onReject={sim.reject}
+          />
+        )}
+      </AnimatePresence>
 
       {/* interaction drawers — float above the fabric, never leave it */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex justify-center px-5 pb-28 sm:pb-32">

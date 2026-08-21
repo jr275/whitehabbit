@@ -16,11 +16,17 @@ import type { WorkerStatus } from "@/lib/worker"
 
 const STATUS_LABEL: Record<WorkerStatus, string> = {
   draft: "Draft",
+  building: "Building",
   ready: "Ready",
   live: "Live",
   working: "Working",
   idle: "Idle",
   thinking: "Thinking",
+  waiting: "Waiting",
+  blocked: "Blocked",
+  awaiting_approval: "Awaiting approval",
+  evolving: "Evolving",
+  error: "Error",
 }
 
 export function TaskHud({
@@ -44,11 +50,14 @@ export function TaskHud({
 }) {
   const working = workerStatus === "working"
   const thinking = workerStatus === "thinking"
+  const awaiting = workerStatus === "awaiting_approval"
   const dotClass = working
     ? "bg-grow animate-blink"
     : thinking
       ? "bg-primary animate-pulse"
-      : "bg-muted-foreground"
+      : awaiting
+        ? "bg-warn animate-blink"
+        : "bg-muted-foreground"
 
   return (
     <motion.aside
@@ -74,7 +83,7 @@ export function TaskHud({
         <div className="px-4 py-3.5">
           {/* objective */}
           <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-            {exec.kind === "qualify" ? "Qualifying" : "Mapping"}
+            {exec.kind === "qualify" ? "Qualifying" : exec.kind === "contract" ? "Contracting" : "Mapping"}
           </p>
           <p className="mt-1 text-pretty text-[15px] font-medium leading-snug tracking-tight">
             {exec.company}
