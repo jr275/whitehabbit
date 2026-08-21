@@ -78,10 +78,10 @@ export function TopNav() {
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-grow" />
             </span>
             <span className="font-mono text-[11px] tracking-tight text-foreground">
-              Atlas
+              Workforce
             </span>
             <span className="font-mono text-[10px] text-muted-foreground">
-              v3.2 · Live
+              Live
             </span>
           </div>
         </div>

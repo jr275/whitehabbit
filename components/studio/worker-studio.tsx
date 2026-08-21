@@ -1,149 +1,181 @@
 "use client"
 
 /* ================================================================== *
- * WORKER STUDIO — the real product surface.
+ * WORKER STUDIO — the primary environment for creating a Worker.
  *
- * A single spatial environment split into three functional zones, all
- * projections of ONE source of truth (studioStore):
+ * Three panels, one source of truth (workforceStore):
+ *   LEFT   — BUILD         : the 9-stage worker builder
+ *   CENTER — WORKER CANVAS : the living worker + Run Worker
+ *   RIGHT  — LIVE OUTPUTS  : examples while building, real records once run
  *
- *   LEFT   — BUILD   : configure + build + release the worker
- *   CENTER — FABRIC  : the living worker; run tasks; watch it work
- *   RIGHT  — RESULT  : live event stream, decision, outcome, trace, history
- *
- * The center dominates. This is not a dashboard — the Fabric is the hero.
- * ================================================================== */
+ * Switching workers, or creating a new one, never loses another
+ * worker's build state — everything lives in the same store used by
+ * the Outputs Hub and Worker Overview.
+ * ------------------------------------------------------------------ */
 
-import Link from "next/link"
-import { ArrowLeft, Plus } from "lucide-react"
-import { useEffect } from "react"
+import { ChevronDown, Plus } from "lucide-react"
+import { useEffect, useState } from "react"
 import { BuildPanel } from "@/components/studio/build-panel"
-import { FabricPanel } from "@/components/studio/fabric-panel"
-import { ResultPanel } from "@/components/studio/result-panel"
-import { studioStore, useStudio } from "@/lib/worker/worker-state"
+import { LiveOutputsPanel } from "@/components/studio/live-outputs-panel"
+import { StudioShell } from "@/components/studio/studio-shell"
+import { WorkerCanvas } from "@/components/studio/worker-canvas"
+import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
-/* status → header pill styling, driven by the real state machine */
 const STATUS_STYLE: Record<string, { cls: string; label: string; pulse?: boolean }> = {
-  draft: { cls: "border-white/15 text-white/55", label: "DRAFT" },
-  ready: { cls: "border-[#7d8cff]/40 text-[#9aa6ff]", label: "READY" },
-  live: { cls: "border-[#3ddc84]/40 text-[#3ddc84]", label: "LIVE", pulse: true },
-  idle: { cls: "border-[#3ddc84]/40 text-[#3ddc84]", label: "LIVE", pulse: true },
-  working: { cls: "border-[#7d8cff]/50 text-[#9aa6ff]", label: "RUNNING", pulse: true },
-  waiting: { cls: "border-[#e0a53d]/50 text-[#e0a53d]", label: "WAITING", pulse: true },
+  draft: { cls: "border-border text-muted-foreground", label: "Draft" },
+  ready: { cls: "border-primary/30 text-primary", label: "Ready" },
+  live: { cls: "border-grow/30 text-grow", label: "Live", pulse: true },
+  idle: { cls: "border-grow/30 text-grow", label: "Live", pulse: true },
+  working: { cls: "border-primary/30 text-primary", label: "Working", pulse: true },
 }
 
 export function WorkerStudio() {
-  const { hydrated, worker, activeCapability, capPulse, activeRun, history, showTrace, runningTaskId } =
-    useStudio()
+  const { hydrated, workers, activeWorkerId, executions, outputs } = useWorkforce()
 
-  // restore persisted worker on mount (single source of truth)
   useEffect(() => {
-    studioStore.hydrate()
+    workforceStore.hydrate()
   }, [])
 
   if (!hydrated) {
     return (
-      <div className="flex h-dvh items-center justify-center bg-[#07080e]">
-        <span className="font-mono text-[11px] uppercase tracking-[0.3em] text-white/40">Loading studio…</span>
-      </div>
+      <StudioShell>
+        <div className="flex h-[calc(100dvh-3.5rem)] items-center justify-center">
+          <span className="font-mono text-[11px] uppercase tracking-[0.3em] text-muted-foreground">Loading studio…</span>
+        </div>
+      </StudioShell>
     )
   }
 
-  // no worker yet — send the user back to CREATE
+  const worker = workers.find((w) => w.id === activeWorkerId) ?? workers[0]
+
   if (!worker) {
     return (
-      <div className="flex h-dvh flex-col items-center justify-center gap-6 bg-[#07080e] px-6 text-center">
-        <div>
-          <p className="font-mono text-[11px] uppercase tracking-[0.3em] text-white/40">Worker Studio</p>
-          <h1 className="mt-3 text-balance text-2xl font-medium text-white">No worker assembled yet</h1>
-          <p className="mt-2 max-w-sm text-sm leading-relaxed text-white/50">
-            Start on the create screen — describe what your worker should do, and it will be assembled here.
-          </p>
+      <StudioShell>
+        <div className="flex h-[calc(100dvh-3.5rem)] flex-col items-center justify-center gap-4 text-center">
+          <p className="text-[15px] text-muted-foreground">No worker yet.</p>
+          <button
+            onClick={() => workforceStore.createDraftWorker()}
+            className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-[13px] font-medium text-primary-foreground"
+          >
+            <Plus className="h-4 w-4" /> Create a worker
+          </button>
         </div>
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 rounded-full bg-[#5a6ef0] px-6 py-3 font-mono text-[12px] uppercase tracking-[0.2em] text-white transition hover:bg-[#6a7cf5]"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Create a worker
-        </Link>
-      </div>
+      </StudioShell>
     )
   }
 
-  const running = !!runningTaskId
+  const running = workforceStore.isRunning(worker.id)
   const status = STATUS_STYLE[worker.status] ?? STATUS_STYLE.draft
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-[#07080e] text-white">
-      {/* header — WORKER STUDIO · identity · status */}
-      <header className="flex h-14 shrink-0 items-center gap-4 border-b border-white/10 bg-[#0a0b12] px-4 sm:px-6">
-        <Link
-          href="/"
-          className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] text-white/40 transition hover:text-white/70"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Studio</span>
-        </Link>
-        <span className="h-4 w-px bg-white/10" />
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="font-mono text-[10px] uppercase tracking-[0.28em] text-white/40">Worker Studio</span>
-          <span className="text-[15px] font-semibold tracking-tight text-white">{worker.name}</span>
-          <span className="hidden min-w-0 truncate text-[12px] text-white/45 md:inline">{worker.objective}</span>
-        </div>
-        <div className="ml-auto flex items-center gap-3">
-          <span className="font-mono text-[11px] text-white/40">v{worker.version || "0.0"}</span>
+    <StudioShell>
+      <div className="flex h-[calc(100dvh-3.5rem)] flex-col overflow-hidden">
+        {/* studio sub-header — worker switcher + status */}
+        <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card/60 px-4 sm:px-6">
+          <span className="font-mono text-[10px] uppercase tracking-[0.24em] text-muted-foreground">Studio</span>
+          <span className="h-4 w-px bg-border" />
+          <WorkerSwitcher workers={workers} activeId={worker.id} />
           <span
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] ${status.cls}`}
+            className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.14em] ${status.cls}`}
           >
             <span className={`h-1.5 w-1.5 rounded-full bg-current ${status.pulse ? "animate-pulse" : ""}`} />
             {status.label}
           </span>
         </div>
-      </header>
 
-      {/* three functional zones — the center dominates */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[20rem_minmax(0,1fr)_23rem]">
-        {/* LEFT — BUILD */}
-        <aside className="hidden min-h-0 flex-col border-r border-white/10 bg-[#0a0b12] lg:flex">
-          <ZoneLabel>Build</ZoneLabel>
-          <div className="min-h-0 flex-1">
-            <BuildPanel />
-          </div>
-        </aside>
+        {/* three panels — the canvas dominates */}
+        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[19rem_minmax(0,1fr)_22rem]">
+          <aside className="hidden min-h-0 flex-col border-r border-border bg-card/40 lg:flex">
+            <ZoneLabel>Build</ZoneLabel>
+            <div className="min-h-0 flex-1">
+              <BuildPanel worker={worker} />
+            </div>
+          </aside>
 
-        {/* CENTER — FABRIC (hero) */}
-        <main className="relative min-h-0">
-          <FabricPanel
-            worker={worker}
-            activeCapability={activeCapability}
-            capPulse={capPulse}
-            activeRun={activeRun}
-            running={running}
-          />
-        </main>
+          <main className="relative min-h-0 bg-background">
+            <WorkerCanvas worker={worker} executions={executions} running={running} />
+          </main>
 
-        {/* RIGHT — RESULT */}
-        <aside className="hidden min-h-0 flex-col border-l border-white/10 bg-[#0a0b12] lg:flex">
-          <ZoneLabel>Result</ZoneLabel>
-          <div className="min-h-0 flex-1">
-            <ResultPanel
-              worker={worker}
-              activeRun={activeRun}
-              history={history}
-              showTrace={showTrace}
-              running={running}
-            />
-          </div>
-        </aside>
+          <aside className="hidden min-h-0 flex-col border-l border-border bg-card/40 lg:flex">
+            <div className="min-h-0 flex-1">
+              <LiveOutputsPanel worker={worker} outputs={outputs} running={running} />
+            </div>
+          </aside>
+        </div>
       </div>
-    </div>
+    </StudioShell>
   )
 }
 
 function ZoneLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="shrink-0 border-b border-white/10 px-4 py-2.5">
-      <span className="font-mono text-[9px] uppercase tracking-[0.28em] text-white/35">{children}</span>
+    <div className="shrink-0 border-b border-border px-4 py-2.5">
+      <span className="font-mono text-[9px] uppercase tracking-[0.28em] text-muted-foreground">{children}</span>
+    </div>
+  )
+}
+
+function WorkerSwitcher({ workers, activeId }: { workers: ReturnType<typeof useWorkforce>["workers"]; activeId: string }) {
+  const [open, setOpen] = useState(false)
+  const active = workers.find((w) => w.id === activeId)
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-secondary"
+      >
+        <span
+          className="flex h-5 w-5 items-center justify-center rounded-md text-[9px] font-bold text-white"
+          style={{ backgroundColor: active?.identity.accent || "#5a6ef0" }}
+        >
+          {active?.identity.initials || "?"}
+        </span>
+        {active?.identity.name || "Unnamed worker"}
+        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-40 mt-1.5 w-64 overflow-hidden rounded-xl border border-border bg-card shadow-lg">
+            <ul className="max-h-72 overflow-y-auto py-1">
+              {workers.map((w) => (
+                <li key={w.id}>
+                  <button
+                    onClick={() => {
+                      workforceStore.selectWorker(w.id)
+                      setOpen(false)
+                    }}
+                    className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors hover:bg-secondary ${
+                      w.id === activeId ? "text-foreground" : "text-muted-foreground"
+                    }`}
+                  >
+                    <span
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[9px] font-bold text-white"
+                      style={{ backgroundColor: w.identity.accent || "#5a6ef0" }}
+                    >
+                      {w.identity.initials || "?"}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{w.identity.name || "Unnamed worker"}</span>
+                    {(w.status === "live" || w.status === "working" || w.status === "idle") && (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-grow" />
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              onClick={() => {
+                workforceStore.createDraftWorker()
+                setOpen(false)
+              }}
+              className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-[13px] font-medium text-primary hover:bg-secondary"
+            >
+              <Plus className="h-3.5 w-3.5" /> New worker
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
