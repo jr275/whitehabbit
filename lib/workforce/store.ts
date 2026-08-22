@@ -266,6 +266,13 @@ class WorkforceStore {
     this.schedulePersist(workerId)
   }
 
+  /** Real, operator-authored reference text for one knowledge source —
+   * the only thing the runtime's KnowledgeRetriever ever reads from. */
+  setKnowledgeContent(workerId: string, id: string, content: string) {
+    this.patchWorker(workerId, (w) => ({ ...w, knowledge: w.knowledge.map((k) => (k.id === id ? { ...k, content } : k)) }))
+    this.schedulePersist(workerId)
+  }
+
   /* ---- 04 Skills ---- */
   toggleSkill(workerId: string, skillId: string) {
     this.patchWorker(workerId, (w) => ({ ...w, skills: w.skills.map((s) => (s.id === skillId ? { ...s, enabled: !s.enabled } : s)) }))
@@ -317,7 +324,14 @@ class WorkforceStore {
     }))
     this.set({
       testingWorkerId: null,
-      notice: outcome === "completed" ? null : outcome === "blocked" ? "Test blocked — see the execution timeline for the real reason." : "Test failed — see the execution timeline for the real reason.",
+      notice:
+        outcome === "completed"
+          ? null
+          : outcome === "blocked"
+            ? "Test blocked — see the execution timeline for the real reason."
+            : outcome === "pending_approval"
+              ? "Test halted — this action requires human approval before it can run."
+              : "Test failed — see the execution timeline for the real reason.",
     })
     this.schedulePersist(workerId)
   }
@@ -335,7 +349,7 @@ class WorkforceStore {
   }
 
   /* ---- Run Worker — a real, streamed execution ---- */
-  async runWorker(workerId: string): Promise<"completed" | "blocked" | "failed" | "error"> {
+  async runWorker(workerId: string): Promise<"completed" | "blocked" | "failed" | "pending_approval" | "error"> {
     const worker = this.state.workers.find((w) => w.id === workerId)
     if (!worker) return "error"
     if (this.isRunning(workerId)) return "error"
@@ -348,7 +362,7 @@ class WorkforceStore {
     const input: Record<string, string> = { query: worker.mission || worker.identity.description || "" }
 
     this.set({ runningWorkerIds: [...this.state.runningWorkerIds, workerId] })
-    let outcome: "completed" | "blocked" | "failed" | "error" = "error"
+    let outcome: "completed" | "blocked" | "failed" | "pending_approval" | "error" = "error"
 
     try {
       const res = await fetch(`/api/workers/${workerId}/run`, {
@@ -400,7 +414,7 @@ class WorkforceStore {
 
   /** Applies one real event to local state for instant feedback, and
    * reports task_completed/blocked/failed back to the caller. */
-  private handleRuntimeEvent(event: WorkerEvent, taskTitle: string): "completed" | "blocked" | "failed" | null {
+  private handleRuntimeEvent(event: WorkerEvent, taskTitle: string): "completed" | "blocked" | "failed" | "pending_approval" | null {
     const events = [event, ...this.state.events].slice(0, 300)
 
     if (event.type === "task_started") {
@@ -427,8 +441,8 @@ class WorkforceStore {
       return null
     }
 
-    if (event.type === "task_completed" || event.type === "task_blocked" || event.type === "task_failed") {
-      const status = event.type === "task_completed" ? "completed" : event.type === "task_blocked" ? "blocked" : "failed"
+    if (event.type === "task_completed" || event.type === "task_blocked" || event.type === "task_failed" || event.type === "approval_required") {
+      const status = event.type === "task_completed" ? "completed" : event.type === "task_blocked" ? "blocked" : event.type === "approval_required" ? "pending_approval" : "failed"
       const reasonCode = event.payload.reasonCode as WorkerExecution["reasonCode"] | undefined
       this.set({
         events,

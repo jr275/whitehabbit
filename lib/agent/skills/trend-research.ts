@@ -13,7 +13,9 @@ import "server-only"
  * with the exact reason — it never substitutes a fabricated result.
  * ================================================================== */
 
-import type { SkillDefinition, SkillEvaluation, SkillExecutionResult } from "@/lib/agent/types"
+import { retrieveRelevantKnowledge } from "@/lib/agent/knowledge"
+import { runToolAction } from "@/lib/agent/tool-runner"
+import type { SkillDefinition, SkillEvaluation, SkillExecutionResult, WorkerContext } from "@/lib/agent/types"
 import { InvalidCredentialError, ProviderError, SkillBlockedError } from "@/lib/agent/types"
 
 interface TrendItem {
@@ -36,9 +38,26 @@ Respond with ONLY a single valid JSON object, no markdown fences, no commentary,
 
 Identify between 3 and 6 trends, ranked by importance (rank 1 = most important). Every trend must cite at least one source_index. If the sources do not support any clear trend, return an empty trends array rather than inventing one.`
 
-function buildPrompt(query: string, sources: { title: string; url: string; snippet?: string }[]): string {
+/** Appends the real worker's mission/objectives/behavior rules to the
+ * base system prompt — only the fields that are actually set. A worker
+ * with no mission or behaviors yields the unmodified base prompt, not
+ * placeholder directives. */
+function buildSystemPrompt(worker: WorkerContext): string {
+  const extra: string[] = []
+  if (worker.mission.trim()) extra.push(`The worker executing this task has this mission: "${worker.mission.trim()}"`)
+  if (worker.objectives.length) extra.push(`Its current open objectives:\n${worker.objectives.map((o) => `- ${o}`).join("\n")}`)
+  if (worker.behaviors.length) {
+    extra.push(`It must follow these operator-defined behavior rules:\n${worker.behaviors.map((b) => `- IF ${b.condition} THEN ${b.action}`).join("\n")}`)
+  }
+  return extra.length ? `${SYSTEM_PROMPT}\n\n${extra.join("\n\n")}` : SYSTEM_PROMPT
+}
+
+function buildPrompt(query: string, sources: { title: string; url: string; snippet?: string }[], knowledge: { name: string; snippet: string }[]): string {
   const list = sources.map((s, i) => `[${i}] ${s.title} — ${s.snippet ?? "(no description)"} (${s.url})`).join("\n")
-  return `Research question: "${query}"\n\nReal sources found via web search:\n${list}\n\nIdentify the most important trends visible in these real sources.`
+  const knowledgeBlock = knowledge.length
+    ? `\n\nInternal knowledge provided by the operator (use only where genuinely relevant — do not treat as a source citation):\n${knowledge.map((k) => `[${k.name}] ${k.snippet}`).join("\n\n")}`
+    : ""
+  return `Research question: "${query}"\n\nReal sources found via web search:\n${list}${knowledgeBlock}\n\nIdentify the most important trends visible in these real sources.`
 }
 
 function parseTrends(text: string, query: string): TrendsPayload | null {
@@ -88,7 +107,13 @@ export const trendResearchSkill: SkillDefinition = {
     if (!search) throw new SkillBlockedError("Web Search tool is not registered on this worker.")
     ctx.emit("tool_called", { tool: search.id, toolName: search.name, action: "search", input: { query } })
     const searchAction = search.actions.find((a) => a.id === "search")!
-    const searchResult = await searchAction.run({ query, limit: 10 }, toolCtx)
+    const searchResult = await runToolAction<{ results: { title: string; url: string; provider: string; snippet?: string }[] }>(
+      search.id,
+      search.name,
+      searchAction,
+      { query, limit: 10 },
+      toolCtx,
+    )
     if (!searchResult.ok) {
       if (searchResult.blocked) throw new SkillBlockedError(searchResult.blockedReason ?? "Web Search is blocked.")
       throw new ProviderError(searchResult.error ?? "Web search failed.")
@@ -101,7 +126,14 @@ export const trendResearchSkill: SkillDefinition = {
     if (!llm) throw new SkillBlockedError("LLM tool is not registered on this worker.")
     ctx.emit("reasoning_started", { model: "llm" })
     const analyzeAction = llm.actions.find((a) => a.id === "analyze")!
-    const llmResult = await analyzeAction.run({ system: SYSTEM_PROMPT, prompt: buildPrompt(query, searchData.results), maxTokens: 2000 }, toolCtx)
+    const knowledge = retrieveRelevantKnowledge(ctx.worker.knowledge, query)
+    const llmResult = await runToolAction<{ text: string; model: string; inputTokens: number; outputTokens: number; provider: string }>(
+      llm.id,
+      llm.name,
+      analyzeAction,
+      { system: buildSystemPrompt(ctx.worker), prompt: buildPrompt(query, searchData.results, knowledge), maxTokens: 2000 },
+      toolCtx,
+    )
     if (!llmResult.ok) {
       if (llmResult.blocked) throw new SkillBlockedError(llmResult.blockedReason ?? "LLM is blocked.")
       if (llmResult.errorCode === "invalid_credential") throw new InvalidCredentialError(llmResult.error ?? "The configured LLM credential was rejected.")

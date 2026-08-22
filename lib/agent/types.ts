@@ -17,6 +17,19 @@
 
 import type { SkillCategory } from "@/lib/workforce/model"
 
+/* ---- the real slice of a Worker's definition a skill actually needs
+ * to reason with — mission/objectives/behaviors/knowledge, resolved
+ * from the real stored Worker row by the runtime before execute() is
+ * called. Never fabricated; a worker with an empty mission or no
+ * knowledge sources yields empty arrays/strings here, not placeholder
+ * text. */
+export interface WorkerContext {
+  mission: string
+  objectives: string[]
+  behaviors: { condition: string; action: string }[]
+  knowledge: { id: string; name: string; type: string; content?: string }[]
+}
+
 /* ---- permission / risk vocabulary (section 16) ---- */
 export type ToolPermission = "read" | "write" | "publish" | "delete" | "financial" | "external_communication"
 export type RiskLevel = "low" | "medium" | "high" | "critical"
@@ -121,6 +134,10 @@ export interface SkillExecutionContext {
   taskId: string
   input: Record<string, string>
   tools: Map<string, ToolDefinition>
+  /** real mission/objectives/behaviors/knowledge from the worker being
+   * executed — see WorkerContext. A skill is free to ignore fields it
+   * doesn't use; nothing here is invented if the worker left it empty. */
+  worker: WorkerContext
   emit: (type: RuntimeEventType, payload: Record<string, unknown>) => void
 }
 
@@ -155,6 +172,7 @@ export type RuntimeEventType =
   | "task_completed"
   | "task_failed"
   | "task_blocked"
+  | "approval_required"
 
 /** A required credential/tool was never configured. Maps to execution
  * status "blocked" — the NOT_CONFIGURED state. Thrown before any
@@ -185,5 +203,25 @@ export class ProviderError extends Error {
   constructor(message: string) {
     super(message)
     this.name = "ProviderError"
+  }
+}
+
+/** A tool action's permission (write/publish/delete/financial/
+ * external_communication) means it must never auto-execute. Thrown by
+ * runToolAction() (lib/agent/tool-runner.ts) BEFORE the action ever
+ * runs — no partial side effect, no fabricated result. Maps to
+ * execution status "pending_approval", a real terminal state distinct
+ * from both "blocked" (missing capability) and "failed" (something
+ * went wrong) — this is neither: the capability exists and works, a
+ * human just has to say yes first. */
+export class ApprovalRequiredError extends Error {
+  constructor(
+    public toolId: string,
+    public toolName: string,
+    public actionLabel: string,
+    public permission: ToolPermission,
+  ) {
+    super(`"${actionLabel}" on ${toolName} requires human approval (${permission}) before it can run.`)
+    this.name = "ApprovalRequiredError"
   }
 }

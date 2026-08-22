@@ -129,6 +129,7 @@ export interface WorkerTaskSummary {
   completed: number
   failed: number
   blocked: number
+  pendingApproval: number
   quality: number | null
 }
 
@@ -141,6 +142,7 @@ export function workerTaskSummary(workerId: string, tasks: WorkerTask[], outputs
     completed: todaysTasks.filter((t) => t.status === "completed").length,
     failed: todaysTasks.filter((t) => t.status === "failed").length,
     blocked: todaysTasks.filter((t) => t.status === "blocked").length,
+    pendingApproval: todaysTasks.filter((t) => t.status === "pending_approval").length,
     quality,
   }
 }
@@ -217,6 +219,9 @@ export function todaysTimeline(workers: Worker[], executions: WorkerExecution[],
         : `${worker.identity.name} completed "${task.title}"`
     } else if (e.status === "blocked") {
       text = `${worker.identity.name} — "${task.title}" blocked: ${e.blockedReason ?? "a required tool is not connected"}`
+      tone = "warn"
+    } else if (e.status === "pending_approval") {
+      text = `${worker.identity.name} — "${task.title}" waiting on approval: ${e.blockedReason ?? "requires human approval"}`
       tone = "warn"
     } else {
       text = `${worker.identity.name} — "${task.title}" failed: ${e.blockedReason ?? "unknown error"}`

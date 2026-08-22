@@ -22,8 +22,8 @@ import { randomUUID } from "node:crypto"
 import { llmCostUsd } from "@/lib/agent/cost"
 import { getSkill } from "@/lib/agent/skills/registry"
 import { toolsMap } from "@/lib/agent/tools/registry"
-import type { ExecutionReasonCode, RuntimeEventType, SkillExecutionResult } from "@/lib/agent/types"
-import { InvalidCredentialError, ProviderError, SkillBlockedError } from "@/lib/agent/types"
+import type { ExecutionReasonCode, RuntimeEventType, SkillExecutionResult, WorkerContext } from "@/lib/agent/types"
+import { ApprovalRequiredError, InvalidCredentialError, ProviderError, SkillBlockedError } from "@/lib/agent/types"
 import * as repo from "@/lib/db/repo"
 import type {
   MetricRecord,
@@ -116,12 +116,19 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
     emit("skill_started", { skillId: skill.id })
 
     try {
+      const workerContext: WorkerContext = {
+        mission: run.worker.mission,
+        objectives: run.worker.objectives.filter((o) => !o.done).map((o) => o.text),
+        behaviors: run.worker.behaviors.map((b) => ({ condition: b.condition, action: b.action })),
+        knowledge: run.worker.knowledge.map((k) => ({ id: k.id, name: k.name, type: k.type, content: k.content })),
+      }
       const result: SkillExecutionResult = await skill.execute({
         workerId: run.worker.id,
         executionId: execution.id,
         taskId: task.id,
         input: run.input,
         tools: toolsMap(),
+        worker: workerContext,
         emit,
       })
 
@@ -184,6 +191,13 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         repo.finalizeExecution(execution.id, { status: "blocked", reasonCode: err.code, blockedReason: err.reason, completedAt, durationMs })
         repo.updateTaskStatus(task.id, "blocked")
         emit("task_blocked", { reason: err.reason, reasonCode: err.code })
+      } else if (err instanceof ApprovalRequiredError) {
+        // Real terminal state, not a failure: the tool exists and
+        // works, it just requires a human to say yes first. No tool
+        // action ran — runToolAction() throws before calling it.
+        repo.finalizeExecution(execution.id, { status: "pending_approval", blockedReason: err.message, completedAt, durationMs })
+        repo.updateTaskStatus(task.id, "pending_approval")
+        emit("approval_required", { reason: err.message, toolId: err.toolId, toolName: err.toolName, action: err.actionLabel, permission: err.permission })
       } else {
         const reasonCode: ExecutionReasonCode = err instanceof InvalidCredentialError || err instanceof ProviderError ? err.code : "execution_error"
         const message = err instanceof Error ? err.message : "Task failed for an unknown reason."

@@ -8,7 +8,7 @@
  * number or a silent zero.
  * ================================================================== */
 
-import { SKILL_CATEGORY_LABEL, type MetricRecord, type SkillCategory, type Worker } from "./model"
+import { SKILL_CATEGORY_LABEL, type MetricRecord, type SkillCategory, type Worker, type WorkerTask } from "./model"
 
 export interface CategoryQuality {
   category: SkillCategory
@@ -41,6 +41,50 @@ function qualityByCategory(worker: Worker, metrics: MetricRecord[]): CategoryQua
 export function capabilityScores(worker: Worker, metrics: MetricRecord[]): { label: string; score: number | null; sampleSize: number }[] {
   const byCategory = qualityByCategory(worker, metrics)
   return byCategory.map((c) => ({ label: c.label, score: c.avgQuality, sampleSize: c.sampleSize }))
+}
+
+/* ---- observed success rate per skill — real WorkerTask counts, never
+ * an arbitrary quality score. "40 executions, 28 successful, 12
+ * failures -> 70%" is exactly what this computes, per skill, from the
+ * real task ledger. A skill with zero recorded tasks reports null, not
+ * 0% — it hasn't failed, it just hasn't run. ---- */
+export interface SkillExecutionStats {
+  skillId: string
+  skillName: string
+  total: number
+  completed: number
+  failed: number
+  blocked: number
+  pendingApproval: number
+  successRate: number | null
+}
+
+export function skillExecutionStats(worker: Worker, tasks: WorkerTask[]): SkillExecutionStats[] {
+  const bySkill = new Map<string, WorkerTask[]>()
+  for (const t of tasks) {
+    if (t.workerId !== worker.id) continue
+    const list = bySkill.get(t.skillId) ?? []
+    list.push(t)
+    bySkill.set(t.skillId, list)
+  }
+  return Array.from(bySkill.entries()).map(([skillId, list]) => {
+    const skillName = worker.skills.find((s) => s.id === skillId)?.name ?? skillId
+    const completed = list.filter((t) => t.status === "completed").length
+    const failed = list.filter((t) => t.status === "failed").length
+    const blocked = list.filter((t) => t.status === "blocked").length
+    const pendingApproval = list.filter((t) => t.status === "pending_approval").length
+    const finished = completed + failed + blocked
+    return {
+      skillId,
+      skillName,
+      total: list.length,
+      completed,
+      failed,
+      blocked,
+      pendingApproval,
+      successRate: finished > 0 ? Math.round((completed / finished) * 1000) / 10 : null,
+    }
+  })
 }
 
 export interface EvolutionRecommendation {

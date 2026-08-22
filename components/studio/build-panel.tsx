@@ -16,7 +16,7 @@ import { Check, Loader2, Plus, Rocket, Trash2, X } from "lucide-react"
 import { useState } from "react"
 import { BEHAVIOR_PRESETS, CHANNEL_CATALOG, KNOWLEDGE_TEMPLATES, SKILL_CATALOG, TONE_PRESETS, TOOL_CATALOG } from "@/lib/workforce/catalog"
 import type { Autonomy, ChannelId, SkillCategory, Worker } from "@/lib/workforce/model"
-import { OUTCOME_PRESETS, SKILL_CATEGORIES, SKILL_CATEGORY_LABEL } from "@/lib/workforce/model"
+import { OUTCOME_PRESETS, SKILL_CATEGORIES, SKILL_CATEGORY_LABEL, TOOL_BOUNDARY_META, toolExecutionBoundary } from "@/lib/workforce/model"
 import { computeReadiness } from "@/lib/workforce/selectors"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
@@ -387,25 +387,47 @@ function KnowledgeStep({ worker, onAdvance }: { worker: Worker; onAdvance: () =>
         </div>
       </div>
       {worker.knowledge.length > 0 && (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           {worker.knowledge.map((k) => (
-            <div key={k.id} className="group flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5">
-              <div className="min-w-0 flex-1">
-                <div className="text-[12.5px] font-medium text-foreground">{k.name}</div>
-                <div className="text-[10.5px] text-muted-foreground">{k.documents.toLocaleString()} documents · {k.type}</div>
+            <div key={k.id} className="group flex flex-col gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5">
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12.5px] font-medium text-foreground">{k.name}</div>
+                  <div className="text-[10.5px] text-muted-foreground">{k.documents.toLocaleString()} documents · {k.type}</div>
+                </div>
+                <button
+                  onClick={() => workforceStore.removeKnowledge(worker.id, k.id)}
+                  className="text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </div>
-              <button
-                onClick={() => workforceStore.removeKnowledge(worker.id, k.id)}
-                className="text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              <KnowledgeContentField worker={worker} source={k} />
             </div>
           ))}
         </div>
       )}
       <Continue onClick={onAdvance} />
     </div>
+  )
+}
+
+/* Real reference text the LLM can actually be given — see
+ * lib/agent/knowledge.ts. This card is metadata (a name + document
+ * count) until someone types real content here; there is no ingestion
+ * pipeline behind "documents", so this is the one honest way to make
+ * a knowledge source do anything in a real execution. */
+function KnowledgeContentField({ worker, source }: { worker: Worker; source: Worker["knowledge"][number] }) {
+  const [text, setText] = useState(source.content ?? "")
+  return (
+    <textarea
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => workforceStore.setKnowledgeContent(worker.id, source.id, text)}
+      rows={2}
+      placeholder="Paste real reference text this worker should consider (optional) — nothing is fetched automatically."
+      className="modal-input resize-none text-[11.5px]"
+    />
   )
 }
 
@@ -463,7 +485,7 @@ function ToolsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => voi
               <p className={`text-[11px] leading-relaxed ${tool.connected ? "text-muted-foreground" : "text-warn"}`}>
                 {tool.connected ? template?.description : (tool.notConnectedReason ?? "Not connected")}
               </p>
-              <ConnectionTag connected={tool.connected} />
+              <BoundaryTag boundary={toolExecutionBoundary(tool)} />
             </div>
           </div>
         )
@@ -473,15 +495,17 @@ function ToolsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => voi
   )
 }
 
-function ConnectionTag({ connected }: { connected: boolean }) {
-  if (connected) {
-    return (
-      <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[9px] uppercase tracking-wider text-grow">
-        <Check className="h-2.5 w-2.5" /> Connected
-      </span>
-    )
-  }
-  return <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-warn">Not connected</span>
+/* real available/connected/executable/requires-approval distinction —
+ * never just "on" — see toolExecutionBoundary() in lib/workforce/model. */
+function BoundaryTag({ boundary }: { boundary: ReturnType<typeof toolExecutionBoundary> }) {
+  const meta = TOOL_BOUNDARY_META[boundary]
+  const cls = meta.tone === "good" ? "text-grow" : meta.tone === "warn" ? "text-warn" : "text-muted-foreground"
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1 font-mono text-[9px] uppercase tracking-wider ${cls}`}>
+      {meta.tone === "good" && <Check className="h-2.5 w-2.5" />}
+      {meta.label}
+    </span>
+  )
 }
 
 function RiskTag({ risk }: { risk: "low" | "medium" | "high" | "critical" }) {

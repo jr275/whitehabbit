@@ -23,7 +23,7 @@ interface Row {
   time: number
 }
 
-const STATUSES = ["running", "completed", "blocked", "failed"] as const
+const STATUSES = ["running", "completed", "blocked", "pending_approval", "failed"] as const
 
 export function OutputTable({
   workers,

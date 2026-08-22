@@ -31,6 +31,39 @@ export interface Skill {
 export type ToolRisk = "low" | "medium" | "high" | "critical"
 export type ToolPermission = "read" | "write" | "publish" | "delete" | "financial" | "external_communication"
 
+/** Permissions that must never fire without a human approving first —
+ * shared by the runtime's real approval gate (lib/agent/tool-runner.ts)
+ * and the Studio UI's tool-boundary badge, so they can never disagree
+ * about which actions are "high risk". */
+export const HIGH_RISK_PERMISSIONS: ToolPermission[] = ["write", "publish", "delete", "financial", "external_communication"]
+
+/** The real, current relationship between a worker and a tool — distinct
+ * from the single "connected" boolean, per the product requirement that
+ * a tool must never be treated as executable just because it's listed:
+ *   not_available    — the worker hasn't enabled this tool at all
+ *   not_connected     — enabled, but the real credential/integration isn't present
+ *   requires_approval — connected, but its permission (write/publish/delete/
+ *                        financial/external_communication) means the runtime
+ *                        will halt with PENDING_APPROVAL rather than auto-run it
+ *   executable         — connected, read-permission (or otherwise low-risk):
+ *                        the runtime will actually call it
+ */
+export type ToolExecutionBoundary = "not_available" | "not_connected" | "requires_approval" | "executable"
+
+export function toolExecutionBoundary(tool: WorkforceTool): ToolExecutionBoundary {
+  if (!tool.enabled) return "not_available"
+  if (!tool.connected) return "not_connected"
+  if (HIGH_RISK_PERMISSIONS.includes(tool.permission)) return "requires_approval"
+  return "executable"
+}
+
+export const TOOL_BOUNDARY_META: Record<ToolExecutionBoundary, { label: string; tone: "good" | "warn" | "muted" }> = {
+  not_available: { label: "Not enabled", tone: "muted" },
+  not_connected: { label: "Not connected", tone: "warn" },
+  requires_approval: { label: "Requires approval", tone: "warn" },
+  executable: { label: "Executable", tone: "good" },
+}
+
 export interface WorkforceTool {
   id: string
   name: string
@@ -49,6 +82,11 @@ export interface KnowledgeSource {
   type: "website" | "pdf" | "playbook" | "docs" | "crm" | "faq" | "brand"
   documents: number
   addedAt: number
+  /** Real, operator-authored reference text — never auto-fetched or
+   * invented. Only sources with real content here can ever be surfaced
+   * to a skill's execution context; a source with no content is real
+   * metadata (a catalog entry) but contributes no retrievable text. */
+  content?: string
 }
 
 export interface BehaviorRule {
@@ -121,7 +159,7 @@ export interface WorkerTask {
   skillId: string
   type: SkillCategory
   title: string
-  status: "queued" | "running" | "completed" | "failed" | "blocked"
+  status: "queued" | "running" | "completed" | "failed" | "blocked" | "pending_approval"
   createdAt: number
 }
 
@@ -133,7 +171,7 @@ export interface WorkerExecution {
   id: string
   workerId: string
   taskId: string
-  status: "running" | "completed" | "failed" | "blocked"
+  status: "running" | "completed" | "failed" | "blocked" | "pending_approval"
   reasonCode?: ExecutionReasonCode
   blockedReason?: string
   startedAt: number
@@ -190,6 +228,7 @@ export type WorkerEventType =
   | "task_completed"
   | "task_failed"
   | "task_blocked"
+  | "approval_required"
 
 export interface WorkerEvent {
   id: string
@@ -242,6 +281,7 @@ export const EXECUTION_STATUS_META: Record<WorkerExecution["status"], { label: s
   completed: { label: "Completed", tone: "good" },
   failed: { label: "Failed", tone: "bad" },
   blocked: { label: "Blocked", tone: "warn" },
+  pending_approval: { label: "Pending approval", tone: "warn" },
 }
 
 /* ---- outcome KPI presets, per vertical (section 8) ---- */

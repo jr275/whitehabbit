@@ -66,11 +66,12 @@ export function WorkerOutputCard({
         </div>
       )}
 
-      <div className="mt-4 grid grid-cols-5 gap-2 border-t border-border pt-3.5">
+      <div className={`mt-4 grid gap-2 border-t border-border pt-3.5 ${summary.pendingApproval > 0 ? "grid-cols-6" : "grid-cols-5"}`}>
         <MiniStat value={String(summary.tasks)} label="Tasks" />
         <MiniStat value={String(summary.completed)} label="Completed" tone="good" />
         <MiniStat value={String(summary.failed)} label="Failed" tone={summary.failed > 0 ? "bad" : undefined} />
         <MiniStat value={String(summary.blocked)} label="Blocked" tone={summary.blocked > 0 ? "warn" : undefined} />
+        {summary.pendingApproval > 0 && <MiniStat value={String(summary.pendingApproval)} label="Pending" tone="warn" />}
         <MiniStat value={summary.quality != null ? `${summary.quality}%` : "—"} label="Quality" />
       </div>
     </article>

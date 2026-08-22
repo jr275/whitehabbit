@@ -7,7 +7,7 @@
  * it actually happens (not a fake percentage tick).
  * ------------------------------------------------------------------ */
 
-import { AlertTriangle, KeyRound, Loader2, Play, XCircle } from "lucide-react"
+import { AlertTriangle, KeyRound, Loader2, Play, ShieldAlert, XCircle } from "lucide-react"
 import { SKILL_CATALOG } from "@/lib/workforce/catalog"
 import { SKILL_CATEGORIES, SKILL_CATEGORY_LABEL, type SkillCategory, type Worker, type WorkerEvent, type WorkerExecution, type WorkerTask } from "@/lib/workforce/model"
 import { activeWork, computeReadiness, credentialBlockers, workerCredentialState } from "@/lib/workforce/selectors"
@@ -32,6 +32,9 @@ function describeFinishedRun(worker: Worker, task: WorkerTask, execution: Worker
   if (execution.status === "blocked") {
     const blocker = credentialBlockers(worker).find((b) => b.skillId === task.skillId)
     return { icon: KeyRound, title: blocker?.title ?? "Credential required", detail: blocker?.detail ?? execution.blockedReason ?? "A required credential is not configured." }
+  }
+  if (execution.status === "pending_approval") {
+    return { icon: ShieldAlert, title: "Waiting on human approval", detail: execution.blockedReason ?? "This action requires approval before it can run." }
   }
   switch (execution.reasonCode) {
     case "invalid_credential":
@@ -73,7 +76,7 @@ export function WorkerCanvas({
     .sort((a, b) => b.startedAt - a.startedAt)[0]
   const lastTask = lastExecution ? tasks.find((t) => t.id === lastExecution.taskId) : undefined
   const lastResult =
-    active.length === 0 && lastExecution && lastTask && (lastExecution.status === "blocked" || lastExecution.status === "failed")
+    active.length === 0 && lastExecution && lastTask && (lastExecution.status === "blocked" || lastExecution.status === "failed" || lastExecution.status === "pending_approval")
       ? describeFinishedRun(worker, lastTask, lastExecution)
       : null
 
