@@ -33,6 +33,31 @@ interface GeminiErrorBody {
   error?: { code?: number; message?: string; status?: string }
 }
 
+/** Never let a raw provider message reach the UI/logs unfiltered — Google's
+ * error bodies for this endpoint don't echo the key back, but this is a
+ * defensive backstop against ever surfacing something that looks like one,
+ * plus the existing 300-char cap against runaway bodies. */
+function sanitizeProviderMessage(message: string): string {
+  return message
+    .replace(/AQ\.[A-Za-z0-9_-]+/g, "[redacted]")
+    .replace(/AIzaSy[A-Za-z0-9_-]+/g, "[redacted]")
+    .slice(0, 300)
+}
+
+/** Classify a failed Gemini response on the real signals Google actually
+ * returns — never "every 403 is a bad key". A 403 with status
+ * PERMISSION_DENIED means the key authenticated fine but the project
+ * behind it is denied access (billing, project verification, model
+ * access, etc.) — a materially different, and separately actionable,
+ * condition from an actually invalid/malformed credential. */
+type GeminiFailureKind = "invalid_credential" | "permission_denied" | "provider_error"
+
+function classifyGeminiFailure(httpStatus: number, providerStatus: string | undefined, message: string): GeminiFailureKind {
+  if (providerStatus === "PERMISSION_DENIED") return "permission_denied"
+  if (httpStatus === 401 || providerStatus === "UNAUTHENTICATED" || /api key not valid/i.test(message)) return "invalid_credential"
+  return "provider_error"
+}
+
 async function call(input: LlmCallInput): Promise<ToolActionResult<LlmCallOutput>> {
   const started = Date.now()
   const key = process.env.GEMINI_API_KEY
@@ -58,23 +83,27 @@ async function call(input: LlmCallInput): Promise<ToolActionResult<LlmCallOutput
 
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as GeminiErrorBody | null
-      const message = body?.error?.message ?? `HTTP ${res.status}`
-      const status = body?.error?.status
-      // Gemini reports a bad API key as 400 INVALID_ARGUMENT ("API key
-      // not valid...") as often as a clean 401/403 — classify on the
-      // real signals the API actually returns, not just the HTTP code.
-      const invalidCredential =
-        res.status === 401 ||
-        res.status === 403 ||
-        status === "PERMISSION_DENIED" ||
-        status === "UNAUTHENTICATED" ||
-        /api key not valid/i.test(message)
-      return {
-        ok: false,
-        errorCode: invalidCredential ? "invalid_credential" : "provider_error",
-        error: invalidCredential ? `Gemini rejected the configured API key (${res.status}).` : `Gemini API returned ${res.status}: ${message.slice(0, 300)}`,
-        durationMs: Date.now() - started,
-      }
+      const rawMessage = body?.error?.message ?? `HTTP ${res.status}`
+      const providerStatus = body?.error?.status
+      const sanitizedMessage = sanitizeProviderMessage(rawMessage)
+      const kind = classifyGeminiFailure(res.status, providerStatus, rawMessage)
+      const statusSuffix = providerStatus ? `, ${providerStatus}` : ""
+
+      // errorCode stays within the existing two-value contract
+      // (invalid_credential | provider_error) — permission_denied is a
+      // real, distinct condition but not a credential-validity failure,
+      // so it maps to provider_error; the message text (which the
+      // existing UI surface already renders verbatim as blockedReason)
+      // is what actually carries the distinction through to the user.
+      const errorCode = kind === "invalid_credential" ? "invalid_credential" : "provider_error"
+      const error =
+        kind === "invalid_credential"
+          ? `Gemini rejected the configured API key (${res.status}${statusSuffix}): ${sanitizedMessage}`
+          : kind === "permission_denied"
+            ? `Gemini denied this project access (${res.status}${statusSuffix}): ${sanitizedMessage}`
+            : `Gemini API returned ${res.status}${statusSuffix}: ${sanitizedMessage}`
+
+      return { ok: false, errorCode, error, durationMs: Date.now() - started }
     }
 
     const json = (await res.json()) as {
