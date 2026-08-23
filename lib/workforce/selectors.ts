@@ -84,6 +84,36 @@ export function workerCredentialState(worker: Worker): WorkerCredentialState {
   return credentialBlockers(worker).length === 0 ? "ready" : "not_configured"
 }
 
+/* ---- ONE authoritative worker state — replaces the previous two
+ * separate indicators (a header lifecycle pill and a footer credential
+ * badge, which could disagree). Priority order matters: a worker can
+ * simultaneously be "released" and "missing a credential" — that's
+ * shown as not_configured, since that's what actually blocks the next
+ * click. Real execution history only ever refines "ready" into
+ * "completed"/"failed" once there's something real to report. ---- */
+export type WorkerOverallState = "draft" | "not_configured" | "ready" | "running" | "completed" | "failed"
+
+export const WORKER_STATE_META: Record<WorkerOverallState, { label: string; tone: "muted" | "warn" | "info" | "good" | "bad" }> = {
+  draft: { label: "Draft", tone: "muted" },
+  not_configured: { label: "Not configured", tone: "warn" },
+  ready: { label: "Ready", tone: "good" },
+  running: { label: "Running", tone: "info" },
+  completed: { label: "Completed", tone: "good" },
+  failed: { label: "Failed", tone: "bad" },
+}
+
+export function computeWorkerState(worker: Worker, executions: WorkerExecution[], running: boolean): WorkerOverallState {
+  if (worker.status === "draft") return "draft"
+  if (running) return "running"
+  if (workerCredentialState(worker) === "not_configured") return "not_configured"
+  const last = executions.filter((e) => e.workerId === worker.id && e.status !== "running").sort((a, b) => b.startedAt - a.startedAt)[0]
+  if (!last) return "ready"
+  // blocked/failed/pending_approval all coarsen to "failed" at this
+  // single-badge level — the real distinction is still shown in full
+  // right below it (describeFinishedRun / the execution timeline).
+  return last.status === "completed" ? "completed" : "failed"
+}
+
 /* ---- time helpers ---- */
 export function isToday(ts: number): boolean {
   const d = new Date(ts)

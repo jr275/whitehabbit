@@ -31,6 +31,11 @@ import type {
   WorkerTask,
 } from "./model"
 
+/** Which Build category a just-completed real save belongs to — lets the
+ * canvas briefly acknowledge the matching capability card. Set only
+ * after persistNow()'s PATCH actually succeeds; never on keystroke. */
+export type SaveCategory = "identity" | "mission" | "knowledge" | "skills" | "tools" | "behavior" | "channels"
+
 export interface WorkforceState {
   hydrated: boolean
   workers: Worker[]
@@ -44,6 +49,7 @@ export interface WorkforceState {
   activeWorkerId: string | null
   testingWorkerId: string | null
   notice: string | null
+  lastSaved: { workerId: string; category: SaveCategory; at: number } | null
 }
 
 const INITIAL: WorkforceState = {
@@ -59,6 +65,7 @@ const INITIAL: WorkforceState = {
   activeWorkerId: null,
   testingWorkerId: null,
   notice: null,
+  lastSaved: null,
 }
 
 let idSeq = 0
@@ -151,8 +158,14 @@ class WorkforceStore {
     if (changed) this.set({ workers })
   }
 
-  /** Debounced real persistence — every edit eventually becomes a real PATCH. */
-  private schedulePersist(workerId: string) {
+  private pendingSaveCategory = new Map<string, SaveCategory>()
+
+  /** Debounced real persistence — every edit eventually becomes a real
+   * PATCH. `category` (when given) is what lastSaved reports once this
+   * specific save actually succeeds — a real confirmation, not a typing
+   * indicator. */
+  private schedulePersist(workerId: string, category?: SaveCategory) {
+    if (category) this.pendingSaveCategory.set(workerId, category)
     const existing = this.persistTimers.get(workerId)
     if (existing) clearTimeout(existing)
     this.persistTimers.set(
@@ -164,12 +177,15 @@ class WorkforceStore {
   private async persistNow(workerId: string) {
     const worker = this.state.workers.find((w) => w.id === workerId)
     if (!worker) return
+    const category = this.pendingSaveCategory.get(workerId)
+    this.pendingSaveCategory.delete(workerId)
     try {
       const { worker: saved } = await api<{ worker: Worker }>(`/api/workers/${workerId}`, {
         method: "PATCH",
         body: JSON.stringify({ worker }),
       })
       this.patchWorker(workerId, () => saved)
+      if (category) this.set({ lastSaved: { workerId, category, at: Date.now() } })
     } catch (err) {
       console.log("[v0] persist failed", err)
       this.set({ notice: "Could not save changes — check the connection and try again." })
@@ -204,7 +220,7 @@ class WorkforceStore {
       if (patch.name !== undefined) identity.initials = patch.name.trim().slice(0, 2).toUpperCase() || "NW"
       return { ...w, identity }
     })
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "identity")
   }
 
   toggleTone(workerId: string, trait: string) {
@@ -212,13 +228,13 @@ class WorkforceStore {
       const has = w.identity.tone.includes(trait)
       return { ...w, identity: { ...w.identity, tone: has ? w.identity.tone.filter((t) => t !== trait) : [...w.identity.tone, trait] } }
     })
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "identity")
   }
 
   /* ---- 02 Mission + Outcome ---- */
   setMission(workerId: string, mission: string) {
     this.patchWorker(workerId, (w) => ({ ...w, mission }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "mission")
   }
 
   deriveObjectives(workerId: string) {
@@ -226,64 +242,64 @@ class WorkforceStore {
       ...w,
       objectives: deriveObjectivesFromMission(w.mission).map((text) => ({ id: uid("obj"), text, done: true })),
     }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "mission")
   }
 
   addObjective(workerId: string, text: string) {
     if (!text.trim()) return
     this.patchWorker(workerId, (w) => ({ ...w, objectives: [...w.objectives, { id: uid("obj"), text: text.trim(), done: true }] }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "mission")
   }
 
   editObjective(workerId: string, objId: string, text: string) {
     this.patchWorker(workerId, (w) => ({ ...w, objectives: w.objectives.map((o) => (o.id === objId ? { ...o, text } : o)) }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "mission")
   }
 
   toggleObjective(workerId: string, objId: string) {
     this.patchWorker(workerId, (w) => ({ ...w, objectives: w.objectives.map((o) => (o.id === objId ? { ...o, done: !o.done } : o)) }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "mission")
   }
 
   removeObjective(workerId: string, objId: string) {
     this.patchWorker(workerId, (w) => ({ ...w, objectives: w.objectives.filter((o) => o.id !== objId) }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "mission")
   }
 
   setOutcome(workerId: string, patch: Partial<Worker["outcome"]>) {
     this.patchWorker(workerId, (w) => ({ ...w, outcome: { ...w.outcome, ...patch } }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "mission")
   }
 
   /* ---- 03 Knowledge ---- */
   addKnowledge(workerId: string, item: { name: string; type: KnowledgeSource["type"]; documents: number }) {
     const source: KnowledgeSource = { id: uid("kn"), addedAt: Date.now(), ...item }
     this.patchWorker(workerId, (w) => ({ ...w, knowledge: [source, ...w.knowledge] }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "knowledge")
   }
 
   removeKnowledge(workerId: string, id: string) {
     this.patchWorker(workerId, (w) => ({ ...w, knowledge: w.knowledge.filter((k) => k.id !== id) }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "knowledge")
   }
 
   /** Real, operator-authored reference text for one knowledge source —
    * the only thing the runtime's KnowledgeRetriever ever reads from. */
   setKnowledgeContent(workerId: string, id: string, content: string) {
     this.patchWorker(workerId, (w) => ({ ...w, knowledge: w.knowledge.map((k) => (k.id === id ? { ...k, content } : k)) }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "knowledge")
   }
 
   /* ---- 04 Skills ---- */
   toggleSkill(workerId: string, skillId: string) {
     this.patchWorker(workerId, (w) => ({ ...w, skills: w.skills.map((s) => (s.id === skillId ? { ...s, enabled: !s.enabled } : s)) }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "skills")
   }
 
   /* ---- 05 Tools — enabling is permission; `connected` is real and server-owned ---- */
   toggleTool(workerId: string, toolId: string) {
     this.patchWorker(workerId, (w) => ({ ...w, tools: w.tools.map((t) => (t.id === toolId ? { ...t, enabled: !t.enabled } : t)) }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "tools")
   }
 
   /* ---- 06 Behavior ---- */
@@ -295,23 +311,23 @@ class WorkforceStore {
       ...w,
       behaviors: [...w.behaviors, { id: uid("beh"), raw: trimmed, condition: m?.[1] ?? trimmed, action: m?.[2] ?? "" }],
     }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "behavior")
   }
 
   removeBehavior(workerId: string, id: string) {
     this.patchWorker(workerId, (w) => ({ ...w, behaviors: w.behaviors.filter((b) => b.id !== id) }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "behavior")
   }
 
   /* ---- 07 Channels ---- */
   toggleChannel(workerId: string, channelId: ChannelId) {
     this.patchWorker(workerId, (w) => ({ ...w, channels: w.channels.map((c) => (c.id === channelId ? { ...c, connected: !c.connected } : c)) }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "channels")
   }
 
   setAutonomy(workerId: string, level: Autonomy) {
     this.patchWorker(workerId, (w) => ({ ...w, autonomy: level }))
-    this.schedulePersist(workerId)
+    this.schedulePersist(workerId, "channels")
   }
 
   /* ---- 08 Test — actually executes the real worker ---- */

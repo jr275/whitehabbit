@@ -20,7 +20,7 @@ import { OUTCOME_PRESETS, SKILL_CATEGORIES, SKILL_CATEGORY_LABEL, TOOL_BOUNDARY_
 import { computeReadiness } from "@/lib/workforce/selectors"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
-type StepKey = "identity" | "mission" | "knowledge" | "skills" | "tools" | "behavior" | "channels" | "test" | "release"
+export type StepKey = "identity" | "mission" | "knowledge" | "skills" | "tools" | "behavior" | "channels" | "test" | "release"
 
 const STEPS: { key: StepKey; number: string; label: string }[] = [
   { key: "identity", number: "01", label: "Identity" },
@@ -61,8 +61,9 @@ function truncate(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n).trim()}…` : s
 }
 
-export function BuildPanel({ worker }: { worker: Worker }) {
-  const [openKey, setOpenKey] = useState<StepKey>("identity")
+export function BuildPanel({ worker, activeStep, onStepChange }: { worker: Worker; activeStep: StepKey; onStepChange: (key: StepKey) => void }) {
+  const openKey = activeStep
+  const setOpenKey = onStepChange
   const currentIndex = STEPS.findIndex((s) => s.key === openKey)
 
   return (

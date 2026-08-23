@@ -15,21 +15,17 @@
 
 import { ChevronDown, Plus } from "lucide-react"
 import { useEffect, useState } from "react"
-import { BuildPanel } from "@/components/studio/build-panel"
+import { BuildPanel, type StepKey } from "@/components/studio/build-panel"
 import { LiveOutputsPanel } from "@/components/studio/live-outputs-panel"
 import { StudioShell } from "@/components/studio/studio-shell"
 import { WorkerCanvas } from "@/components/studio/worker-canvas"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
-const STATUS_STYLE: Record<string, { cls: string; label: string; pulse?: boolean }> = {
-  draft: { cls: "border-border text-muted-foreground", label: "Draft" },
-  ready: { cls: "border-primary/30 text-primary", label: "Ready" },
-  live: { cls: "border-grow/30 text-grow", label: "Live", pulse: true },
-  idle: { cls: "border-grow/30 text-grow", label: "Live", pulse: true },
-  working: { cls: "border-primary/30 text-primary", label: "Working", pulse: true },
-}
-
 export function WorkerStudio() {
+  // owned here, not inside BuildPanel, so the canvas's capability cards
+  // can navigate into a Build step and both panels stay one system —
+  // see section 2 of the CEO demo readiness brief.
+  const [activeStep, setActiveStep] = useState<StepKey>("identity")
   const { hydrated, workers, activeWorkerId, tasks, executions, outputs, events } = useWorkforce()
 
   useEffect(() => {
@@ -65,22 +61,18 @@ export function WorkerStudio() {
   }
 
   const running = workforceStore.isRunning(worker.id)
-  const status = running ? STATUS_STYLE.working : (STATUS_STYLE[worker.status] ?? STATUS_STYLE.draft)
 
   return (
     <StudioShell>
       <div className="flex h-[calc(100dvh-3.5rem)] flex-col overflow-hidden">
-        {/* studio sub-header — worker switcher + status */}
+        {/* studio sub-header — just the worker switcher. The one
+         * authoritative worker state lives in the canvas, directly
+         * above Run Worker, where it actually matters — see
+         * computeWorkerState() in lib/workforce/selectors.ts. */}
         <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card/60 px-4 sm:px-6">
           <span className="font-mono text-[10px] uppercase tracking-[0.24em] text-muted-foreground">Studio</span>
           <span className="h-4 w-px bg-border" />
           <WorkerSwitcher workers={workers} activeId={worker.id} />
-          <span
-            className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.14em] ${status.cls}`}
-          >
-            <span className={`h-1.5 w-1.5 rounded-full bg-current ${status.pulse ? "animate-pulse" : ""}`} />
-            {status.label}
-          </span>
         </div>
 
         {/* three panels — the canvas dominates */}
@@ -88,12 +80,21 @@ export function WorkerStudio() {
           <aside className="hidden min-h-0 flex-col border-r border-border bg-card/40 lg:flex">
             <ZoneLabel>Build</ZoneLabel>
             <div className="min-h-0 flex-1">
-              <BuildPanel worker={worker} />
+              <BuildPanel worker={worker} activeStep={activeStep} onStepChange={setActiveStep} />
             </div>
           </aside>
 
           <main className="relative min-h-0 bg-background">
-            <WorkerCanvas worker={worker} tasks={tasks} executions={executions} events={events} outputs={outputs} running={running} />
+            <WorkerCanvas
+              worker={worker}
+              tasks={tasks}
+              executions={executions}
+              events={events}
+              outputs={outputs}
+              running={running}
+              activeStep={activeStep}
+              onNavigateToStep={setActiveStep}
+            />
           </main>
 
           <aside className="hidden min-h-0 flex-col border-l border-border bg-card/40 lg:flex">

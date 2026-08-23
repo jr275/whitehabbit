@@ -2,8 +2,15 @@
 
 /* ------------------------------------------------------------------ *
  * Operational top nav — a slim, persistent bar across the light
- * surfaces. Overview links back to the immersive Fabric; Studio and
- * Outputs are the operational surfaces; Activity is upcoming.
+ * surfaces. Studio and Outputs are the one real, connected product;
+ * that's the whole primary nav.
+ *
+ * Overview (home), Library, and Insights are deliberately NOT linked
+ * here — they're a different, disconnected visual language with no
+ * real Worker data behind them yet (see the product audit). Their
+ * routes and code are untouched and still reachable directly
+ * (/, /library, /insights) for future work — this is a navigation
+ * decision only, not a removal.
  * ------------------------------------------------------------------ */
 
 import { Circle } from "lucide-react"
@@ -11,12 +18,8 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 
 const LINKS = [
-  { href: "/", label: "Overview" },
-  { href: "/library", label: "Library" },
   { href: "/studio", label: "Studio" },
-  { href: "/insights", label: "Insights" },
   { href: "/outputs", label: "Outputs" },
-  { href: "/activity", label: "Activity", soon: true },
 ]
 
 export function TopNav() {
@@ -38,22 +41,7 @@ export function TopNav() {
         {/* section links */}
         <nav className="flex items-center gap-1">
           {LINKS.map((l) => {
-            const active =
-              l.href === "/" ? pathname === "/" : pathname.startsWith(l.href)
-            if (l.soon) {
-              return (
-                <span
-                  key={l.href}
-                  className="flex cursor-default items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] text-muted-foreground/50"
-                  aria-disabled="true"
-                >
-                  {l.label}
-                  <span className="rounded bg-muted px-1 py-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-                    Soon
-                  </span>
-                </span>
-              )
-            }
+            const active = pathname.startsWith(l.href)
             return (
               <Link
                 key={l.href}

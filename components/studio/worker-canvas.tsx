@@ -10,18 +10,33 @@
  * The capability cross is a spatial arrangement (Skills/Tools/
  * Knowledge/Behavior around a Worker Core), not a node graph — there
  * are no edges, no decorative connectors, nothing that isn't real
- * worker data. The execution zone reuses the exact same real
- * event-derived stage list (buildExecutionStages) whether a run is
- * currently in progress or already finished, so "live" and "history"
- * are one real code path, not two.
+ * worker data. It's also a real navigation surface: each card opens
+ * the matching Build step (see onNavigateToStep) — "I see what this
+ * Worker can do -> I click it -> I configure it."
+ *
+ * The execution zone reuses the exact same real event-derived stage
+ * list (buildExecutionStages) whether a run is currently in progress
+ * or already finished, so "live" and "history" are one real code
+ * path, not two. Above it sits the ONE authoritative worker state
+ * (computeWorkerState) — no second status indicator exists elsewhere.
  * ------------------------------------------------------------------ */
 
 import { AlertTriangle, BookOpen, Check, KeyRound, Layers, ListChecks, Loader2, Play, ShieldAlert, Wrench, XCircle } from "lucide-react"
+import { useEffect, useState } from "react"
+import type { StepKey } from "@/components/studio/build-panel"
 import { ExecutionTimeline } from "@/components/outputs/output-drawer"
 import { SKILL_CATALOG } from "@/lib/workforce/catalog"
 import { toolExecutionBoundary, TOOL_BOUNDARY_META, type Worker, type WorkerEvent, type WorkerExecution, type WorkerOutput, type WorkerTask } from "@/lib/workforce/model"
-import { activeWork, buildExecutionStages, computeReadiness, credentialBlockers, timeAgo, todaysTimeline, workerCredentialState } from "@/lib/workforce/selectors"
-import { workforceStore } from "@/lib/workforce/store"
+import {
+  activeWork,
+  buildExecutionStages,
+  computeReadiness,
+  computeWorkerState,
+  credentialBlockers,
+  todaysTimeline,
+  WORKER_STATE_META,
+} from "@/lib/workforce/selectors"
+import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
 interface FinishedRunResult {
   icon: typeof KeyRound
@@ -49,6 +64,16 @@ function describeFinishedRun(worker: Worker, task: WorkerTask, execution: Worker
   }
 }
 
+/** Which capability category a Build step belongs to — connects the
+ * canvas's real save-flash to the real category the store just
+ * confirmed persisted (see SaveCategory in lib/workforce/store.ts). */
+const STEP_SAVE_CATEGORY: Partial<Record<StepKey, string>> = {
+  skills: "skills",
+  tools: "tools",
+  knowledge: "knowledge",
+  behavior: "behavior",
+}
+
 export function WorkerCanvas({
   worker,
   tasks,
@@ -56,6 +81,8 @@ export function WorkerCanvas({
   events,
   outputs,
   running,
+  activeStep,
+  onNavigateToStep,
 }: {
   worker: Worker
   tasks: WorkerTask[]
@@ -63,7 +90,10 @@ export function WorkerCanvas({
   events: WorkerEvent[]
   outputs: WorkerOutput[]
   running: boolean
+  activeStep: StepKey
+  onNavigateToStep: (step: StepKey) => void
 }) {
+  const { lastSaved } = useWorkforce()
   const readiness = computeReadiness(worker)
   const released = worker.status !== "draft"
   // a real blocker is shown as context, not a reason to prevent the
@@ -71,7 +101,8 @@ export function WorkerCanvas({
   // BLOCKED state instead of being told about it secondhand.
   const canRun = released && !running && worker.skills.some((s) => s.enabled)
   const active = activeWork([worker], executions, tasks, events).filter((a) => a.workerId === worker.id)
-  const credentialState = workerCredentialState(worker)
+  const overallState = computeWorkerState(worker, executions, running)
+  const stateMeta = WORKER_STATE_META[overallState]
 
   // the currently running execution (if any) and the most recently
   // finished one — the execution zone shows one real state at a time:
@@ -95,6 +126,18 @@ export function WorkerCanvas({
     .filter((t) => t.workerId === worker.id)
     .slice(0, 4)
 
+  // a brief, real acknowledgement that a Build edit actually persisted
+  // — only fires once the store confirms a real successful PATCH (see
+  // lastSaved in store.ts), never on keystroke, never faked.
+  const [flashCategory, setFlashCategory] = useState<string | null>(null)
+  useEffect(() => {
+    if (!lastSaved || lastSaved.workerId !== worker.id) return
+    setFlashCategory(lastSaved.category)
+    const t = setTimeout(() => setFlashCategory(null), 900)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastSaved?.at, lastSaved?.workerId])
+
   return (
     <div className="flex h-full flex-col">
       <div className="thin-scroll-light flex-1 overflow-y-auto px-6 py-8 sm:px-10">
@@ -112,8 +155,7 @@ export function WorkerCanvas({
         </div>
 
         {/* capability cross — Worker Core surrounded by its real
-         * capabilities. Spatial arrangement only; no edges, no nodes,
-         * no decorative graph. */}
+         * capabilities, and a real navigation surface into Build. */}
         <div className="mx-auto mt-8 grid max-w-2xl grid-cols-1 gap-2.5 lg:grid-cols-3 lg:[grid-template-rows:auto_auto_auto]">
           <CapabilityCard
             className="lg:col-start-2 lg:row-start-1"
@@ -121,9 +163,18 @@ export function WorkerCanvas({
             label="Skills"
             items={worker.skills.filter((s) => s.enabled).map((s) => SKILL_CATALOG.find((t) => t.id === s.id)?.name ?? s.name)}
             empty="No skills enabled"
-            active={active.length > 0}
+            executing={active.length > 0}
+            selected={activeStep === "skills"}
+            flash={flashCategory === STEP_SAVE_CATEGORY.skills}
+            onClick={() => onNavigateToStep("skills")}
           />
-          <ToolsCapabilityCard className="lg:col-start-1 lg:row-start-2" worker={worker} />
+          <ToolsCapabilityCard
+            className="lg:col-start-1 lg:row-start-2"
+            worker={worker}
+            selected={activeStep === "tools"}
+            flash={flashCategory === STEP_SAVE_CATEGORY.tools}
+            onClick={() => onNavigateToStep("tools")}
+          />
           <div className="lg:col-start-2 lg:row-start-2 rounded-xl border border-primary/25 bg-primary/[0.03] p-4 text-center">
             <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Worker readiness</p>
             <p className="mt-1 font-mono text-[22px] font-semibold tabular-nums text-foreground">{readiness.percent}%</p>
@@ -145,6 +196,9 @@ export function WorkerCanvas({
             label="Knowledge"
             items={worker.knowledge.map((k) => k.name)}
             empty="No knowledge sources"
+            selected={activeStep === "knowledge"}
+            flash={flashCategory === STEP_SAVE_CATEGORY.knowledge}
+            onClick={() => onNavigateToStep("knowledge")}
           />
           <CapabilityCard
             className="lg:col-start-2 lg:row-start-3"
@@ -152,6 +206,9 @@ export function WorkerCanvas({
             label="Behavior"
             items={worker.behaviors.map((b) => `IF ${b.condition} → ${b.action}`)}
             empty="No behavior rules set"
+            selected={activeStep === "behavior"}
+            flash={flashCategory === STEP_SAVE_CATEGORY.behavior}
+            onClick={() => onNavigateToStep("behavior")}
           />
         </div>
 
@@ -222,12 +279,23 @@ export function WorkerCanvas({
         </div>
       </div>
 
-      {/* run worker */}
+      {/* run worker — the ONE authoritative worker state, and the
+       * action that visually derives from it */}
       <div className="border-t border-border bg-card/60 p-4">
         {released && (
           <div className="mb-2.5 flex items-center justify-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em]">
-            <span className={`h-1.5 w-1.5 rounded-full ${credentialState === "ready" ? "bg-grow" : "bg-warn"}`} />
-            <span className={credentialState === "ready" ? "text-grow" : "text-warn"}>{credentialState === "ready" ? "Ready" : "Not configured"}</span>
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                stateMeta.tone === "good" ? "bg-grow" : stateMeta.tone === "bad" ? "bg-destructive" : stateMeta.tone === "info" ? "bg-primary" : "bg-warn"
+              } ${overallState === "running" ? "animate-pulse" : ""}`}
+            />
+            <span
+              className={
+                stateMeta.tone === "good" ? "text-grow" : stateMeta.tone === "bad" ? "text-destructive" : stateMeta.tone === "info" ? "text-primary" : "text-warn"
+              }
+            >
+              {stateMeta.label}
+            </span>
           </div>
         )}
         <button
@@ -250,25 +318,42 @@ export function WorkerCanvas({
   )
 }
 
+function cardToneClass(selected: boolean, flash: boolean, executing: boolean): string {
+  if (executing) return "border-primary/40 ring-1 ring-primary/25"
+  if (flash) return "border-primary bg-primary/[0.04]"
+  if (selected) return "border-primary/50"
+  return "border-border hover:border-primary/30"
+}
+
 function CapabilityCard({
   className = "",
   icon: Icon,
   label,
   items,
   empty,
-  active = false,
+  executing = false,
+  selected = false,
+  flash = false,
+  onClick,
 }: {
   className?: string
   icon: typeof Layers
   label: string
   items: string[]
   empty: string
-  active?: boolean
+  executing?: boolean
+  selected?: boolean
+  flash?: boolean
+  onClick?: () => void
 }) {
   const shown = items.slice(0, 3)
   const extra = items.length - shown.length
   return (
-    <div className={`rounded-xl border bg-card p-3.5 transition-colors ${active ? "border-primary/40 ring-1 ring-primary/25" : "border-border"} ${className}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full rounded-xl border bg-card p-3.5 text-left transition-colors ${cardToneClass(selected, flash, executing)} ${className}`}
+    >
       <div className="flex items-center gap-1.5">
         <Icon className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-muted-foreground">{label}</span>
@@ -286,13 +371,29 @@ function CapabilityCard({
           {extra > 0 && <li className="text-[10.5px] text-muted-foreground">+{extra} more</li>}
         </ul>
       )}
-    </div>
+    </button>
   )
 }
 
-function ToolsCapabilityCard({ worker, className = "" }: { worker: Worker; className?: string }) {
+function ToolsCapabilityCard({
+  worker,
+  className = "",
+  selected = false,
+  flash = false,
+  onClick,
+}: {
+  worker: Worker
+  className?: string
+  selected?: boolean
+  flash?: boolean
+  onClick?: () => void
+}) {
   return (
-    <div className={`rounded-xl border border-border bg-card p-3.5 ${className}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full rounded-xl border bg-card p-3.5 text-left transition-colors ${cardToneClass(selected, flash, false)} ${className}`}
+    >
       <div className="flex items-center gap-1.5">
         <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-muted-foreground">Tools</span>
@@ -311,6 +412,6 @@ function ToolsCapabilityCard({ worker, className = "" }: { worker: Worker; class
           )
         })}
       </ul>
-    </div>
+    </button>
   )
 }
