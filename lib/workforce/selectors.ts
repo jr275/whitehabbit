@@ -5,7 +5,7 @@
  * ================================================================== */
 
 import { SKILL_CATALOG } from "./catalog"
-import type { MetricRecord, Worker, WorkerEvent, WorkerExecution, WorkerOutput, WorkerTask } from "./model"
+import type { MetricRecord, Worker, WorkerEvent, WorkerEventType, WorkerExecution, WorkerOutput, WorkerTask } from "./model"
 import { OUTPUT_TYPE_META } from "./model"
 
 /* ---- readiness (Studio) — real, and it names the real blocker ---- */
@@ -188,6 +188,106 @@ export function activeWork(workers: Worker[], executions: WorkerExecution[], tas
       }
     })
     .filter((x): x is ActiveWorkItem => x !== null)
+}
+
+/* ---- post-run stage-by-stage breakdown — built purely from the real
+ * events persisted for one execution (see lib/db/repo.ts's events read).
+ * A stage a run never reached is "pending", never fabricated as done;
+ * the stage where a real failure happened is "failed" with the real
+ * reason. Durations/token counts come straight from the same event
+ * payloads the live stream already used — nothing here is re-estimated. ---- */
+export interface ExecutionStageStep {
+  key: string
+  label: string
+  status: "done" | "failed" | "pending"
+  detail?: string
+  timestamp?: number
+  durationMs?: number
+}
+
+export function buildExecutionStages(execution: WorkerExecution, events: WorkerEvent[], output?: WorkerOutput): ExecutionStageStep[] {
+  const own = events.filter((e) => e.executionId === execution.id).sort((a, b) => a.timestamp - b.timestamp)
+  const byType = (t: WorkerEventType) => own.filter((e) => e.type === t)
+  const steps: ExecutionStageStep[] = []
+
+  const started = byType("task_started")[0]
+  steps.push({ key: "started", label: "Started", status: started ? "done" : "pending", timestamp: started?.timestamp ?? execution.startedAt })
+
+  const toolCompleted = byType("tool_completed")[0]
+  const toolBlocked = byType("tool_blocked")[0]
+  const toolCalled = byType("tool_called")[0]
+  if (toolCompleted) {
+    const p = toolCompleted.payload as { resultCount?: number; durationMs?: number }
+    steps.push({
+      key: "search",
+      label: "Search",
+      status: "done",
+      detail: p.resultCount != null ? `${p.resultCount} real result${p.resultCount === 1 ? "" : "s"}` : undefined,
+      timestamp: toolCompleted.timestamp,
+      durationMs: typeof p.durationMs === "number" ? p.durationMs : undefined,
+    })
+  } else if (toolBlocked) {
+    steps.push({ key: "search", label: "Search", status: "failed", detail: String((toolBlocked.payload as { reason?: string }).reason ?? "Tool blocked"), timestamp: toolBlocked.timestamp })
+  } else {
+    steps.push({ key: "search", label: "Search", status: "pending", timestamp: toolCalled?.timestamp })
+  }
+
+  const reasoningCompleted = byType("reasoning_completed")[0]
+  const reasoningStarted = byType("reasoning_started")[0]
+  if (reasoningCompleted) {
+    const p = reasoningCompleted.payload as { durationMs?: number; inputTokens?: number; outputTokens?: number; executionMode?: string }
+    steps.push({
+      key: "reasoning",
+      label: "Reasoning",
+      status: "done",
+      detail: p.executionMode === "development" ? "Development fixture — no external LLM called" : p.inputTokens != null ? `${p.inputTokens} in / ${p.outputTokens ?? 0} out tokens` : undefined,
+      timestamp: reasoningCompleted.timestamp,
+      durationMs: typeof p.durationMs === "number" ? p.durationMs : undefined,
+    })
+  } else {
+    steps.push({ key: "reasoning", label: "Reasoning", status: "pending", timestamp: reasoningStarted?.timestamp })
+  }
+
+  const outputCreated = byType("output_created")[0]
+  steps.push({
+    key: "output",
+    label: "Output",
+    status: outputCreated ? "done" : "pending",
+    detail: outputCreated ? String((outputCreated.payload as { title?: string }).title ?? "") : undefined,
+    timestamp: outputCreated?.timestamp,
+  })
+
+  steps.push({
+    key: "evaluation",
+    label: "Evaluation",
+    status: output?.evaluation ? "done" : "pending",
+    detail: output?.evaluation ? `Quality ${output.qualityScore ?? "—"}%` : undefined,
+    // evaluate() runs synchronously right before the output is persisted
+    // and emitted — there is no separate timed event for it, so this
+    // honestly shares output_created's real timestamp rather than
+    // inventing a distinct one.
+    timestamp: outputCreated?.timestamp,
+  })
+
+  const done = byType("task_completed")[0]
+  const failed = byType("task_failed")[0]
+  const blocked = byType("task_blocked")[0]
+  const approval = byType("approval_required")[0]
+  const final = done ?? failed ?? blocked ?? approval
+  if (final) {
+    const good = final.type === "task_completed"
+    steps.push({
+      key: "completed",
+      label: good ? "Completed" : final.type === "approval_required" ? "Pending approval" : final.type === "task_blocked" ? "Blocked" : "Failed",
+      status: good ? "done" : "failed",
+      detail: !good ? String((final.payload as { reason?: string }).reason ?? execution.blockedReason ?? "") : undefined,
+      timestamp: final.timestamp,
+    })
+  } else {
+    steps.push({ key: "completed", label: "Completed", status: "pending" })
+  }
+
+  return steps
 }
 
 /* ---- today's activity timeline — real outcomes, not fake ticks ---- */

@@ -67,7 +67,7 @@ export function OutputsHub() {
         <EvolveSection workers={workers} metrics={metrics} tasks={tasks} />
       </div>
 
-      {drawer && <OutputDrawer filter={drawer} workers={workers} tasks={tasks} executions={executions} outputs={outputs} onClose={() => setDrawer(null)} />}
+      {drawer && <OutputDrawer filter={drawer} workers={workers} tasks={tasks} executions={executions} outputs={outputs} events={events} onClose={() => setDrawer(null)} />}
     </div>
   )
 }

@@ -110,7 +110,7 @@ class WorkforceStore {
   async hydrate() {
     if (this.state.hydrated) return
     try {
-      let data = await api<{ workers: Worker[]; tasks: WorkerTask[]; executions: WorkerExecution[]; outputs: WorkerOutput[]; metrics: MetricRecord[]; businessEvents: BusinessEvent[] }>("/api/state")
+      let data = await api<{ workers: Worker[]; tasks: WorkerTask[]; executions: WorkerExecution[]; outputs: WorkerOutput[]; events: WorkerEvent[]; metrics: MetricRecord[]; businessEvents: BusinessEvent[] }>("/api/state")
       if (data.workers.length === 0) {
         await api("/api/seed", { method: "POST" })
         data = await api("/api/state")
@@ -121,6 +121,7 @@ class WorkforceStore {
         tasks: data.tasks,
         executions: data.executions,
         outputs: data.outputs,
+        events: data.events,
         metrics: data.metrics,
         businessEvents: data.businessEvents,
         activeWorkerId: data.workers[0]?.id ?? null,
@@ -133,8 +134,8 @@ class WorkforceStore {
 
   async refetchState() {
     try {
-      const data = await api<{ workers: Worker[]; tasks: WorkerTask[]; executions: WorkerExecution[]; outputs: WorkerOutput[]; metrics: MetricRecord[]; businessEvents: BusinessEvent[] }>("/api/state")
-      this.set({ workers: data.workers, tasks: data.tasks, executions: data.executions, outputs: data.outputs, metrics: data.metrics, businessEvents: data.businessEvents })
+      const data = await api<{ workers: Worker[]; tasks: WorkerTask[]; executions: WorkerExecution[]; outputs: WorkerOutput[]; events: WorkerEvent[]; metrics: MetricRecord[]; businessEvents: BusinessEvent[] }>("/api/state")
+      this.set({ workers: data.workers, tasks: data.tasks, executions: data.executions, outputs: data.outputs, events: data.events, metrics: data.metrics, businessEvents: data.businessEvents })
     } catch (err) {
       console.log("[v0] refetch failed", err)
     }

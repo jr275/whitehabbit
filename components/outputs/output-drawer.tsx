@@ -9,13 +9,13 @@
  * shows the real reason instead of pretending one exists.
  * ------------------------------------------------------------------ */
 
-import { ArrowLeft, X } from "lucide-react"
+import { ArrowLeft, Check, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { DevModeTag } from "@/components/outputs/output-table"
 import { SKILL_CATALOG, TOOL_CATALOG } from "@/lib/workforce/catalog"
-import type { Worker, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
+import type { Worker, WorkerEvent, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
 import { EXECUTION_STATUS_META, OUTPUT_TYPE_META } from "@/lib/workforce/model"
-import { isToday, timeOfDay } from "@/lib/workforce/selectors"
+import { buildExecutionStages, isToday, timeOfDay } from "@/lib/workforce/selectors"
 
 export type DrawerFilter = { kind: "type"; workerId: string; type: string; title: string } | { kind: "execution"; executionId: string }
 
@@ -32,6 +32,7 @@ export function OutputDrawer({
   tasks,
   executions,
   outputs,
+  events,
   onClose,
 }: {
   filter: DrawerFilter
@@ -39,6 +40,7 @@ export function OutputDrawer({
   tasks: WorkerTask[]
   executions: WorkerExecution[]
   outputs: WorkerOutput[]
+  events: WorkerEvent[]
   onClose: () => void
 }) {
   const list =
@@ -82,7 +84,7 @@ export function OutputDrawer({
 
         <div className="thin-scroll-light flex-1 overflow-y-auto">
           {showBlockedDetail && singleExecution ? (
-            <BlockedDetail execution={singleExecution} task={singleTask} />
+            <BlockedDetail execution={singleExecution} task={singleTask} events={events} />
           ) : !activeOutput ? (
             <ul className="divide-y divide-border">
               {list.map((o) => (
@@ -99,7 +101,7 @@ export function OutputDrawer({
               {list.length === 0 && <p className="px-5 py-8 text-center text-[13px] text-muted-foreground">No outputs to show.</p>}
             </ul>
           ) : (
-            <DetailView output={activeOutput} execution={activeExecution} task={activeTask} />
+            <DetailView output={activeOutput} execution={activeExecution} task={activeTask} events={events} />
           )}
         </div>
       </div>
@@ -107,14 +109,21 @@ export function OutputDrawer({
   )
 }
 
-function BlockedDetail({ execution, task }: { execution: WorkerExecution; task?: WorkerTask }) {
+function BlockedDetail({ execution, task, events }: { execution: WorkerExecution; task?: WorkerTask; events: WorkerEvent[] }) {
   const meta = EXECUTION_STATUS_META[execution.status]
+  const stages = buildExecutionStages(execution, events)
   return (
     <div className="flex flex-col gap-4 px-5 py-5">
       <div className="rounded-lg border border-warn/30 bg-warn/5 p-4">
         <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-warn">{meta.label}</p>
         <p className="mt-2 text-[13px] leading-relaxed text-foreground">{execution.blockedReason ?? "No reason recorded."}</p>
       </div>
+
+      <div>
+        <SectionLabel>Execution timeline — exactly how far it got</SectionLabel>
+        <ExecutionTimeline stages={stages} />
+      </div>
+
       <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">
         <MetaRow k="Task" v={task?.title ?? "—"} />
         {execution.reasonCode && <MetaRow k="Reason" v={REASON_CODE_LABEL[execution.reasonCode]} />}
@@ -128,16 +137,49 @@ function BlockedDetail({ execution, task }: { execution: WorkerExecution; task?:
   )
 }
 
-function DetailView({ output, execution, task }: { output: WorkerOutput; execution?: WorkerExecution; task?: WorkerTask }) {
+/** Real stage-by-stage progression — see buildExecutionStages(). A stage
+ * the run never reached renders as a hollow, muted step, not a fake
+ * checkmark; the stage that actually failed renders red with the real
+ * reason. Durations shown are the same real numbers the live stream used. */
+export function ExecutionTimeline({ stages }: { stages: ReturnType<typeof buildExecutionStages> }) {
+  return (
+    <ol className="flex flex-col gap-0">
+      {stages.map((s, i) => (
+        <li key={s.key} className="relative flex gap-3 pb-3 last:pb-0">
+          {i < stages.length - 1 && <span className="absolute left-[9px] top-5 h-[calc(100%-0.5rem)] w-px bg-border" />}
+          <span
+            className={`z-10 mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border ${
+              s.status === "done" ? "border-grow bg-grow/15 text-grow" : s.status === "failed" ? "border-destructive bg-destructive/15 text-destructive" : "border-border bg-card text-muted-foreground/40"
+            }`}
+          >
+            {s.status === "done" ? <Check className="h-2.5 w-2.5" /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
+          </span>
+          <div className="min-w-0 flex-1 pt-px">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className={`text-[12.5px] font-medium ${s.status === "pending" ? "text-muted-foreground/60" : "text-foreground"}`}>{s.label}</span>
+              {s.durationMs != null && <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground">{s.durationMs}ms</span>}
+            </div>
+            {s.detail && <p className={`mt-0.5 text-[11px] leading-relaxed ${s.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>{s.detail}</p>}
+            {s.status === "pending" && !s.detail && <p className="mt-0.5 text-[11px] italic text-muted-foreground/60">Not reached</p>}
+          </div>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+function DetailView({ output, execution, task, events }: { output: WorkerOutput; execution?: WorkerExecution; task?: WorkerTask; events: WorkerEvent[] }) {
   const template = task ? SKILL_CATALOG.find((s) => s.id === task.skillId) : undefined
   const toolNames = template?.requiredTools.map((id) => TOOL_CATALOG.find((t) => t.id === id)?.name ?? id).join(", ")
+  const isDev = execution?.executionMode === "development"
+  const stages = execution ? buildExecutionStages(execution, events, output) : []
 
   return (
     <div className="flex flex-col gap-5 px-5 py-5">
       <div>
         <div className="flex items-center gap-2">
           <h3 className="text-pretty text-[16px] font-semibold leading-snug text-foreground">{output.title}</h3>
-          {execution?.executionMode === "development" && <DevModeTag />}
+          {isDev && <DevModeTag />}
         </div>
         <div className="mt-2 grid grid-cols-2 gap-3">
           <Field label="Status">
@@ -147,35 +189,23 @@ function DetailView({ output, execution, task }: { output: WorkerOutput; executi
             <span className="font-mono text-[13px] tabular-nums text-foreground">{output.qualityScore ?? "—"}%</span>
           </Field>
         </div>
-      </div>
 
-      {task && (
-        <div>
-          <SectionLabel>Task</SectionLabel>
-          <p className="rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-[12.5px] leading-relaxed text-foreground">{task.title}</p>
+        {/* the economics/telemetry of this run, at a glance — the same
+         * real numbers the full Execution metadata section below has in
+         * detail, promoted here so they're never buried past everything
+         * else. */}
+        <div className="mt-3 grid grid-cols-4 gap-2 rounded-lg border border-border bg-secondary/30 p-2.5">
+          <StatCell label="Model" value={execution?.model ?? "—"} />
+          <StatCell label="Tokens" value={isDev ? "0 / 0" : execution?.inputTokens != null ? `${execution.inputTokens}/${execution.outputTokens ?? 0}` : "—"} />
+          <StatCell label="Cost" value={isDev ? "$0 (dev)" : execution?.costUsd != null ? `$${execution.costUsd.toFixed(4)}` : "—"} />
+          <StatCell label="Time" value={execution?.durationMs ? `${Math.round(execution.durationMs / 1000)}s` : "—"} />
         </div>
-      )}
+      </div>
 
       <div>
         <SectionLabel>Output</SectionLabel>
         <p className="whitespace-pre-line rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-[12.5px] leading-relaxed text-foreground">{output.content}</p>
       </div>
-
-      {output.sources && output.sources.length > 0 && (
-        <div>
-          <SectionLabel>Real sources used ({output.sources.length})</SectionLabel>
-          <ul className="flex flex-col gap-1.5">
-            {output.sources.map((s, i) => (
-              <li key={i} className="rounded-lg border border-border bg-card px-3 py-2">
-                <a href={s.url} target="_blank" rel="noreferrer" className="block truncate text-[12px] font-medium text-primary hover:underline">
-                  {s.title}
-                </a>
-                {s.snippet && <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{s.snippet}</p>}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       {output.evaluation && (
         <div>
@@ -197,18 +227,57 @@ function DetailView({ output, execution, task }: { output: WorkerOutput; executi
         </div>
       )}
 
+      {output.sources && output.sources.length > 0 && (
+        <div>
+          <SectionLabel>Real sources used ({output.sources.length})</SectionLabel>
+          <ul className="flex flex-col gap-1.5">
+            {output.sources.map((s, i) => (
+              <li key={i} className="rounded-lg border border-border bg-card px-3 py-2">
+                <a href={s.url} target="_blank" rel="noreferrer" className="block truncate text-[12px] font-medium text-primary hover:underline">
+                  {s.title}
+                </a>
+                {s.snippet && <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{s.snippet}</p>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {stages.length > 0 && (
+        <div>
+          <SectionLabel>Execution timeline</SectionLabel>
+          <ExecutionTimeline stages={stages} />
+        </div>
+      )}
+
+      {task && (
+        <div>
+          <SectionLabel>Task</SectionLabel>
+          <p className="rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-[12.5px] leading-relaxed text-foreground">{task.title}</p>
+        </div>
+      )}
+
       <div>
         <SectionLabel>Execution metadata</SectionLabel>
         <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">
-          {execution?.executionMode === "development" && <MetaRow k="Mode" v="Development simulation — no external LLM was called" />}
+          {isDev && <MetaRow k="Mode" v="Development simulation — no external LLM was called" />}
           <MetaRow k="Timestamp" v={new Date(output.createdAt).toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" })} />
           <MetaRow k="Duration" v={execution?.durationMs ? `${Math.round(execution.durationMs / 1000)}s` : "—"} />
           <MetaRow k="Model" v={execution?.model ?? "—"} />
-          <MetaRow k="Tokens" v={execution?.executionMode === "development" ? "0 in / 0 out (development)" : execution?.inputTokens != null ? `${execution.inputTokens} in / ${execution.outputTokens ?? 0} out` : "—"} />
-          <MetaRow k="Cost" v={execution?.executionMode === "development" ? "$0.0000 (development)" : execution?.costUsd != null ? `$${execution.costUsd.toFixed(4)}` : "—"} />
+          <MetaRow k="Tokens" v={isDev ? "0 in / 0 out (development)" : execution?.inputTokens != null ? `${execution.inputTokens} in / ${execution.outputTokens ?? 0} out` : "—"} />
+          <MetaRow k="Cost" v={isDev ? "$0.0000 (development)" : execution?.costUsd != null ? `$${execution.costUsd.toFixed(4)}` : "—"} />
           <MetaRow k="Tools used" v={toolNames || "—"} />
         </dl>
       </div>
+    </div>
+  )
+}
+
+function StatCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-0.5 truncate font-mono text-[12px] font-medium tabular-nums text-foreground">{value}</div>
     </div>
   )
 }

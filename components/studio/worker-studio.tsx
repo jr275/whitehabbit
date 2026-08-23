@@ -93,7 +93,7 @@ export function WorkerStudio() {
           </aside>
 
           <main className="relative min-h-0 bg-background">
-            <WorkerCanvas worker={worker} tasks={tasks} executions={executions} events={events} running={running} />
+            <WorkerCanvas worker={worker} tasks={tasks} executions={executions} events={events} outputs={outputs} running={running} />
           </main>
 
           <aside className="hidden min-h-0 flex-col border-l border-border bg-card/40 lg:flex">

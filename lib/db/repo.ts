@@ -197,6 +197,7 @@ export interface BootstrapState {
   tasks: WorkerTask[]
   executions: WorkerExecution[]
   outputs: WorkerOutput[]
+  events: WorkerEvent[]
   metrics: MetricRecord[]
   businessEvents: BusinessEvent[]
 }
@@ -206,7 +207,7 @@ export function getBootstrapState(orgId: string = DEFAULT_ORG_ID): BootstrapStat
   const workers = listWorkers(orgId)
   const workerIds = workers.map((w) => w.id)
   if (workerIds.length === 0) {
-    return { workers: [], tasks: [], executions: [], outputs: [], metrics: [], businessEvents: [] }
+    return { workers: [], tasks: [], executions: [], outputs: [], events: [], metrics: [], businessEvents: [] }
   }
   const placeholders = workerIds.map(() => "?").join(",")
 
@@ -265,6 +266,24 @@ export function getBootstrapState(orgId: string = DEFAULT_ORG_ID): BootstrapStat
     }
   })
 
+  // Real, already-persisted per-execution events (see insertEvent) — not
+  // previously returned to the client, so a completed run's stage-by-
+  // stage progression was only ever visible during the live stream and
+  // lost on reload. This is the same real rows the live stream came
+  // from, just read back; no new data is written or invented here.
+  const eventRows = db
+    .prepare(`SELECT * FROM events WHERE worker_id IN (${placeholders}) ORDER BY timestamp DESC LIMIT 2000`)
+    .all(...workerIds) as any[]
+  const events: WorkerEvent[] = eventRows.map((r) => ({
+    id: r.id,
+    workerId: r.worker_id,
+    executionId: r.execution_id,
+    taskId: r.task_id,
+    type: r.type,
+    timestamp: r.timestamp,
+    payload: JSON.parse(r.payload),
+  }))
+
   const metricRows = db
     .prepare(`SELECT * FROM metrics WHERE worker_id IN (${placeholders}) ORDER BY recorded_at DESC LIMIT 1000`)
     .all(...workerIds) as any[]
@@ -292,5 +311,5 @@ export function getBootstrapState(orgId: string = DEFAULT_ORG_ID): BootstrapStat
     occurredAt: r.occurred_at,
   }))
 
-  return { workers, tasks, executions, outputs, metrics, businessEvents }
+  return { workers, tasks, executions, outputs, events, metrics, businessEvents }
 }
