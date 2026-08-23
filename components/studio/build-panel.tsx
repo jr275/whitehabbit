@@ -72,11 +72,15 @@ export function BuildPanel({ worker, activeStep, onStepChange }: { worker: Worke
         const status: "done" | "active" | "upcoming" = i < currentIndex ? "done" : i === currentIndex ? "active" : "upcoming"
         const open = step.key === openKey
         return (
-          <div key={step.key} className="border-b border-border/70 last:border-b-0">
+          <div key={step.key} className="relative border-b border-border/70 last:border-b-0">
+            <span
+              aria-hidden
+              className={`absolute inset-y-2 left-0 w-0.5 rounded-full transition-colors duration-200 ${open ? "bg-primary" : "bg-transparent"}`}
+            />
             <button
               onClick={() => setOpenKey(step.key)}
-              className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2.5 text-left transition-colors ${
-                open ? "bg-secondary" : "hover:bg-secondary/60"
+              className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition-colors duration-150 ${
+                open ? "bg-secondary" : "hover:bg-secondary/60 active:bg-secondary/80"
               }`}
             >
               <StepIcon status={status} />
@@ -152,7 +156,7 @@ function Continue({ onClick, label = "Continue" }: { onClick: () => void; label?
   return (
     <button
       onClick={onClick}
-      className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
+      className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground transition-[opacity,transform] duration-150 hover:opacity-90 active:scale-[0.98]"
     >
       {label}
     </button>
@@ -232,7 +236,7 @@ function MissionStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => v
 
   return (
     <div className="flex flex-col gap-3">
-      <Field label="Mission">
+      <Field label="Mission" hint="This becomes the real task this worker runs — sent as-is when you click Run Worker.">
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -695,11 +699,12 @@ function Switch({ on }: { on: boolean }) {
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="flex flex-col gap-1.5">
       <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
       {children}
+      {hint && <span className="text-[10.5px] leading-relaxed text-muted-foreground/80">{hint}</span>}
     </label>
   )
 }

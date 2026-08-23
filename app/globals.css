@@ -259,6 +259,9 @@
   .modal-input::placeholder {
     color: var(--muted-foreground);
   }
+  .modal-input:hover:not(:focus-visible) {
+    border-color: color-mix(in oklch, var(--foreground) 22%, var(--border));
+  }
   .modal-input:focus-visible {
     border-color: var(--ring);
     box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 18%, transparent);
@@ -284,4 +287,14 @@
 }
 .animate-blink {
   animation: wh-blink 1.4s ease-in-out infinite;
+}
+
+/* One-shot arrival for a genuinely new real output — plays once on
+ * mount only, never re-triggers on already-rendered cards. */
+@keyframes wh-output-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-output-in {
+  animation: wh-output-in 0.28s ease-out;
 }

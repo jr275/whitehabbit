@@ -141,28 +141,29 @@ export function WorkerCanvas({
   return (
     <div className="flex h-full flex-col">
       <div className="thin-scroll-light flex-1 overflow-y-auto px-6 py-8 sm:px-10">
-        {/* worker header */}
-        <div className="flex flex-col items-center text-center">
-          <span
-            className="flex h-14 w-14 items-center justify-center rounded-2xl text-base font-bold text-white shadow-sm"
-            style={{ backgroundColor: worker.identity.accent || "#5a6ef0" }}
-          >
-            {worker.identity.initials || "NW"}
-          </span>
-          <h1 className="mt-3 text-[20px] font-semibold tracking-tight text-foreground">{worker.identity.name || "Unnamed worker"}</h1>
-          <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">{worker.identity.role || "No role set"}</p>
-          {worker.mission.trim() && <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-muted-foreground">{worker.mission}</p>}
-        </div>
-
-        {/* capability cross — Worker Core surrounded by its real
-         * capabilities, and a real navigation surface into Build. */}
-        <div className="mx-auto mt-8 grid max-w-2xl grid-cols-1 gap-2.5 lg:grid-cols-3 lg:[grid-template-rows:auto_auto_auto]">
+        {/* capability cross — Worker identity at the center, surrounded
+         * by its real capabilities, and a real navigation surface into
+         * Build. Identity is first in DOM so it leads on mobile (stacked)
+         * and lands in the center cell at lg via explicit placement —
+         * "what is this Worker?" before "is it ready?" */}
+        <div className="mx-auto mt-2 grid max-w-2xl grid-cols-1 gap-2.5 lg:grid-cols-3 lg:[grid-template-rows:auto_auto_auto]">
+          <div className="flex flex-col items-center justify-center rounded-xl border border-foreground/15 bg-card px-4 py-5 text-center lg:col-start-2 lg:row-start-2">
+            <span
+              className="flex h-12 w-12 items-center justify-center rounded-2xl text-[13px] font-bold text-white shadow-sm"
+              style={{ backgroundColor: worker.identity.accent || "#5a6ef0" }}
+            >
+              {worker.identity.initials || "NW"}
+            </span>
+            <h1 className="mt-2.5 text-[16px] font-semibold leading-tight tracking-tight text-foreground">{worker.identity.name || "Unnamed worker"}</h1>
+            <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{worker.identity.role || "No role set"}</p>
+            {worker.mission.trim() && <p className="mt-2 line-clamp-3 text-[11.5px] leading-relaxed text-muted-foreground">{worker.mission}</p>}
+          </div>
           <CapabilityCard
             className="lg:col-start-2 lg:row-start-1"
             icon={Layers}
             label="Skills"
             items={worker.skills.filter((s) => s.enabled).map((s) => SKILL_CATALOG.find((t) => t.id === s.id)?.name ?? s.name)}
-            empty="No skills enabled"
+            empty="No skills enabled — click to configure"
             executing={active.length > 0}
             selected={activeStep === "skills"}
             flash={flashCategory === STEP_SAVE_CATEGORY.skills}
@@ -175,27 +176,12 @@ export function WorkerCanvas({
             flash={flashCategory === STEP_SAVE_CATEGORY.tools}
             onClick={() => onNavigateToStep("tools")}
           />
-          <div className="lg:col-start-2 lg:row-start-2 rounded-xl border border-primary/25 bg-primary/[0.03] p-4 text-center">
-            <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Worker readiness</p>
-            <p className="mt-1 font-mono text-[22px] font-semibold tabular-nums text-foreground">{readiness.percent}%</p>
-            <div className="mx-auto mt-2 h-1.5 w-full max-w-[10rem] overflow-hidden rounded-full bg-secondary">
-              <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${readiness.percent}%` }} />
-            </div>
-            <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-left">
-              {readiness.steps.map((s) => (
-                <div key={s.key} className="flex items-center justify-between gap-1.5">
-                  <dt className="truncate text-[10.5px] text-muted-foreground">{s.label}</dt>
-                  <dd className={`shrink-0 font-mono text-[10px] ${s.done ? "text-grow" : "text-muted-foreground/50"}`}>{s.done ? "✓" : "—"}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
           <CapabilityCard
             className="lg:col-start-3 lg:row-start-2"
             icon={BookOpen}
             label="Knowledge"
             items={worker.knowledge.map((k) => k.name)}
-            empty="No knowledge sources"
+            empty="No knowledge sources — click to connect"
             selected={activeStep === "knowledge"}
             flash={flashCategory === STEP_SAVE_CATEGORY.knowledge}
             onClick={() => onNavigateToStep("knowledge")}
@@ -205,11 +191,31 @@ export function WorkerCanvas({
             icon={ListChecks}
             label="Behavior"
             items={worker.behaviors.map((b) => `IF ${b.condition} → ${b.action}`)}
-            empty="No behavior rules set"
+            empty="No behavior rules — click to add one"
             selected={activeStep === "behavior"}
             flash={flashCategory === STEP_SAVE_CATEGORY.behavior}
             onClick={() => onNavigateToStep("behavior")}
           />
+        </div>
+
+        {/* readiness — kept prominent (percent, bar, per-step checklist,
+         * all real) but as a slim strip rather than the visual center. */}
+        <div className="mx-auto mt-3 max-w-2xl rounded-lg border border-primary/25 bg-primary/[0.03] px-4 py-2.5">
+          <div className="flex items-center gap-3">
+            <p className="shrink-0 font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Readiness</p>
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary">
+              <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${readiness.percent}%` }} />
+            </div>
+            <p className="shrink-0 font-mono text-[13px] font-semibold tabular-nums text-foreground">{readiness.percent}%</p>
+          </div>
+          <dl className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+            {readiness.steps.map((s) => (
+              <div key={s.key} className="flex items-center gap-1">
+                <dt className="text-[10.5px] text-muted-foreground">{s.label}</dt>
+                <dd className={`font-mono text-[10px] ${s.done ? "text-grow" : "text-muted-foreground/50"}`}>{s.done ? "✓" : "—"}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
 
         {readiness.blockers.length > 0 && (
@@ -236,7 +242,7 @@ export function WorkerCanvas({
                 {active[0] && <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{active[0].elapsedSeconds}s</span>}
               </div>
               <div className="mt-3">
-                <ExecutionTimeline stages={liveStages} />
+                <ExecutionTimeline stages={liveStages} live />
               </div>
             </div>
           ) : lastResult ? (
@@ -285,14 +291,14 @@ export function WorkerCanvas({
         {released && (
           <div className="mb-2.5 flex items-center justify-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em]">
             <span
-              className={`h-1.5 w-1.5 rounded-full ${
+              className={`h-1.5 w-1.5 rounded-full transition-colors duration-300 ${
                 stateMeta.tone === "good" ? "bg-grow" : stateMeta.tone === "bad" ? "bg-destructive" : stateMeta.tone === "info" ? "bg-primary" : "bg-warn"
               } ${overallState === "running" ? "animate-pulse" : ""}`}
             />
             <span
-              className={
+              className={`transition-colors duration-300 ${
                 stateMeta.tone === "good" ? "text-grow" : stateMeta.tone === "bad" ? "text-destructive" : stateMeta.tone === "info" ? "text-primary" : "text-warn"
-              }
+              }`}
             >
               {stateMeta.label}
             </span>
@@ -301,7 +307,7 @@ export function WorkerCanvas({
         <button
           onClick={() => workforceStore.runWorker(worker.id)}
           disabled={!canRun}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-[14px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-[14px] font-semibold text-primary-foreground transition-[opacity,transform] duration-150 hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100"
         >
           {running ? (
             <>
@@ -321,8 +327,8 @@ export function WorkerCanvas({
 function cardToneClass(selected: boolean, flash: boolean, executing: boolean): string {
   if (executing) return "border-primary/40 ring-1 ring-primary/25"
   if (flash) return "border-primary bg-primary/[0.04]"
-  if (selected) return "border-primary/50"
-  return "border-border hover:border-primary/30"
+  if (selected) return "border-primary/50 bg-primary/[0.02] hover:border-primary/60"
+  return "border-border hover:border-primary/30 hover:bg-secondary/30"
 }
 
 function CapabilityCard({

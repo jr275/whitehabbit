@@ -141,29 +141,49 @@ function BlockedDetail({ execution, task, events }: { execution: WorkerExecution
  * the run never reached renders as a hollow, muted step, not a fake
  * checkmark; the stage that actually failed renders red with the real
  * reason. Durations shown are the same real numbers the live stream used. */
-export function ExecutionTimeline({ stages }: { stages: ReturnType<typeof buildExecutionStages> }) {
+export function ExecutionTimeline({ stages, live = false }: { stages: ReturnType<typeof buildExecutionStages>; live?: boolean }) {
+  // the real stage list is already ordered; while a run is actually in
+  // progress (live), the first not-yet-reached stage is the one it's
+  // currently on — a read of real, existing data, not a new status.
+  const currentIdx = live ? stages.findIndex((s) => s.status === "pending") : -1
   return (
     <ol className="flex flex-col gap-0">
-      {stages.map((s, i) => (
-        <li key={s.key} className="relative flex gap-3 pb-3 last:pb-0">
-          {i < stages.length - 1 && <span className="absolute left-[9px] top-5 h-[calc(100%-0.5rem)] w-px bg-border" />}
-          <span
-            className={`z-10 mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border ${
-              s.status === "done" ? "border-grow bg-grow/15 text-grow" : s.status === "failed" ? "border-destructive bg-destructive/15 text-destructive" : "border-border bg-card text-muted-foreground/40"
-            }`}
-          >
-            {s.status === "done" ? <Check className="h-2.5 w-2.5" /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
-          </span>
-          <div className="min-w-0 flex-1 pt-px">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className={`text-[12.5px] font-medium ${s.status === "pending" ? "text-muted-foreground/60" : "text-foreground"}`}>{s.label}</span>
-              {s.durationMs != null && <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground">{s.durationMs}ms</span>}
+      {stages.map((s, i) => {
+        const isCurrent = i === currentIdx
+        return (
+          <li key={s.key} className="relative flex gap-3 pb-3 last:pb-0">
+            {i < stages.length - 1 && <span className="absolute left-[9px] top-5 h-[calc(100%-0.5rem)] w-px bg-border" />}
+            <span
+              className={`z-10 mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border transition-colors duration-300 ${
+                s.status === "done"
+                  ? "border-grow bg-grow/15 text-grow"
+                  : s.status === "failed"
+                    ? "border-destructive bg-destructive/15 text-destructive"
+                    : isCurrent
+                      ? "border-primary bg-primary/15 text-primary"
+                      : "border-border bg-card text-muted-foreground/40"
+              }`}
+            >
+              {s.status === "done" ? (
+                <Check className="h-2.5 w-2.5" />
+              ) : (
+                <span className={`h-1.5 w-1.5 rounded-full bg-current ${isCurrent ? "animate-pulse" : ""}`} />
+              )}
+            </span>
+            <div className="min-w-0 flex-1 pt-px">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className={`text-[12.5px] font-medium ${isCurrent ? "text-primary" : s.status === "pending" ? "text-muted-foreground/60" : "text-foreground"}`}>
+                  {s.label}
+                </span>
+                {s.durationMs != null && <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground">{s.durationMs}ms</span>}
+              </div>
+              {s.detail && <p className={`mt-0.5 text-[11px] leading-relaxed ${s.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>{s.detail}</p>}
+              {isCurrent && !s.detail && <p className="mt-0.5 text-[11px] text-primary">In progress</p>}
+              {s.status === "pending" && !isCurrent && !s.detail && <p className="mt-0.5 text-[11px] italic text-muted-foreground/60">Not reached</p>}
             </div>
-            {s.detail && <p className={`mt-0.5 text-[11px] leading-relaxed ${s.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>{s.detail}</p>}
-            {s.status === "pending" && !s.detail && <p className="mt-0.5 text-[11px] italic text-muted-foreground/60">Not reached</p>}
-          </div>
-        </li>
-      ))}
+          </li>
+        )
+      })}
     </ol>
   )
 }
@@ -203,8 +223,8 @@ function DetailView({ output, execution, task, events }: { output: WorkerOutput;
       </div>
 
       <div>
-        <SectionLabel>Output</SectionLabel>
-        <p className="whitespace-pre-line rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-[12.5px] leading-relaxed text-foreground">{output.content}</p>
+        <ResultLabel>Result</ResultLabel>
+        <p className="whitespace-pre-line rounded-lg border border-border bg-card px-3.5 py-3 text-[13px] leading-relaxed text-foreground shadow-sm">{output.content}</p>
       </div>
 
       {output.evaluation && (
@@ -293,6 +313,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <div className="mb-1.5 font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{children}</div>
+}
+
+/** The Result is the actual work product — one visual step louder than
+ * the SectionLabel used for supporting telemetry (Evaluation, Sources,
+ * Timeline, Task, Metadata), so it reads first without adding anything
+ * that isn't already there. */
+function ResultLabel({ children }: { children: React.ReactNode }) {
+  return <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-[0.1em] text-foreground">{children}</div>
 }
 
 function MetaRow({ k, v }: { k: string; v: string }) {

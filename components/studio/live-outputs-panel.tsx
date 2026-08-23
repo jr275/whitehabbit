@@ -100,7 +100,7 @@ function EmptyState({ worker }: { worker: Worker }) {
 function OutputCard({ output, execution }: { output: WorkerOutput; execution?: WorkerExecution }) {
   const meta = OUTPUT_TYPE_META[output.type] ?? { label: output.type }
   return (
-    <div className={`rounded-xl border bg-card p-3.5 ${output.status === "failed" ? "border-destructive/25" : "border-border"}`}>
+    <div className={`animate-output-in rounded-xl border bg-card p-3.5 ${output.status === "failed" ? "border-destructive/25" : "border-border"}`}>
       <div className="flex items-center gap-1.5">
         <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">{meta.label}</span>
         {execution?.executionMode === "development" && <DevModeTag />}
