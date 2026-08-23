@@ -48,6 +48,7 @@ export interface WorkforceState {
   runningWorkerIds: string[]
   activeWorkerId: string | null
   testingWorkerId: string | null
+  creatingWorker: boolean
   notice: string | null
   lastSaved: { workerId: string; category: SaveCategory; at: number } | null
 }
@@ -64,6 +65,7 @@ const INITIAL: WorkforceState = {
   runningWorkerIds: [],
   activeWorkerId: null,
   testingWorkerId: null,
+  creatingWorker: false,
   notice: null,
   lastSaved: null,
 }
@@ -192,11 +194,26 @@ class WorkforceStore {
     }
   }
 
-  /* ---- worker lifecycle ---- */
-  async createDraftWorker(): Promise<string> {
-    const { worker } = await api<{ worker: Worker }>("/api/workers", { method: "POST" })
-    this.set({ workers: [worker, ...this.state.workers], activeWorkerId: worker.id })
-    return worker.id
+  /* ---- worker lifecycle ----
+   * The one canonical creation path — the empty-state CTA and the
+   * "+ New worker" switcher entry both call this and nothing else.
+   * The in-flight guard lives here, not in a component, so it protects
+   * every caller: a second call while one is already in flight is a
+   * no-op rather than a second real POST/DB row (see TEST D). */
+  async createDraftWorker(): Promise<string | null> {
+    if (this.state.creatingWorker) return null
+    this.set({ creatingWorker: true })
+    try {
+      const { worker } = await api<{ worker: Worker }>("/api/workers", { method: "POST" })
+      this.set({ workers: [worker, ...this.state.workers], activeWorkerId: worker.id })
+      return worker.id
+    } catch (err) {
+      console.log("[v0] create worker failed", err)
+      this.set({ notice: err instanceof Error ? err.message : "Could not create a new worker — check the connection and try again." })
+      return null
+    } finally {
+      this.set({ creatingWorker: false })
+    }
   }
 
   selectWorker(id: string) {

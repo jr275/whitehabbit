@@ -13,7 +13,7 @@
  * the Outputs Hub and Worker Overview.
  * ------------------------------------------------------------------ */
 
-import { ChevronDown, Plus } from "lucide-react"
+import { ChevronDown, Loader2, Plus, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { BuildPanel, type StepKey } from "@/components/studio/build-panel"
 import { LiveOutputsPanel } from "@/components/studio/live-outputs-panel"
@@ -26,7 +26,7 @@ export function WorkerStudio() {
   // can navigate into a Build step and both panels stay one system —
   // see section 2 of the CEO demo readiness brief.
   const [activeStep, setActiveStep] = useState<StepKey>("identity")
-  const { hydrated, workers, activeWorkerId, tasks, executions, outputs, events } = useWorkforce()
+  const { hydrated, workers, activeWorkerId, tasks, executions, outputs, events, creatingWorker, notice } = useWorkforce()
 
   useEffect(() => {
     workforceStore.hydrate()
@@ -51,10 +51,13 @@ export function WorkerStudio() {
           <p className="text-[15px] text-muted-foreground">No worker yet.</p>
           <button
             onClick={() => workforceStore.createDraftWorker()}
-            className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-[13px] font-medium text-primary-foreground"
+            disabled={creatingWorker}
+            className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-[13px] font-medium text-primary-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <Plus className="h-4 w-4" /> Create a worker
+            {creatingWorker ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            {creatingWorker ? "Creating…" : "Create a worker"}
           </button>
+          {notice && <Notice text={notice} />}
         </div>
       </StudioShell>
     )
@@ -74,6 +77,12 @@ export function WorkerStudio() {
           <span className="h-4 w-px bg-border" />
           <WorkerSwitcher workers={workers} activeId={worker.id} />
         </div>
+
+        {notice && (
+          <div className="shrink-0 border-b border-border px-4 py-2 sm:px-6">
+            <Notice text={notice} />
+          </div>
+        )}
 
         {/* three panels — the canvas dominates */}
         <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[19rem_minmax(0,1fr)_22rem]">
@@ -116,8 +125,24 @@ function ZoneLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
+/** A real, dismissible surface for workforceStore's existing `notice`
+ * field — persist/run/delete/create failures already set it; this is
+ * the first place anything actually renders it. Not a toast: static,
+ * inline, stays until dismissed or replaced by the next real notice. */
+function Notice({ text }: { text: string }) {
+  return (
+    <div className="mx-auto flex max-w-xl items-start gap-2 rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-left">
+      <p className="flex-1 text-[12px] leading-relaxed text-foreground">{text}</p>
+      <button onClick={() => workforceStore.dismissNotice()} className="shrink-0 text-muted-foreground hover:text-foreground">
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  )
+}
+
 function WorkerSwitcher({ workers, activeId }: { workers: ReturnType<typeof useWorkforce>["workers"]; activeId: string }) {
   const [open, setOpen] = useState(false)
+  const { creatingWorker } = useWorkforce()
   const active = workers.find((w) => w.id === activeId)
 
   return (
@@ -166,13 +191,15 @@ function WorkerSwitcher({ workers, activeId }: { workers: ReturnType<typeof useW
               ))}
             </ul>
             <button
-              onClick={() => {
-                workforceStore.createDraftWorker()
+              onClick={async () => {
+                await workforceStore.createDraftWorker()
                 setOpen(false)
               }}
-              className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-[13px] font-medium text-primary hover:bg-secondary"
+              disabled={creatingWorker}
+              className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-[13px] font-medium text-primary transition-opacity hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Plus className="h-3.5 w-3.5" /> New worker
+              {creatingWorker ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              {creatingWorker ? "Creating…" : "New worker"}
             </button>
           </div>
         </>
