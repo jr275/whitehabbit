@@ -98,7 +98,7 @@ export function WorkerStudio() {
 
           <aside className="hidden min-h-0 flex-col border-l border-border bg-card/40 lg:flex">
             <div className="min-h-0 flex-1">
-              <LiveOutputsPanel worker={worker} outputs={outputs} running={running} />
+              <LiveOutputsPanel worker={worker} outputs={outputs} executions={executions} running={running} />
             </div>
           </aside>
         </div>

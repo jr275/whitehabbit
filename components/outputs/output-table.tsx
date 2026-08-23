@@ -7,6 +7,7 @@
  * reason it didn't).
  * ------------------------------------------------------------------ */
 
+import { FlaskConical } from "lucide-react"
 import { useMemo, useState } from "react"
 import { SKILL_CATALOG, TOOL_CATALOG } from "@/lib/workforce/catalog"
 import type { Worker, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
@@ -139,7 +140,10 @@ export function OutputTable({
                 </td>
                 <td className="whitespace-nowrap px-4 py-2.5 text-[12px] text-muted-foreground">{r.tools}</td>
                 <td className="whitespace-nowrap px-4 py-2.5">
-                  <StatusPill status={r.execution.status} />
+                  <div className="flex items-center gap-1.5">
+                    <StatusPill status={r.execution.status} />
+                    {r.execution.executionMode === "development" && <DevModeTag />}
+                  </div>
                 </td>
                 <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[12.5px] tabular-nums text-foreground">
                   {r.output?.qualityScore != null ? `${r.output.qualityScore}%` : "—"}
@@ -158,6 +162,17 @@ export function OutputTable({
         </table>
       </div>
     </div>
+  )
+}
+
+/** The one thing that must never be confusable with a real execution —
+ * see lib/agent/tools/llm-providers/development.ts. Always rendered
+ * alongside the real status, never in place of it. */
+export function DevModeTag() {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded border border-dashed border-muted-foreground/40 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground" title="Development simulation — no external LLM was called">
+      <FlaskConical className="h-2.5 w-2.5" /> Dev
+    </span>
   )
 }
 

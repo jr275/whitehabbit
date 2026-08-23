@@ -14,11 +14,12 @@
 
 import { AlertTriangle, ArrowRight, Sparkles } from "lucide-react"
 import { useMemo } from "react"
+import { DevModeTag } from "@/components/outputs/output-table"
 import { SKILL_CATALOG } from "@/lib/workforce/catalog"
-import { OUTPUT_TYPE_META, type Worker, type WorkerOutput } from "@/lib/workforce/model"
+import { OUTPUT_TYPE_META, type Worker, type WorkerExecution, type WorkerOutput } from "@/lib/workforce/model"
 import { credentialBlockers, timeAgo } from "@/lib/workforce/selectors"
 
-export function LiveOutputsPanel({ worker, outputs, running }: { worker: Worker; outputs: WorkerOutput[]; running: boolean }) {
+export function LiveOutputsPanel({ worker, outputs, executions, running }: { worker: Worker; outputs: WorkerOutput[]; executions: WorkerExecution[]; running: boolean }) {
   const real = useMemo(
     () => outputs.filter((o) => o.workerId === worker.id).sort((a, b) => b.createdAt - a.createdAt).slice(0, 14),
     [outputs, worker.id],
@@ -39,7 +40,7 @@ export function LiveOutputsPanel({ worker, outputs, running }: { worker: Worker;
         {real.length === 0 ? <EmptyState worker={worker} /> : (
           <div className="flex flex-col gap-2.5">
             {real.map((o) => (
-              <OutputCard key={o.id} output={o} />
+              <OutputCard key={o.id} output={o} execution={executions.find((e) => e.id === o.executionId)} />
             ))}
           </div>
         )}
@@ -96,12 +97,13 @@ function EmptyState({ worker }: { worker: Worker }) {
   )
 }
 
-function OutputCard({ output }: { output: WorkerOutput }) {
+function OutputCard({ output, execution }: { output: WorkerOutput; execution?: WorkerExecution }) {
   const meta = OUTPUT_TYPE_META[output.type] ?? { label: output.type }
   return (
     <div className={`rounded-xl border bg-card p-3.5 ${output.status === "failed" ? "border-destructive/25" : "border-border"}`}>
       <div className="flex items-center gap-1.5">
         <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">{meta.label}</span>
+        {execution?.executionMode === "development" && <DevModeTag />}
       </div>
       <h4 className="mt-1.5 text-pretty text-[13px] font-medium leading-snug text-foreground">{output.title}</h4>
       <p className="mt-1.5 line-clamp-4 whitespace-pre-line text-[11.5px] leading-relaxed text-muted-foreground">{output.content}</p>

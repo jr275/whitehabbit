@@ -113,6 +113,11 @@ export interface SkillExecutionResult {
    * lookup keys off this so one provider's rate is never applied to
    * another's tokens. */
   provider?: string
+  /** set only when the LLM call was served by the local development
+   * provider (LLM_DEV_MODE=true) — see llm-providers/types.ts. Threaded
+   * through to WorkerExecution so a development run can never be
+   * mistaken for a real one, even after LLM_DEV_MODE is turned back off. */
+  executionMode?: "development"
 }
 
 export interface SkillEvaluation {

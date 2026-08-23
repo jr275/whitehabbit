@@ -26,6 +26,12 @@ export interface LlmCallOutput {
   /** which provider actually produced this — real token accounting and
    * cost lookup both key off this, never assumed. */
   provider: string
+  /** set ONLY by the development provider (lib/agent/tools/llm-providers/
+   * development.ts) when LLM_DEV_MODE=true. Absent/undefined means a real
+   * external provider call happened — this is the one field every layer
+   * downstream (SkillExecutionResult, WorkerExecution, the UI) checks to
+   * know whether tokens/cost/model are real or a local dev fixture. */
+  executionMode?: "development"
 }
 
 export interface LlmProvider {

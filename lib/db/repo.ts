@@ -85,7 +85,7 @@ export function updateTaskStatus(id: string, status: WorkerTask["status"]) {
 export function insertExecution(exec: WorkerExecution) {
   const db = getDb()
   db.prepare(
-    "INSERT INTO executions (id, worker_id, task_id, status, reason_code, blocked_reason, started_at, completed_at, duration_ms, cost_usd, input_tokens, output_tokens, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO executions (id, worker_id, task_id, status, reason_code, blocked_reason, started_at, completed_at, duration_ms, cost_usd, input_tokens, output_tokens, model, execution_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     exec.id,
     exec.workerId,
@@ -95,6 +95,7 @@ export function insertExecution(exec: WorkerExecution) {
     exec.blockedReason ?? null,
     exec.startedAt,
     exec.completedAt ?? null,
+    null,
     null,
     null,
     null,
@@ -115,11 +116,12 @@ export function finalizeExecution(
     inputTokens?: number
     outputTokens?: number
     model?: string
+    executionMode?: WorkerExecution["executionMode"]
   },
 ) {
   const db = getDb()
   db.prepare(
-    "UPDATE executions SET status = ?, reason_code = ?, blocked_reason = ?, completed_at = ?, duration_ms = ?, cost_usd = ?, input_tokens = ?, output_tokens = ?, model = ? WHERE id = ?",
+    "UPDATE executions SET status = ?, reason_code = ?, blocked_reason = ?, completed_at = ?, duration_ms = ?, cost_usd = ?, input_tokens = ?, output_tokens = ?, model = ?, execution_mode = ? WHERE id = ?",
   ).run(
     patch.status,
     patch.reasonCode ?? null,
@@ -130,6 +132,7 @@ export function finalizeExecution(
     patch.inputTokens ?? null,
     patch.outputTokens ?? null,
     patch.model ?? null,
+    patch.executionMode ?? null,
     id,
   )
 }
@@ -237,6 +240,7 @@ export function getBootstrapState(orgId: string = DEFAULT_ORG_ID): BootstrapStat
     inputTokens: r.input_tokens ?? undefined,
     outputTokens: r.output_tokens ?? undefined,
     model: r.model ?? undefined,
+    executionMode: r.execution_mode ?? undefined,
   }))
 
   const outputRows = db

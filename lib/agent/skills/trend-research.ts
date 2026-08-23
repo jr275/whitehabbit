@@ -127,7 +127,7 @@ export const trendResearchSkill: SkillDefinition = {
     ctx.emit("reasoning_started", { model: "llm" })
     const analyzeAction = llm.actions.find((a) => a.id === "analyze")!
     const knowledge = retrieveRelevantKnowledge(ctx.worker.knowledge, query)
-    const llmResult = await runToolAction<{ text: string; model: string; inputTokens: number; outputTokens: number; provider: string }>(
+    const llmResult = await runToolAction<{ text: string; model: string; inputTokens: number; outputTokens: number; provider: string; executionMode?: "development" }>(
       llm.id,
       llm.name,
       analyzeAction,
@@ -139,8 +139,8 @@ export const trendResearchSkill: SkillDefinition = {
       if (llmResult.errorCode === "invalid_credential") throw new InvalidCredentialError(llmResult.error ?? "The configured LLM credential was rejected.")
       throw new ProviderError(llmResult.error ?? "LLM analysis failed.")
     }
-    const llmData = llmResult.data as { text: string; model: string; inputTokens: number; outputTokens: number; provider: string }
-    ctx.emit("reasoning_completed", { durationMs: llmResult.durationMs, inputTokens: llmData.inputTokens, outputTokens: llmData.outputTokens })
+    const llmData = llmResult.data as { text: string; model: string; inputTokens: number; outputTokens: number; provider: string; executionMode?: "development" }
+    ctx.emit("reasoning_completed", { durationMs: llmResult.durationMs, inputTokens: llmData.inputTokens, outputTokens: llmData.outputTokens, executionMode: llmData.executionMode })
 
     const parsed = parseTrends(llmData.text, query)
     if (!parsed) throw new Error("The LLM response was not valid structured trend data.")
@@ -153,6 +153,7 @@ export const trendResearchSkill: SkillDefinition = {
       inputTokens: llmData.inputTokens,
       outputTokens: llmData.outputTokens,
       provider: llmData.provider,
+      executionMode: llmData.executionMode,
     }
   },
 

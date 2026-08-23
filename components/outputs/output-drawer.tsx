@@ -11,6 +11,7 @@
 
 import { ArrowLeft, X } from "lucide-react"
 import { useEffect, useState } from "react"
+import { DevModeTag } from "@/components/outputs/output-table"
 import { SKILL_CATALOG, TOOL_CATALOG } from "@/lib/workforce/catalog"
 import type { Worker, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
 import { EXECUTION_STATUS_META, OUTPUT_TYPE_META } from "@/lib/workforce/model"
@@ -134,7 +135,10 @@ function DetailView({ output, execution, task }: { output: WorkerOutput; executi
   return (
     <div className="flex flex-col gap-5 px-5 py-5">
       <div>
-        <h3 className="text-pretty text-[16px] font-semibold leading-snug text-foreground">{output.title}</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-pretty text-[16px] font-semibold leading-snug text-foreground">{output.title}</h3>
+          {execution?.executionMode === "development" && <DevModeTag />}
+        </div>
         <div className="mt-2 grid grid-cols-2 gap-3">
           <Field label="Status">
             <span className={`font-mono text-[12px] ${output.status === "failed" ? "text-destructive" : "text-grow"}`}>{output.status === "failed" ? "Failed" : "Completed"}</span>
@@ -196,11 +200,12 @@ function DetailView({ output, execution, task }: { output: WorkerOutput; executi
       <div>
         <SectionLabel>Execution metadata</SectionLabel>
         <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">
+          {execution?.executionMode === "development" && <MetaRow k="Mode" v="Development simulation — no external LLM was called" />}
           <MetaRow k="Timestamp" v={new Date(output.createdAt).toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" })} />
           <MetaRow k="Duration" v={execution?.durationMs ? `${Math.round(execution.durationMs / 1000)}s` : "—"} />
           <MetaRow k="Model" v={execution?.model ?? "—"} />
-          <MetaRow k="Tokens" v={execution?.inputTokens != null ? `${execution.inputTokens} in / ${execution.outputTokens ?? 0} out` : "—"} />
-          <MetaRow k="Cost" v={execution?.costUsd != null ? `$${execution.costUsd.toFixed(4)}` : "—"} />
+          <MetaRow k="Tokens" v={execution?.executionMode === "development" ? "0 in / 0 out (development)" : execution?.inputTokens != null ? `${execution.inputTokens} in / ${execution.outputTokens ?? 0} out` : "—"} />
+          <MetaRow k="Cost" v={execution?.executionMode === "development" ? "$0.0000 (development)" : execution?.costUsd != null ? `$${execution.costUsd.toFixed(4)}` : "—"} />
           <MetaRow k="Tools used" v={toolNames || "—"} />
         </dl>
       </div>

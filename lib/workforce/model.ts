@@ -181,6 +181,12 @@ export interface WorkerExecution {
   inputTokens?: number
   outputTokens?: number
   model?: string
+  /** "development" = this ran through the local development LLM provider
+   * (LLM_DEV_MODE=true) — a deterministic fixture, never a real Anthropic
+   * or Gemini call. Undefined = a real production execution. Persisted so
+   * a past development run can never be mistaken for a real one, even
+   * after LLM_DEV_MODE is turned back off. */
+  executionMode?: "development"
 }
 
 export interface SourceRecord {

@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS executions (
   cost_usd REAL,
   input_tokens INTEGER,
   output_tokens INTEGER,
-  model TEXT
+  model TEXT,
+  execution_mode TEXT            -- NULL = real production execution; "development" = LLM_DEV_MODE fixture, never a real provider call
 );
 
 CREATE TABLE IF NOT EXISTS events (

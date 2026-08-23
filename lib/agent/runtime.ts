@@ -177,6 +177,7 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
         model: result.model,
+        executionMode: result.executionMode,
       })
       repo.updateTaskStatus(task.id, "completed")
       emit("task_completed", { outputId: output.id, durationMs })
@@ -235,8 +236,13 @@ function titleFor(outputType: string, input: Record<string, string>): string {
 /** The single authoritative cost calculation: real tokens x the active
  * provider's real (or explicitly configured) rate. Returns undefined —
  * not 0 — when no rate is configured for that provider, so the UI can
- * tell "unmeasured" apart from "genuinely free". */
+ * tell "unmeasured" apart from "genuinely free".
+ *
+ * A development-mode result is the one deliberate exception: it never
+ * consumed real tokens, so there is no rate to look up and nothing to
+ * mark "unmeasured" — the cost is a real, definite $0, not an unknown. */
 function sumCost(result: SkillExecutionResult): number | undefined {
+  if (result.executionMode === "development") return 0
   if (result.inputTokens == null || !result.provider) return undefined
   const estimate = llmCostUsd(result.provider, result.inputTokens, result.outputTokens ?? 0)
   return estimate.costUsd ?? undefined
