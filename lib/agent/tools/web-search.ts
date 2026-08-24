@@ -44,10 +44,29 @@ export interface WebSearchOutput {
   provider: string
 }
 
+/** The real registry API's own documented constraint (ERR_TEXT_LENGTH:
+ * "'text' must be between 2 and 64 characters") — not a WhiteHabbit
+ * decision. A caller-supplied query (a Worker's mission, an operator's
+ * free-text objective, a Product's onboarding-derived mission) can
+ * easily run longer than that, so it is trimmed here, once, at the
+ * real boundary that actually enforces the limit — trimmed at a word
+ * boundary where possible so the query stays a real phrase, not a
+ * hard-cut fragment. */
+const NPM_TEXT_MAX = 64
+
+function clampQuery(query: string): string {
+  const trimmed = query.trim()
+  if (trimmed.length <= NPM_TEXT_MAX) return trimmed
+  const cut = trimmed.slice(0, NPM_TEXT_MAX)
+  const lastSpace = cut.lastIndexOf(" ")
+  return (lastSpace > NPM_TEXT_MAX * 0.5 ? cut.slice(0, lastSpace) : cut).trim()
+}
+
 export async function webSearch(input: WebSearchInput): Promise<ToolActionResult<WebSearchOutput>> {
   const started = Date.now()
   const limit = Math.min(20, input.limit ?? 10)
-  const url = `${NPM_SEARCH_URL}?text=${encodeURIComponent(input.query)}&size=${limit}`
+  const query = clampQuery(input.query)
+  const url = `${NPM_SEARCH_URL}?text=${encodeURIComponent(query)}&size=${limit}`
 
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(15_000) })

@@ -26,6 +26,7 @@ import { useEffect, useState } from "react"
 import type { StepKey } from "@/components/studio/build-panel"
 import { ExecutionTimeline } from "@/components/outputs/output-drawer"
 import { WorkerAvatar } from "@/components/workforce/worker-avatar"
+import { getProduct } from "@/lib/products/catalog"
 import { SKILL_CATALOG } from "@/lib/workforce/catalog"
 import { toolExecutionBoundary, TOOL_BOUNDARY_META, type Worker, type WorkerEvent, type WorkerExecution, type WorkerOutput, type WorkerTask } from "@/lib/workforce/model"
 import {
@@ -95,6 +96,7 @@ export function WorkerCanvas({
   onNavigateToStep: (step: StepKey) => void
 }) {
   const { lastSaved } = useWorkforce()
+  const product = worker.productId ? getProduct(worker.productId) : undefined
   const readiness = computeReadiness(worker)
   const released = worker.status !== "draft"
   // a real blocker is shown as context, not a reason to prevent the
@@ -149,6 +151,14 @@ export function WorkerCanvas({
          * "what is this Worker?" before "is it ready?" */}
         <div className="mx-auto mt-2 grid max-w-2xl grid-cols-1 gap-2.5 lg:grid-cols-3 lg:[grid-template-rows:auto_auto_auto]">
           <div className="flex flex-col items-center justify-center rounded-xl border border-foreground/15 bg-card px-4 py-5 text-center lg:col-start-2 lg:row-start-2">
+            {product && (
+              <span
+                className="mb-2.5 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-white"
+                style={{ backgroundColor: product.accent }}
+              >
+                {product.name} product
+              </span>
+            )}
             <WorkerAvatar worker={worker} size="lg" rounded="2xl" className="shadow-sm" />
             <h1 className="mt-2.5 text-[16px] font-semibold leading-tight tracking-tight text-foreground">{worker.identity.name || "Unnamed worker"}</h1>
             <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{worker.identity.role || "No role set"}</p>

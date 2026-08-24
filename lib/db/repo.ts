@@ -178,6 +178,42 @@ export async function deleteWorker(id: string, orgId: string): Promise<void> {
   await query("DELETE FROM workers WHERE id = $1 AND org_id = $2", [id, orgId])
 }
 
+/** The one org-scoped lookup the Product layer needs: "does this org
+ * already have a Worker for this Product" — reads the same JSONB
+ * `definition` column every other Worker read uses, filtered on the
+ * productId field inside it. No new table, no migration. */
+export async function getWorkerByProduct(orgId: string, productId: string): Promise<Worker | null> {
+  const row = await queryOne<WorkerRow>(
+    "SELECT * FROM workers WHERE org_id = $1 AND definition->>'productId' = $2 ORDER BY created_at ASC LIMIT 1",
+    [orgId, productId],
+  )
+  return row ? rowToWorker(row) : null
+}
+
+/** Appends a real, dated fact to a Worker's accumulated Memory
+ * KnowledgeSource — creating it on first use. Called only from
+ * lib/agent/runtime.ts after a real evaluated execution completes for
+ * a product-provisioned Worker; `note` must already be built from real
+ * result/evaluation data by the caller, never invented here. Silently
+ * a no-op if the worker no longer exists (never blocks the execution
+ * that triggered it — see the try/catch at the call site). */
+export async function appendWorkerMemory(workerId: string, orgId: string, note: string): Promise<void> {
+  const worker = await getWorker(workerId, orgId)
+  if (!worker) return
+  const existing = worker.knowledge.find((k) => k.type === "memory")
+  const now = Date.now()
+  if (existing) {
+    existing.content = existing.content ? `${existing.content}\n- ${note}` : `- ${note}`
+    existing.documents += 1
+  } else {
+    worker.knowledge = [
+      ...worker.knowledge,
+      { id: `kn_mem_${randomUUID()}`, name: "Accumulated Memory", type: "memory", documents: 1, addedAt: now, content: `- ${note}` },
+    ]
+  }
+  await upsertWorker(worker, orgId)
+}
+
 /** Marks a worker tested — set ONLY by the server, ONLY after a real
  * test-mode execution actually completes (see app/api/workers/[id]/
  * run/route.ts). Never client-settable via PATCH — `tested` gates

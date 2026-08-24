@@ -24,6 +24,7 @@
 import { AnimatePresence, motion } from "framer-motion"
 import { ArrowRight, Loader2 } from "lucide-react"
 import { signIn, useSession } from "next-auth/react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
@@ -75,6 +76,12 @@ export default function Page() {
 
   return (
     <main className="relative flex h-dvh w-full items-center justify-center overflow-hidden bg-background bg-substrate px-6">
+      <Link
+        href="/products"
+        className="absolute right-6 top-6 z-10 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground transition-colors hover:text-foreground"
+      >
+        Explore products →
+      </Link>
       <AnimatePresence mode="wait">
         {!assembling ? (
           <motion.div

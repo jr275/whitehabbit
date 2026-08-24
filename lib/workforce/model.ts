@@ -79,7 +79,13 @@ export interface WorkforceTool {
 export interface KnowledgeSource {
   id: string
   name: string
-  type: "website" | "pdf" | "playbook" | "docs" | "crm" | "faq" | "brand"
+  /** "memory" is distinct from the operator-authored types above it:
+   * its content is appended to by the runtime itself (see
+   * lib/db/repo.ts's appendWorkerMemory(), called from
+   * lib/agent/runtime.ts after a real evaluated execution) — real,
+   * accumulated facts about what actually happened, never invented,
+   * never pre-seeded with placeholder history. */
+  type: "website" | "pdf" | "playbook" | "docs" | "crm" | "faq" | "brand" | "memory"
   documents: number
   addedAt: number
   /** Real, operator-authored reference text — never auto-fetched or
@@ -140,6 +146,16 @@ export type WorkerStatus = "draft" | "building" | "ready" | "live"
 
 export interface Worker {
   id: string
+  /** Which Product (lib/products/catalog.ts) this Worker was
+   * provisioned for, if any — undefined for a Worker created the
+   * general-purpose way (homepage "Assemble Worker", or built by hand
+   * in Studio). This is an identity fact about the Worker record
+   * itself, not a versioned configuration detail — it lives here, not
+   * in WorkerDefinitionSnapshot, the same way status/releasedVersionId
+   * do. A product-provisioned Worker is still a completely ordinary
+   * Worker everywhere else: same runtime, same Studio, same execution
+   * ledger — the product layer sits above this, it never forks it. */
+  productId?: string
   identity: WorkerIdentity
   mission: string
   objectives: Objective[]
@@ -252,7 +268,7 @@ export interface EvaluationBreakdown {
   breakdown: { label: string; score: number; note: string }[]
 }
 
-export type OutputKind = "trend_report" | "content_analysis" | "engagement_analysis" | "lead_qualification"
+export type OutputKind = "trend_report" | "content_analysis" | "engagement_analysis" | "lead_qualification" | "seo_opportunity_plan"
 
 export type OutputStatus = "completed" | "failed"
 
@@ -331,6 +347,7 @@ export const OUTPUT_TYPE_META: Record<string, { label: string; plural: string; f
   content_analysis: { label: "Content analysis", plural: "Content analyses", filter: "Content" },
   engagement_analysis: { label: "Engagement analysis", plural: "Engagement analyses", filter: "Communication" },
   lead_qualification: { label: "Lead qualification", plural: "Lead qualifications", filter: "Sales" },
+  seo_opportunity_plan: { label: "SEO opportunity plan", plural: "SEO opportunity plans", filter: "Content" },
 }
 
 export const OUTPUT_STATUS_META: Record<OutputStatus, { label: string; tone: "good" | "info" | "warn" | "bad" | "muted" }> = {

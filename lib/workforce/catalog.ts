@@ -68,6 +68,16 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     requiredTools: ["tool_web_search", "tool_llm"],
     inputs: [{ key: "query", label: "What kind of leads should it find?", type: "text", required: true, placeholder: "Enterprise SaaS companies expanding into new markets" }],
   },
+  {
+    id: "skill_seo_opportunity",
+    name: "SEO Opportunity Planning",
+    category: "content",
+    description: "Searches real sources and uses an LLM to identify genuine topic/page opportunities and produce a structured page plan.",
+    outputType: "seo_opportunity_plan",
+    taskTitle: "Plan SEO page opportunities",
+    requiredTools: ["tool_web_search", "tool_llm"],
+    inputs: [{ key: "query", label: "What topic area or site focus should it plan for?", type: "text", required: true, placeholder: "Comparison and how-to pages for a project management tool" }],
+  },
 ]
 
 export interface ToolTemplate {
