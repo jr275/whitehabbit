@@ -13,7 +13,8 @@
  * decision only, not a removal.
  * ------------------------------------------------------------------ */
 
-import { Circle } from "lucide-react"
+import { Circle, LogOut } from "lucide-react"
+import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
@@ -22,8 +23,10 @@ const LINKS = [
   { href: "/outputs", label: "Outputs" },
 ]
 
-export function TopNav() {
+export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview" | "production" }) {
   const pathname = usePathname()
+  const { data: session } = useSession()
+  const orgName = (session as { organizationName?: string } | null)?.organizationName
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-card/80 backdrop-blur-md">
@@ -58,20 +61,32 @@ export function TopNav() {
           })}
         </nav>
 
-        {/* right — worker chip */}
-        <div className="ml-auto flex items-center gap-3">
-          <div className="hidden items-center gap-2 rounded-full border border-border bg-secondary px-3 py-1.5 sm:flex">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-grow opacity-60" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-grow" />
+        {/* right — real runtime mode, real authenticated organization, real sign-out */}
+        <div className="ml-auto flex items-center gap-2">
+          {runtimeMode && runtimeMode !== "production" && (
+            <span className="hidden rounded-full border border-warn/30 bg-warn/10 px-2.5 py-1 font-mono text-[9.5px] uppercase tracking-wider text-warn sm:inline">
+              {runtimeMode}
             </span>
-            <span className="font-mono text-[11px] tracking-tight text-foreground">
-              Workforce
-            </span>
-            <span className="font-mono text-[10px] text-muted-foreground">
-              Live
-            </span>
-          </div>
+          )}
+          {orgName && (
+            <div className="hidden items-center gap-2 rounded-full border border-border bg-secondary px-3 py-1.5 sm:flex">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-grow opacity-60" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-grow" />
+              </span>
+              <span className="max-w-[10rem] truncate font-mono text-[11px] tracking-tight text-foreground">{orgName}</span>
+            </div>
+          )}
+          {session && (
+            <button
+              onClick={() => signOut({ callbackUrl: "/login" })}
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              title="Sign out"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Sign out</span>
+            </button>
+          )}
         </div>
       </div>
     </header>
