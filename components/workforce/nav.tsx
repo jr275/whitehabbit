@@ -11,14 +11,20 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useDemoWorkforce } from "@/lib/workforce-demo/store"
 
 const LINKS = [
   { href: "/observatory", label: "Observatory" },
   { href: "/workforce", label: "Workforce" },
+  { href: "/outcomes", label: "Outcomes" },
+  { href: "/approvals", label: "Approvals" },
+  { href: "/evolve", label: "Evolve" },
 ]
 
 export function WorkforceNav() {
   const pathname = usePathname()
+  const { approvals } = useDemoWorkforce()
+  const pending = approvals.filter((a) => a.status === "pending").length
 
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/70 backdrop-blur-xl">
@@ -37,17 +43,23 @@ export function WorkforceNav() {
           {LINKS.map((l) => {
             const active =
               pathname === l.href || pathname.startsWith(l.href + "/")
+            const showBadge = l.href === "/approvals" && pending > 0
             return (
               <Link
                 key={l.href}
                 href={l.href}
-                className={`rounded-md px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.15em] transition-colors ${
+                className={`relative rounded-md px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.15em] transition-colors ${
                   active
                     ? "bg-primary/12 text-primary"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {l.label}
+                {showBadge && (
+                  <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-warn px-1 font-mono text-[9px] font-semibold text-background">
+                    {pending}
+                  </span>
+                )}
               </Link>
             )
           })}

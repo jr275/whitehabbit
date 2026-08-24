@@ -178,6 +178,52 @@ export interface Division {
   createdAt: string
 }
 
+/* ---------------------------- approvals --------------------------- *
+ * Some actions are high-risk (spend money, publish, send). A worker
+ * with less-than-full autonomy pauses at those steps and asks a human.
+ * That gate is a first-class object, not a simulation detail. */
+
+export type ApprovalStatus = "pending" | "approved" | "denied"
+
+export interface ApprovalRequest {
+  id: string
+  workerId: string
+  skillId: string
+  /** the gated recipe step, e.g. "Stage budget moves within guardrails" */
+  action: string
+  /** why a human is in the loop */
+  reason: string
+  /** the task that triggered the run */
+  task: string
+  status: ApprovalStatus
+  requestedAt: number
+  decidedAt?: number
+  /** true when a division pulse auto-approved it (still logged) */
+  auto?: boolean
+}
+
+/* ------------------------- evolve engine -------------------------- *
+ * Recommendations are DERIVED from the division's own data — never a
+ * static list. Applying one mutates the division (that is the org
+ * getting better at its job). */
+
+export type EvolveKind = "promote_skill" | "promote_heuristic" | "transfer_skill"
+
+export interface EvolveRecommendation {
+  id: string
+  kind: EvolveKind
+  title: string
+  rationale: string
+  /** projected effect if applied, one line */
+  projectedEffect: string
+  /** 0..1 confidence in the recommendation */
+  confidence: number
+  workerId: string
+  skillId: string
+  /** target worker for a transfer */
+  toWorkerId?: string
+}
+
 /* --------------------- execution provider seam -------------------- *
  * The one seam a real runtime would implement. The UI depends ONLY on
  * this interface, never on the demo internals — see ./execution.ts. */
@@ -191,12 +237,18 @@ export interface ExecutionUpdate {
   done: boolean
 }
 
+/** Asked by the provider when a run hits a high-risk gate. Resolves
+ * true (proceed) or false (deny → abort the run). */
+export type RequestApproval = (gate: { action: string; reason: string }) => Promise<boolean>
+
 export interface ExecutionProvider {
   /** deterministic, streamed run of one worker's skill against a task */
   run(input: {
     worker: DemoWorker
     skill: Skill
     task: string
+    /** if provided, the provider pauses at high-risk steps and awaits it */
+    requestApproval?: RequestApproval
   }): AsyncGenerator<ExecutionUpdate>
   readonly label: string
   readonly isDemo: boolean

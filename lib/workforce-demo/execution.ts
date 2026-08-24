@@ -88,7 +88,7 @@ export const demoExecutionProvider: ExecutionProvider = {
   label: "Demo runtime (deterministic)",
   isDemo: true,
 
-  async *run({ worker, skill, task }): AsyncGenerator<ExecutionUpdate> {
+  async *run({ worker, skill, task, requestApproval }): AsyncGenerator<ExecutionUpdate> {
     const roll = hash(`${worker.id}:${skill.id}:${task}`)
     const gate = needsApproval(skill)
 
@@ -115,13 +115,32 @@ export const demoExecutionProvider: ExecutionProvider = {
       const gatedStep = gate && /approval|publish|financial|budget|send/i.test(`${s.action} ${s.tool ?? ""}`)
       if (gatedStep) {
         state = "blocked"
-        batch.push(ev(worker.id, "blocked", `${worker.name} paused — "${s.action}" needs manager approval (high-risk action).`, skill.id))
+        const reason = `High-risk action: "${s.action}"${s.tool ? ` via ${s.tool}` : ""}.`
+        batch.push(ev(worker.id, "blocked", `${worker.name} paused — "${s.action}" needs a human decision.`, skill.id))
         yield { events: batch, state, done: false }
-        await sleep(900)
-        // auto-resolve the gate in the demo so the run can complete
+
+        // Ask the human through the seam. Without a handler (e.g. a
+        // detached run) we fall back to proceeding after a beat.
+        let approved = true
+        if (requestApproval) {
+          approved = await requestApproval({ action: s.action, reason })
+        } else {
+          await sleep(900)
+        }
+
+        if (!approved) {
+          state = "idle"
+          yield {
+            events: [ev(worker.id, "blocked", `${worker.name} stopped — "${s.action}" was denied. No changes made.`, skill.id)],
+            state,
+            done: true,
+          }
+          return
+        }
+
         state = "working"
         yield {
-          events: [ev(worker.id, "step", `Approval granted — resuming "${s.action}".`, skill.id)],
+          events: [ev(worker.id, "step", `Approved — resuming "${s.action}".`, skill.id)],
           state,
           done: false,
         }
