@@ -252,7 +252,7 @@ export interface EvaluationBreakdown {
   breakdown: { label: string; score: number; note: string }[]
 }
 
-export type OutputKind = "trend_report" | "content_analysis" | "engagement_analysis"
+export type OutputKind = "trend_report" | "content_analysis" | "engagement_analysis" | "lead_qualification"
 
 export type OutputStatus = "completed" | "failed"
 
@@ -330,6 +330,7 @@ export const OUTPUT_TYPE_META: Record<string, { label: string; plural: string; f
   trend_report: { label: "Trend report", plural: "Trend reports", filter: "Research" },
   content_analysis: { label: "Content analysis", plural: "Content analyses", filter: "Content" },
   engagement_analysis: { label: "Engagement analysis", plural: "Engagement analyses", filter: "Communication" },
+  lead_qualification: { label: "Lead qualification", plural: "Lead qualifications", filter: "Sales" },
 }
 
 export const OUTPUT_STATUS_META: Record<OutputStatus, { label: string; tone: "good" | "info" | "warn" | "bad" | "muted" }> = {

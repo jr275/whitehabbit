@@ -44,6 +44,68 @@ function channels(enabled: string[]): WorkerChannel[] {
   return CHANNEL_CATALOG.map((c) => ({ id: c.id, name: c.name, connected: enabled.includes(c.id) }))
 }
 
+/** A real Agent Blueprint — the structured output of analyzing a job
+ * description (app/api/agents/blueprint/route.ts), always referencing
+ * real catalog ids. Never free-form skill/tool names the runtime
+ * can't actually execute. */
+export interface AgentBlueprint {
+  name: string
+  role: string
+  description: string
+  persona: string
+  tone: string[]
+  mission: string
+  primarySkillId: string
+  secondarySkillIds: string[]
+  primaryKPI: string
+  secondaryKPIs: string[]
+}
+
+/** Builds a real, immediately-runnable Worker from a blueprint — every
+ * skill/tool it enables is resolved from the real catalogs, and the
+ * tools enabled are exactly the union of the chosen skills' real
+ * requiredTools, so the assembled worker is never missing what it
+ * needs to actually execute. */
+export function buildWorkerFromBlueprint(id: string, blueprint: AgentBlueprint): Worker {
+  const now = Date.now()
+  const chosenSkillIds = [blueprint.primarySkillId, ...blueprint.secondarySkillIds].filter((skillId) => SKILL_CATALOG.some((s) => s.id === skillId))
+  const requiredToolIds = Array.from(new Set(chosenSkillIds.flatMap((skillId) => SKILL_CATALOG.find((s) => s.id === skillId)?.requiredTools ?? [])))
+  const initials =
+    blueprint.name
+      .trim()
+      .split(/\s+/)
+      .map((w) => w[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "NW"
+  return {
+    id,
+    identity: {
+      name: blueprint.name,
+      role: blueprint.role,
+      description: blueprint.description,
+      persona: blueprint.persona,
+      tone: blueprint.tone,
+      accent: "#5a6ef0",
+      initials,
+    },
+    mission: blueprint.mission,
+    objectives: [],
+    knowledge: [],
+    skills: skills(chosenSkillIds),
+    tools: tools(requiredToolIds),
+    behaviors: [],
+    channels: channels([]),
+    outcome: { primaryKPI: blueprint.primaryKPI, secondaryKPIs: blueprint.secondaryKPIs },
+    autonomy: "medium",
+    status: "draft",
+    tested: false,
+    createdAt: now,
+    releasedAt: null,
+    releasedVersionId: null,
+  }
+}
+
 /** An empty, unconfigured Worker for the "New worker" flow in Studio. */
 export function buildEmptyWorker(id: string): Worker {
   const now = Date.now()

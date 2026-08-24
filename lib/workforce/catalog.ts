@@ -58,6 +58,16 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     requiredTools: ["tool_analytics", "tool_llm"],
     inputs: [{ key: "query", label: "What should it look at?", type: "text", required: false, placeholder: "Last week's posts" }],
   },
+  {
+    id: "skill_lead_qualification",
+    name: "Lead Research & Qualification",
+    category: "sales",
+    description: "Searches real sources and uses an LLM to identify and score genuine candidate companies against a target profile.",
+    outputType: "lead_qualification",
+    taskTitle: "Research and qualify leads",
+    requiredTools: ["tool_web_search", "tool_llm"],
+    inputs: [{ key: "query", label: "What kind of leads should it find?", type: "text", required: true, placeholder: "Enterprise SaaS companies expanding into new markets" }],
+  },
 ]
 
 export interface ToolTemplate {

@@ -14,7 +14,8 @@
  * ------------------------------------------------------------------ */
 
 import { ChevronDown, Loader2, Plus, X } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
+import { useEffect, useRef, useState } from "react"
 import { BuildPanel, type StepKey } from "@/components/studio/build-panel"
 import { LiveOutputsPanel } from "@/components/studio/live-outputs-panel"
 import { StudioShell } from "@/components/studio/studio-shell"
@@ -27,10 +28,26 @@ export function WorkerStudio({ runtimeMode }: { runtimeMode?: "development" | "p
   // see section 2 of the CEO demo readiness brief.
   const [activeStep, setActiveStep] = useState<StepKey>("identity")
   const { hydrated, workers, activeWorkerId, tasks, executions, outputs, events, creatingWorker, loadingExample, notice } = useWorkforce()
+  const searchParams = useSearchParams()
+  const requestedWorkerId = searchParams.get("worker")
+  const appliedRequestedWorkerId = useRef<string | null>(null)
 
   useEffect(() => {
     workforceStore.hydrate()
   }, [])
+
+  // A deep link like /studio?worker=<id> (e.g. straight from Assemble
+  // Worker on the homepage) must land on that exact real worker, not
+  // whichever one hydrate() defaulted to (workers[0]). Applied once
+  // hydration actually contains it — a newly-created worker may arrive
+  // a beat after the redirect if hydrate() and the create request race.
+  useEffect(() => {
+    if (!hydrated || !requestedWorkerId) return
+    if (appliedRequestedWorkerId.current === requestedWorkerId) return
+    if (!workers.some((w) => w.id === requestedWorkerId)) return
+    workforceStore.selectWorker(requestedWorkerId)
+    appliedRequestedWorkerId.current = requestedWorkerId
+  }, [hydrated, requestedWorkerId, workers])
 
   if (!hydrated) {
     return (
