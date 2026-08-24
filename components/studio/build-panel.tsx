@@ -53,7 +53,7 @@ function stepSummary(worker: Worker, key: StepKey): string {
     case "test":
       return worker.tested ? "Passed" : "Not tested"
     case "release":
-      return worker.status === "live" || worker.status === "working" || worker.status === "idle" ? "Live" : "Not released"
+      return worker.releasedVersionId ? "Live" : "Not released"
   }
 }
 
@@ -618,9 +618,9 @@ function ChannelsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => 
   )
 }
 
-/* ---- 08 Test ---- */
+/* ---- 08 Test — Build (freeze an immutable version) then run it ---- */
 function TestStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => void }) {
-  const { testingWorkerId } = useWorkforce()
+  const { testingWorkerId, notice } = useWorkforce()
   const testing = testingWorkerId === worker.id
   const checks = [
     { label: "Identity set", pass: !!worker.identity.name.trim() },
@@ -637,28 +637,36 @@ function TestStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => void
           </div>
         ))}
       </div>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        Running a test first Builds an immutable version from the current configuration, then runs exactly that version — the same real Runtime, Search, and Evaluator a released Worker uses.
+      </p>
       <button
         onClick={() => workforceStore.testWorker(worker.id)}
         disabled={testing}
         className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
       >
         <Loader2 className={`h-3.5 w-3.5 ${testing ? "animate-spin" : "hidden"}`} />
-        {worker.tested ? "Re-run test" : "Run test"}
+        {testing ? "Building & running…" : worker.tested ? "Re-run test" : "Build & run test"}
       </button>
       {worker.tested && (
         <div className="flex items-center gap-1.5 text-[12px] text-grow">
           <Check className="h-3.5 w-3.5" /> Test passed
         </div>
       )}
+      {notice && !testing && <p className="text-[11.5px] leading-relaxed text-warn">{notice}</p>}
       <Continue onClick={onAdvance} label="Continue to release" />
     </div>
   )
 }
 
-/* ---- 09 Release ---- */
+/* ---- 09 Release — promotes a READY version to LIVE. `releasedVersionId`
+ * is the one authoritative "is this live" fact; nothing here infers it
+ * from `status !== "draft"`. ---- */
 function ReleaseStep({ worker }: { worker: Worker }) {
   const readiness = computeReadiness(worker)
-  const isLive = worker.status !== "draft"
+  const { releasingWorkerId } = useWorkforce()
+  const releasing = releasingWorkerId === worker.id
+  const isLive = worker.releasedVersionId != null
   return (
     <div className="flex flex-col gap-3">
       <div className="rounded-lg border border-border bg-card p-3">
@@ -678,11 +686,11 @@ function ReleaseStep({ worker }: { worker: Worker }) {
       ) : (
         <button
           onClick={() => workforceStore.releaseWorker(worker.id)}
-          disabled={!worker.tested}
+          disabled={!worker.tested || releasing}
           className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2.5 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
         >
-          <Rocket className="h-3.5 w-3.5" />
-          Release worker
+          {releasing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Rocket className="h-3.5 w-3.5" />}
+          {releasing ? "Releasing…" : "Release worker"}
         </button>
       )}
       {!worker.tested && <p className="text-[11px] text-muted-foreground">Pass the Test step before releasing.</p>}

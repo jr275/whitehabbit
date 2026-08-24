@@ -21,12 +21,12 @@ import { StudioShell } from "@/components/studio/studio-shell"
 import { WorkerCanvas } from "@/components/studio/worker-canvas"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
-export function WorkerStudio() {
+export function WorkerStudio({ runtimeMode }: { runtimeMode?: "development" | "preview" | "production" }) {
   // owned here, not inside BuildPanel, so the canvas's capability cards
   // can navigate into a Build step and both panels stay one system —
   // see section 2 of the CEO demo readiness brief.
   const [activeStep, setActiveStep] = useState<StepKey>("identity")
-  const { hydrated, workers, activeWorkerId, tasks, executions, outputs, events, creatingWorker, notice } = useWorkforce()
+  const { hydrated, workers, activeWorkerId, tasks, executions, outputs, events, creatingWorker, loadingExample, notice } = useWorkforce()
 
   useEffect(() => {
     workforceStore.hydrate()
@@ -34,7 +34,7 @@ export function WorkerStudio() {
 
   if (!hydrated) {
     return (
-      <StudioShell>
+      <StudioShell runtimeMode={runtimeMode}>
         <div className="flex h-[calc(100dvh-3.5rem)] items-center justify-center">
           <span className="font-mono text-[11px] uppercase tracking-[0.3em] text-muted-foreground">Loading studio…</span>
         </div>
@@ -46,17 +46,27 @@ export function WorkerStudio() {
 
   if (!worker) {
     return (
-      <StudioShell>
+      <StudioShell runtimeMode={runtimeMode}>
         <div className="flex h-[calc(100dvh-3.5rem)] flex-col items-center justify-center gap-4 text-center">
           <p className="text-[15px] text-muted-foreground">No worker yet.</p>
-          <button
-            onClick={() => workforceStore.createDraftWorker()}
-            disabled={creatingWorker}
-            className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-[13px] font-medium text-primary-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {creatingWorker ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            {creatingWorker ? "Creating…" : "Create a worker"}
-          </button>
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => workforceStore.createDraftWorker()}
+              disabled={creatingWorker}
+              className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-[13px] font-medium text-primary-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {creatingWorker ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              {creatingWorker ? "Creating…" : "Create a worker"}
+            </button>
+            <button
+              onClick={() => workforceStore.loadExampleWorker()}
+              disabled={loadingExample}
+              className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-[13px] font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loadingExample && <Loader2 className="h-4 w-4 animate-spin" />}
+              {loadingExample ? "Loading…" : "Load an example worker"}
+            </button>
+          </div>
           {notice && <Notice text={notice} />}
         </div>
       </StudioShell>
@@ -66,7 +76,7 @@ export function WorkerStudio() {
   const running = workforceStore.isRunning(worker.id)
 
   return (
-    <StudioShell>
+    <StudioShell runtimeMode={runtimeMode}>
       <div className="flex h-[calc(100dvh-3.5rem)] flex-col overflow-hidden">
         {/* studio sub-header — just the worker switcher. The one
          * authoritative worker state lives in the canvas, directly
@@ -183,9 +193,7 @@ function WorkerSwitcher({ workers, activeId }: { workers: ReturnType<typeof useW
                       {w.identity.initials || "?"}
                     </span>
                     <span className="min-w-0 flex-1 truncate">{w.identity.name || "Unnamed worker"}</span>
-                    {(w.status === "live" || w.status === "working" || w.status === "idle") && (
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-grow" />
-                    )}
+                    {w.releasedVersionId != null && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-grow" />}
                   </button>
                 </li>
               ))}

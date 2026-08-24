@@ -48,7 +48,9 @@ export interface WorkforceState {
   runningWorkerIds: string[]
   activeWorkerId: string | null
   testingWorkerId: string | null
+  releasingWorkerId: string | null
   creatingWorker: boolean
+  loadingExample: boolean
   notice: string | null
   lastSaved: { workerId: string; category: SaveCategory; at: number } | null
 }
@@ -65,7 +67,9 @@ const INITIAL: WorkforceState = {
   runningWorkerIds: [],
   activeWorkerId: null,
   testingWorkerId: null,
+  releasingWorkerId: null,
   creatingWorker: false,
+  loadingExample: false,
   notice: null,
   lastSaved: null,
 }
@@ -115,15 +119,15 @@ class WorkforceStore {
     this.listeners.forEach((l) => l())
   }
 
-  /* ---- hydration: read real state, seed once if the org is empty ---- */
+  /* ---- hydration: read the authenticated org's real state.
+   * Deliberately does NOT auto-seed demo data just because the org has
+   * zero workers — that would silently populate a real production
+   * organization with a fake Worker the first time someone signs in.
+   * See loadExampleWorker() for the explicit, user-initiated version. */
   async hydrate() {
     if (this.state.hydrated) return
     try {
-      let data = await api<{ workers: Worker[]; tasks: WorkerTask[]; executions: WorkerExecution[]; outputs: WorkerOutput[]; events: WorkerEvent[]; metrics: MetricRecord[]; businessEvents: BusinessEvent[] }>("/api/state")
-      if (data.workers.length === 0) {
-        await api("/api/seed", { method: "POST" })
-        data = await api("/api/state")
-      }
+      const data = await api<{ workers: Worker[]; tasks: WorkerTask[]; executions: WorkerExecution[]; outputs: WorkerOutput[]; events: WorkerEvent[]; metrics: MetricRecord[]; businessEvents: BusinessEvent[] }>("/api/state")
       this.set({
         hydrated: true,
         workers: data.workers,
@@ -138,6 +142,23 @@ class WorkforceStore {
     } catch (err) {
       console.log("[v0] hydrate failed", err)
       this.set({ hydrated: true, notice: err instanceof Error ? err.message : "Failed to load workers." })
+    }
+  }
+
+  /** Explicit, user-initiated: adds the example Worker (Atlas) to the
+   * current organization via a real Build + Release, not a fabricated
+   * "live" flag. See app/api/seed/route.ts. */
+  async loadExampleWorker() {
+    if (this.state.loadingExample) return
+    this.set({ loadingExample: true })
+    try {
+      const data = await api<{ workers: Worker[] }>("/api/seed", { method: "POST" })
+      this.set({ workers: data.workers, activeWorkerId: data.workers[0]?.id ?? this.state.activeWorkerId })
+    } catch (err) {
+      console.log("[v0] load example worker failed", err)
+      this.set({ notice: err instanceof Error ? err.message : "Could not load the example worker." })
+    } finally {
+      this.set({ loadingExample: false })
     }
   }
 
@@ -347,14 +368,22 @@ class WorkforceStore {
     this.schedulePersist(workerId, "channels")
   }
 
-  /* ---- 08 Test — actually executes the real worker ---- */
+  /* ---- 08 Test — Build (freeze an immutable version from the current
+   * draft) then execute exactly that version. Never runs the live
+   * draft directly — same guarantee a released run gets. ---- */
   async testWorker(workerId: string) {
     this.set({ testingWorkerId: workerId })
-    const outcome = await this.runWorker(workerId)
+    try {
+      await api(`/api/workers/${workerId}/build`, { method: "POST" })
+    } catch (err) {
+      this.set({ testingWorkerId: null, notice: err instanceof Error ? err.message : "Build failed." })
+      return
+    }
+
+    const outcome = await this.runWorker(workerId, { mode: "test" })
     this.patchWorker(workerId, (w) => ({
       ...w,
       tested: w.tested || outcome === "completed",
-      status: (w.tested || outcome === "completed") && w.status === "draft" ? "ready" : w.status,
     }))
     this.set({
       testingWorkerId: null,
@@ -367,23 +396,36 @@ class WorkforceStore {
               ? "Test halted — this action requires human approval before it can run."
               : "Test failed — see the execution timeline for the real reason.",
     })
-    this.schedulePersist(workerId)
+    await this.refetchState()
   }
 
-  /* ---- 09 Release ---- */
-  releaseWorker(workerId: string) {
+  /* ---- 09 Release — promotes the just-built version to LIVE via a
+   * real server-side transition. Never sets status/releasedAt locally
+   * before the server confirms it. ---- */
+  async releaseWorker(workerId: string) {
     const worker = this.state.workers.find((w) => w.id === workerId)
-    if (!worker || !worker.tested) return
-    this.patchWorker(workerId, (w) => ({ ...w, status: "live", releasedAt: Date.now() }))
-    this.schedulePersist(workerId)
+    if (!worker || !worker.tested || this.state.releasingWorkerId) return
+    this.set({ releasingWorkerId: workerId })
+    try {
+      const { worker: released } = await api<{ worker: Worker }>(`/api/workers/${workerId}/release`, { method: "POST" })
+      this.patchWorker(workerId, () => released)
+    } catch (err) {
+      console.log("[v0] release failed", err)
+      this.set({ notice: err instanceof Error ? err.message : "Could not release this worker." })
+    } finally {
+      this.set({ releasingWorkerId: null })
+    }
   }
 
   isRunning(workerId: string): boolean {
     return this.state.runningWorkerIds.includes(workerId)
   }
 
-  /* ---- Run Worker — a real, streamed execution ---- */
-  async runWorker(workerId: string): Promise<"completed" | "blocked" | "failed" | "pending_approval" | "error"> {
+  /* ---- Run Worker — a real, streamed execution of a specific,
+   * immutable WorkerVersion. mode "release" (default) runs the
+   * worker's live released version; mode "test" runs the version
+   * Build just produced from the current draft. ---- */
+  async runWorker(workerId: string, opts: { mode?: "release" | "test" } = {}): Promise<"completed" | "blocked" | "failed" | "pending_approval" | "error"> {
     const worker = this.state.workers.find((w) => w.id === workerId)
     if (!worker) return "error"
     if (this.isRunning(workerId)) return "error"
@@ -402,7 +444,7 @@ class WorkforceStore {
       const res = await fetch(`/api/workers/${workerId}/run`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ skillId: skill.id, input }),
+        body: JSON.stringify({ skillId: skill.id, input, mode: opts.mode ?? "release" }),
       })
       if (!res.ok || !res.body) {
         const body = await res.json().catch(() => null)
