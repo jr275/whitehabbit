@@ -17,6 +17,7 @@ import { developmentProvider } from "./llm-providers/development"
 import { geminiProvider } from "./llm-providers/gemini"
 import type { LlmCallInput, LlmCallOutput, LlmProvider } from "./llm-providers/types"
 import type { ToolActionResult, ToolDefinition } from "@/lib/agent/types"
+import { isDevModeAllowed } from "@/lib/runtime-mode"
 
 export type { LlmCallInput, LlmCallOutput } from "./llm-providers/types"
 
@@ -27,23 +28,18 @@ const PROVIDERS: Record<string, LlmProvider> = {
 
 const DEFAULT_PROVIDER_ID = "anthropic"
 
-/** LLM_DEV_MODE=true (exact match, not merely truthy) routes every LLM
- * call to the local development provider — no external credential, no
- * network call, no real tokens/cost. Checked BEFORE LLM_PROVIDER is
- * even looked up, so "development" is never reachable by setting
- * LLM_PROVIDER to it, and is never a fallback for a misconfigured or
- * failed real provider — the only way in is this one explicit flag.
- * Absent, empty, or any value other than "true" -> real behavior,
- * unchanged. */
-function isDevModeEnabled(): boolean {
-  return (process.env.LLM_DEV_MODE || "").trim().toLowerCase() === "true"
-}
-
 /** Resolves LLM_PROVIDER to a known provider, or reports exactly why it
  * can't — an unrecognized value is a misconfiguration, never a silent
- * fallback to a different provider's credentials. */
+ * fallback to a different provider's credentials.
+ *
+ * isDevModeAllowed() (lib/runtime-mode.ts) is checked BEFORE
+ * LLM_PROVIDER is even looked up, so "development" is never reachable
+ * by setting LLM_PROVIDER to it, is never a fallback for a
+ * misconfigured or failed real provider, and — critically — is
+ * hard-blocked whenever this is actually a production deployment,
+ * regardless of what LLM_DEV_MODE is set to. */
 function resolveProvider(): { provider: LlmProvider } | { error: string } {
-  if (isDevModeEnabled()) return { provider: developmentProvider }
+  if (isDevModeAllowed()) return { provider: developmentProvider }
   const raw = (process.env.LLM_PROVIDER || DEFAULT_PROVIDER_ID).trim().toLowerCase()
   const provider = PROVIDERS[raw]
   if (!provider) {

@@ -13,6 +13,7 @@ import "server-only"
  * ================================================================== */
 
 import type { ToolActionResult, ToolDefinition } from "@/lib/agent/types"
+import { assertSafeUrl } from "@/lib/security/ssrf-guard"
 
 export interface OpenPageInput {
   url: string
@@ -45,7 +46,12 @@ function extractText(html: string): { title: string; text: string } {
 export async function openPage(input: OpenPageInput): Promise<ToolActionResult<OpenPageOutput>> {
   const started = Date.now()
   try {
-    const res = await fetch(input.url, { signal: AbortSignal.timeout(15_000), headers: { accept: "text/html" } })
+    // Real SSRF check before any request leaves the server — input.url
+    // is Worker-configuration-controlled (Knowledge sources, and any
+    // future user-supplied URL), so it must never be trusted to point
+    // only at the public internet without verifying it does.
+    const safeUrl = await assertSafeUrl(input.url)
+    const res = await fetch(safeUrl, { signal: AbortSignal.timeout(15_000), headers: { accept: "text/html" }, redirect: "error" })
     if (!res.ok) {
       return { ok: false, error: `Fetching ${input.url} returned ${res.status}`, durationMs: Date.now() - started }
     }
