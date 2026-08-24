@@ -25,6 +25,7 @@ import { AlertTriangle, BookOpen, Check, KeyRound, Layers, ListChecks, Loader2, 
 import { useEffect, useState } from "react"
 import type { StepKey } from "@/components/studio/build-panel"
 import { ExecutionTimeline } from "@/components/outputs/output-drawer"
+import { WorkerAvatar } from "@/components/workforce/worker-avatar"
 import { SKILL_CATALOG } from "@/lib/workforce/catalog"
 import { toolExecutionBoundary, TOOL_BOUNDARY_META, type Worker, type WorkerEvent, type WorkerExecution, type WorkerOutput, type WorkerTask } from "@/lib/workforce/model"
 import {
@@ -148,12 +149,7 @@ export function WorkerCanvas({
          * "what is this Worker?" before "is it ready?" */}
         <div className="mx-auto mt-2 grid max-w-2xl grid-cols-1 gap-2.5 lg:grid-cols-3 lg:[grid-template-rows:auto_auto_auto]">
           <div className="flex flex-col items-center justify-center rounded-xl border border-foreground/15 bg-card px-4 py-5 text-center lg:col-start-2 lg:row-start-2">
-            <span
-              className="flex h-12 w-12 items-center justify-center rounded-2xl text-[13px] font-bold text-white shadow-sm"
-              style={{ backgroundColor: worker.identity.accent || "#5a6ef0" }}
-            >
-              {worker.identity.initials || "NW"}
-            </span>
+            <WorkerAvatar worker={worker} size="lg" rounded="2xl" className="shadow-sm" />
             <h1 className="mt-2.5 text-[16px] font-semibold leading-tight tracking-tight text-foreground">{worker.identity.name || "Unnamed worker"}</h1>
             <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{worker.identity.role || "No role set"}</p>
             {worker.mission.trim() && <p className="mt-2 line-clamp-3 text-[11.5px] leading-relaxed text-muted-foreground">{worker.mission}</p>}

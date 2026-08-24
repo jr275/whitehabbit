@@ -13,6 +13,7 @@ import { SKILL_CATALOG, TOOL_CATALOG } from "@/lib/workforce/catalog"
 import type { Worker, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
 import { EXECUTION_STATUS_META, OUTPUT_TYPE_META } from "@/lib/workforce/model"
 import { isToday, timeOfDay } from "@/lib/workforce/selectors"
+import { getWorkerVisual } from "@/lib/workforce/visual-identity"
 
 interface Row {
   execution: WorkerExecution
@@ -130,7 +131,7 @@ export function OutputTable({
               >
                 <td className="whitespace-nowrap px-4 py-2.5">
                   <span className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: r.worker.identity.accent }} />
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: getWorkerVisual(r.worker).accent }} />
                     {r.worker.identity.name}
                   </span>
                 </td>

@@ -7,6 +7,7 @@
 import { SKILL_CATALOG } from "./catalog"
 import type { MetricRecord, Worker, WorkerEvent, WorkerEventType, WorkerExecution, WorkerOutput, WorkerTask } from "./model"
 import { OUTPUT_TYPE_META } from "./model"
+import { getWorkerVisual } from "./visual-identity"
 
 /* ---- readiness (Studio) — real, and it names the real blocker ---- */
 export interface ReadinessStep {
@@ -210,7 +211,7 @@ export function activeWork(workers: Worker[], executions: WorkerExecution[], tas
       return {
         workerId: e.workerId,
         workerName: worker.identity.name,
-        accent: worker.identity.accent,
+        accent: getWorkerVisual(worker).accent,
         taskTitle: task.title,
         stage: latestEvent ? (STAGE_LABEL[latestEvent.type] ?? latestEvent.type) : "Starting…",
         elapsedSeconds: Math.round((Date.now() - e.startedAt) / 1000),
@@ -358,7 +359,7 @@ export function todaysTimeline(workers: Worker[], executions: WorkerExecution[],
       tone = "bad"
     }
 
-    entries.push({ id: e.id, ts: e.completedAt, workerId: worker.id, workerName: worker.identity.name, accent: worker.identity.accent, text, executionId: e.id, tone })
+    entries.push({ id: e.id, ts: e.completedAt, workerId: worker.id, workerName: worker.identity.name, accent: getWorkerVisual(worker).accent, text, executionId: e.id, tone })
   }
   return entries.sort((a, b) => b.ts - a.ts)
 }

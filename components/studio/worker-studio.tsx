@@ -20,6 +20,7 @@ import { BuildPanel, type StepKey } from "@/components/studio/build-panel"
 import { LiveOutputsPanel } from "@/components/studio/live-outputs-panel"
 import { StudioShell } from "@/components/studio/studio-shell"
 import { WorkerCanvas } from "@/components/studio/worker-canvas"
+import { WorkerAvatar } from "@/components/workforce/worker-avatar"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
 export function WorkerStudio({ runtimeMode }: { runtimeMode?: "development" | "preview" | "production" }) {
@@ -178,12 +179,7 @@ function WorkerSwitcher({ workers, activeId }: { workers: ReturnType<typeof useW
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-secondary"
       >
-        <span
-          className="flex h-5 w-5 items-center justify-center rounded-md text-[9px] font-bold text-white"
-          style={{ backgroundColor: active?.identity.accent || "#5a6ef0" }}
-        >
-          {active?.identity.initials || "?"}
-        </span>
+        {active ? <WorkerAvatar worker={active} size="xs" /> : <span className="flex h-5 w-5 items-center justify-center rounded-md bg-secondary text-[9px] font-bold text-muted-foreground">?</span>}
         {active?.identity.name || "Unnamed worker"}
         <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
       </button>
@@ -203,12 +199,7 @@ function WorkerSwitcher({ workers, activeId }: { workers: ReturnType<typeof useW
                       w.id === activeId ? "text-foreground" : "text-muted-foreground"
                     }`}
                   >
-                    <span
-                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[9px] font-bold text-white"
-                      style={{ backgroundColor: w.identity.accent || "#5a6ef0" }}
-                    >
-                      {w.identity.initials || "?"}
-                    </span>
+                    <WorkerAvatar worker={w} size="xs" />
                     <span className="min-w-0 flex-1 truncate">{w.identity.name || "Unnamed worker"}</span>
                     {w.releasedVersionId != null && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-grow" />}
                   </button>
