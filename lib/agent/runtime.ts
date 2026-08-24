@@ -58,8 +58,32 @@ class EventQueue {
   }
 }
 
+/** `ctx.emit()` is a synchronous callback (skills call it fire-and-
+ * forget, mid-execution) but every event must become a real, durably
+ * persisted Postgres row. This chains each write onto the previous
+ * one's promise, so writes for one execution always land in the exact
+ * order emitted — required for `sequence` to mean anything — without
+ * requiring every skill file to become async at the call site. */
+class SerialWriter {
+  private pending: Promise<unknown> = Promise.resolve()
+
+  enqueue(fn: () => Promise<unknown>) {
+    this.pending = this.pending.then(fn, fn)
+  }
+
+  async drain(): Promise<void> {
+    await this.pending
+  }
+}
+
 export interface RunTaskInput {
   worker: Worker
+  orgId: string
+  /** The exact immutable WorkerVersion this run executes — Run Worker
+   * always resolves this to the worker's released version; Test
+   * resolves it to the version Build just produced from the draft.
+   * Never the live-editable draft itself. */
+  workerVersionId: string
   skillId: string
   input: Record<string, string>
 }
@@ -87,15 +111,19 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
   const execution: WorkerExecution = {
     id: `exec_${randomUUID()}`,
     workerId: run.worker.id,
+    workerVersionId: run.workerVersionId,
     taskId: task.id,
     status: "running",
     startedAt: now,
     completedAt: null,
   }
-  repo.insertTask(task, run.input)
-  repo.insertExecution(execution)
+  // These two must be durable before we emit anything — a reconnecting
+  // client's first read is "does this execution exist at all".
+  await repo.insertTask(task, run.orgId, run.input)
+  await repo.insertExecution(execution, run.orgId)
 
   const queue = new EventQueue()
+  const writer = new SerialWriter()
 
   const emit = (type: RuntimeEventType, payload: Record<string, unknown>) => {
     const event: WorkerEvent = {
@@ -107,7 +135,7 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
       timestamp: Date.now(),
       payload,
     }
-    repo.insertEvent(event)
+    writer.enqueue(() => repo.insertExecutionEvent(event, run.orgId))
     queue.push(event)
   }
 
@@ -148,7 +176,7 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         status: "completed",
         createdAt: Date.now(),
       }
-      repo.insertOutput(output)
+      await repo.insertOutput(output, run.orgId)
       emit("output_created", { outputId: output.id, title: output.title, qualityScore: evaluation.qualityScore })
 
       const emissions = skill.metrics(result, evaluation)
@@ -163,13 +191,13 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         recordedAt: Date.now(),
       }))
       for (const m of metricRecords) {
-        repo.insertMetric(m)
+        await repo.insertMetric(m, run.orgId)
         emit("metric_recorded", { key: m.key, kind: m.kind, value: m.value, unit: m.unit })
       }
 
       const completedAt = Date.now()
       const durationMs = completedAt - execution.startedAt
-      repo.finalizeExecution(execution.id, {
+      await repo.finalizeExecution(execution.id, {
         status: "completed",
         completedAt,
         durationMs,
@@ -179,7 +207,7 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         model: result.model,
         executionMode: result.executionMode,
       })
-      repo.updateTaskStatus(task.id, "completed")
+      await repo.updateTaskStatus(task.id, "completed")
       emit("task_completed", { outputId: output.id, durationMs })
     } catch (err) {
       const completedAt = Date.now()
@@ -189,24 +217,28 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
       // "credential required" vs "the provider failed" vs "this run's
       // own logic broke" — never inferred from string-matching a message.
       if (err instanceof SkillBlockedError) {
-        repo.finalizeExecution(execution.id, { status: "blocked", reasonCode: err.code, blockedReason: err.reason, completedAt, durationMs })
-        repo.updateTaskStatus(task.id, "blocked")
+        await repo.finalizeExecution(execution.id, { status: "blocked", reasonCode: err.code, blockedReason: err.reason, completedAt, durationMs })
+        await repo.updateTaskStatus(task.id, "blocked")
         emit("task_blocked", { reason: err.reason, reasonCode: err.code })
       } else if (err instanceof ApprovalRequiredError) {
         // Real terminal state, not a failure: the tool exists and
         // works, it just requires a human to say yes first. No tool
         // action ran — runToolAction() throws before calling it.
-        repo.finalizeExecution(execution.id, { status: "pending_approval", blockedReason: err.message, completedAt, durationMs })
-        repo.updateTaskStatus(task.id, "pending_approval")
+        await repo.finalizeExecution(execution.id, { status: "pending_approval", blockedReason: err.message, completedAt, durationMs })
+        await repo.updateTaskStatus(task.id, "pending_approval")
         emit("approval_required", { reason: err.message, toolId: err.toolId, toolName: err.toolName, action: err.actionLabel, permission: err.permission })
       } else {
         const reasonCode: ExecutionReasonCode = err instanceof InvalidCredentialError || err instanceof ProviderError ? err.code : "execution_error"
         const message = err instanceof Error ? err.message : "Task failed for an unknown reason."
-        repo.finalizeExecution(execution.id, { status: "failed", reasonCode, blockedReason: message, completedAt, durationMs })
-        repo.updateTaskStatus(task.id, "failed")
+        await repo.finalizeExecution(execution.id, { status: "failed", reasonCode, blockedReason: message, completedAt, durationMs })
+        await repo.updateTaskStatus(task.id, "failed")
         emit("task_failed", { reason: message, reasonCode })
       }
     } finally {
+      // every emitted event must be durably written before this
+      // execution is considered finished — a reconnecting client reads
+      // Postgres, not this in-memory generator.
+      await writer.drain()
       queue.close()
     }
   })()

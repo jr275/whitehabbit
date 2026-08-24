@@ -128,7 +128,15 @@ export interface OutcomeDefinition {
 }
 
 export type Autonomy = "low" | "medium" | "high"
-export type WorkerStatus = "draft" | "ready" | "live" | "working" | "idle"
+
+/** Explicit lifecycle — draft (editable) -> building (Build in
+ * progress) -> ready (has an immutable, buildable version but not
+ * live) -> live (a version has actually been released). `live` is
+ * ONLY ever set by the release action; nothing may infer it from
+ * `status !== "draft"` — that was the ReleaseStep bug. See
+ * `releasedVersionId` below, which is the actual source of truth for
+ * "is this worker live". */
+export type WorkerStatus = "draft" | "building" | "ready" | "live"
 
 export interface Worker {
   id: string
@@ -146,6 +154,45 @@ export interface Worker {
   tested: boolean
   createdAt: number
   releasedAt: number | null
+  /** The one authoritative "is this worker live" fact — the id of the
+   * WorkerVersion currently released, or null. Run Worker always
+   * executes this exact frozen version, never the live-editable
+   * draft, so an in-flight or completed execution's configuration can
+   * never be changed retroactively by a later edit. */
+  releasedVersionId: string | null
+}
+
+/** An immutable Build artifact — a frozen snapshot of a Worker's
+ * definition at the moment it was built, plus a reproducibility
+ * fingerprint. Release promotes exactly one version's id into
+ * Worker.releasedVersionId. A later draft edit never mutates a past
+ * version. */
+export interface WorkerVersion {
+  id: string
+  workerId: string
+  versionNumber: number
+  definition: WorkerDefinitionSnapshot
+  fingerprint: string
+  status: "ready" | "released" | "archived"
+  createdAt: number
+  releasedAt: number | null
+}
+
+/** The portion of Worker that Build actually freezes — everything
+ * that determines runtime behavior. Deliberately excludes the fields
+ * that are about the Worker record itself (id/status/timestamps),
+ * not its configuration. */
+export interface WorkerDefinitionSnapshot {
+  identity: WorkerIdentity
+  mission: string
+  objectives: Objective[]
+  knowledge: KnowledgeSource[]
+  skills: Skill[]
+  tools: WorkforceTool[]
+  behaviors: BehaviorRule[]
+  channels: WorkerChannel[]
+  outcome: OutcomeDefinition
+  autonomy: Autonomy
 }
 
 /* ================================================================== *
@@ -170,8 +217,12 @@ export type ExecutionReasonCode = "missing_credential" | "invalid_credential" | 
 export interface WorkerExecution {
   id: string
   workerId: string
+  /** The exact immutable WorkerVersion this execution ran (or is
+   * running) — never the live-editable draft. Undefined only for
+   * executions persisted before versioning existed. */
+  workerVersionId?: string
   taskId: string
-  status: "running" | "completed" | "failed" | "blocked" | "pending_approval"
+  status: "queued" | "running" | "completed" | "failed" | "blocked" | "pending_approval" | "cancelled"
   reasonCode?: ExecutionReasonCode
   blockedReason?: string
   startedAt: number
@@ -244,6 +295,10 @@ export interface WorkerEvent {
   type: WorkerEventType
   timestamp: number
   payload: Record<string, unknown>
+  /** Monotonic per-execution order, assigned at persistence time —
+   * the durable ordering guarantee a reconnecting client relies on,
+   * independent of network/delivery order. */
+  sequence?: number
 }
 
 /* ---- Business Event -> Metric -> Outcome ---- */
@@ -283,11 +338,13 @@ export const OUTPUT_STATUS_META: Record<OutputStatus, { label: string; tone: "go
 }
 
 export const EXECUTION_STATUS_META: Record<WorkerExecution["status"], { label: string; tone: "good" | "info" | "warn" | "bad" | "muted" }> = {
+  queued: { label: "Queued", tone: "muted" },
   running: { label: "Running", tone: "info" },
   completed: { label: "Completed", tone: "good" },
   failed: { label: "Failed", tone: "bad" },
   blocked: { label: "Blocked", tone: "warn" },
   pending_approval: { label: "Pending approval", tone: "warn" },
+  cancelled: { label: "Cancelled", tone: "muted" },
 }
 
 /* ---- outcome KPI presets, per vertical (section 8) ---- */

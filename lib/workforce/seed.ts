@@ -63,6 +63,7 @@ export function buildEmptyWorker(id: string): Worker {
     tested: false,
     createdAt: now,
     releasedAt: null,
+    releasedVersionId: null,
   }
 }
 
@@ -93,9 +94,15 @@ export function buildSeedWorker(): Worker {
     channels: channels(["web"]),
     outcome: { primaryKPI: "Qualified Leads", secondaryKPIs: ["Reach", "Engagement", "CTR", "Revenue"] },
     autonomy: "medium",
-    status: "live",
+    // "ready", not "live": buildSeedWorker() only ever returns data — it
+    // has no database access to create the real WorkerVersion row that
+    // "live" requires. The seed route (app/api/seed/route.ts) builds and
+    // releases a real version after inserting this, which is what
+    // actually makes it live with a genuine releasedVersionId.
+    status: "ready",
     tested: true,
     createdAt: now,
-    releasedAt: now,
+    releasedAt: null,
+    releasedVersionId: null,
   }
 }
