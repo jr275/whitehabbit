@@ -178,6 +178,65 @@ export async function deleteWorker(id: string, orgId: string): Promise<void> {
   await query("DELETE FROM workers WHERE id = $1 AND org_id = $2", [id, orgId])
 }
 
+/** The one org-scoped lookup the Product layer needs: "does this org
+ * already have a Worker for this Product" — reads the same JSONB
+ * `definition` column every other Worker read uses, filtered on the
+ * productId field inside it. No new table, no migration. */
+export async function getWorkerByProduct(orgId: string, productId: string): Promise<Worker | null> {
+  const row = await queryOne<WorkerRow>(
+    "SELECT * FROM workers WHERE org_id = $1 AND definition->>'productId' = $2 ORDER BY created_at ASC LIMIT 1",
+    [orgId, productId],
+  )
+  return row ? rowToWorker(row) : null
+}
+
+/** Appends a real, dated fact to a Worker's accumulated Memory
+ * KnowledgeSource — creating it on first use. Called only from
+ * lib/agent/runtime.ts after a real evaluated execution completes for
+ * a product-provisioned Worker; `note` must already be built from real
+ * result/evaluation data by the caller, never invented here. Silently
+ * a no-op if the worker no longer exists (never blocks the execution
+ * that triggered it — see the try/catch at the call site).
+ *
+ * Deliberately a targeted `jsonb_set` on the `knowledge` path inside a
+ * `SELECT ... FOR UPDATE` transaction, NOT a read-mutate-write through
+ * upsertWorker(): this runs fire-and-forget, concurrently with
+ * markWorkerTested()'s own write to the same row (app/api/workers/
+ * [id]/run/route.ts, right after this execution's stream finishes).
+ * A full-object upsertWorker() write here would read a `tested` value
+ * that predates markWorkerTested()'s update and silently overwrite it
+ * back to false if this write lands second — a real lost-update race
+ * this fixed. Locking the row and touching only the one JSON path
+ * this function actually owns makes the two writes safely commute
+ * regardless of ordering. */
+export async function appendWorkerMemory(workerId: string, orgId: string, note: string): Promise<void> {
+  const now = Date.now()
+  await withTransaction(async (client) => {
+    const res = await client.query<{ definition: Worker }>("SELECT definition FROM workers WHERE id = $1 AND org_id = $2 FOR UPDATE", [workerId, orgId])
+    const definition = res.rows[0]?.definition
+    if (!definition) return
+    const knowledge = definition.knowledge ?? []
+    const existingIdx = knowledge.findIndex((k) => k.type === "memory")
+    let updatedKnowledge
+    if (existingIdx >= 0) {
+      const existing = knowledge[existingIdx]
+      updatedKnowledge = [
+        ...knowledge.slice(0, existingIdx),
+        { ...existing, content: existing.content ? `${existing.content}\n- ${note}` : `- ${note}`, documents: existing.documents + 1 },
+        ...knowledge.slice(existingIdx + 1),
+      ]
+    } else {
+      updatedKnowledge = [...knowledge, { id: `kn_mem_${randomUUID()}`, name: "Accumulated Memory", type: "memory" as const, documents: 1, addedAt: now, content: `- ${note}` }]
+    }
+    await client.query("UPDATE workers SET definition = jsonb_set(definition, '{knowledge}', $1::jsonb), updated_at = $2 WHERE id = $3 AND org_id = $4", [
+      JSON.stringify(updatedKnowledge),
+      now,
+      workerId,
+      orgId,
+    ])
+  })
+}
+
 /** Marks a worker tested — set ONLY by the server, ONLY after a real
  * test-mode execution actually completes (see app/api/workers/[id]/
  * run/route.ts). Never client-settable via PATCH — `tested` gates

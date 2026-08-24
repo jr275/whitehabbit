@@ -209,6 +209,17 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
       })
       await repo.updateTaskStatus(task.id, "completed")
       emit("task_completed", { outputId: output.id, durationMs })
+
+      // Domain Intelligence -> Memory: only for a Product-provisioned
+      // Worker (see lib/workforce/seed.ts's buildWorkerFromProduct()),
+      // and only a real, already-computed fact — never invented here,
+      // never blocking the execution it's derived from.
+      if (run.worker.productId) {
+        const note = `${new Date(completedAt).toISOString().slice(0, 10)} — ${skill.name}: quality ${evaluation.qualityScore}%, ${result.sources.length} source${result.sources.length === 1 ? "" : "s"}.`
+        repo.appendWorkerMemory(run.worker.id, run.orgId, note).catch((memErr) => {
+          console.error("[runtime] appendWorkerMemory failed (non-fatal)", memErr)
+        })
+      }
     } catch (err) {
       const completedAt = Date.now()
       const durationMs = completedAt - execution.startedAt

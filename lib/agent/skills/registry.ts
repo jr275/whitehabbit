@@ -1,15 +1,28 @@
 import "server-only"
 
 import { contentIntelligenceSkill } from "./content-intelligence"
+import { customerConversationSkill } from "./customer-conversation"
 import { engagementAnalysisSkill } from "./engagement-analysis"
+import { leadQualificationSkill } from "./lead-qualification"
+import { seoOpportunitySkill } from "./seo-opportunity"
 import { trendResearchSkill } from "./trend-research"
 import type { SkillDefinition } from "@/lib/agent/types"
 
-/* The full real-skill catalog for this iteration: ONE vertical
- * (Marketing Intelligence), three real skill contracts. Adding a new
- * vertical means adding definitions here — Studio, Outputs Hub and the
- * runtime do not change. */
-export const SKILL_REGISTRY: SkillDefinition[] = [trendResearchSkill, contentIntelligenceSkill, engagementAnalysisSkill]
+/* The full real-skill catalog — the capability layer shared across
+ * every Product and every hand-built Worker. Products (lib/products/
+ * catalog.ts) compose these same skills with product-specific
+ * onboarding/knowledge/heuristics; they never fork a skill's code to
+ * get product-specific behavior. Adding a new capability means adding
+ * a definition here — Studio, Outputs Hub and the runtime do not
+ * change. */
+export const SKILL_REGISTRY: SkillDefinition[] = [
+  trendResearchSkill,
+  contentIntelligenceSkill,
+  engagementAnalysisSkill,
+  leadQualificationSkill,
+  seoOpportunitySkill,
+  customerConversationSkill,
+]
 
 export function getSkill(id: string): SkillDefinition | undefined {
   return SKILL_REGISTRY.find((s) => s.id === id)

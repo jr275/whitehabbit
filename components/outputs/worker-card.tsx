@@ -7,6 +7,7 @@
  * only ever answers "what did it produce", never "what can it do".
  * ------------------------------------------------------------------ */
 
+import { WorkerAvatar } from "@/components/workforce/worker-avatar"
 import type { Worker, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
 import { todaysWorkByType, workerTaskSummary } from "@/lib/workforce/selectors"
 
@@ -29,12 +30,7 @@ export function WorkerOutputCard({
   return (
     <article className="rounded-xl border border-border bg-card p-5">
       <div className="flex items-center gap-2.5">
-        <span
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-[11px] font-bold text-white"
-          style={{ backgroundColor: worker.identity.accent || "#5a6ef0" }}
-        >
-          {worker.identity.initials}
-        </span>
+        <WorkerAvatar worker={worker} size="md" rounded="xl" />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h3 className="text-[15px] font-semibold tracking-tight text-foreground">{worker.identity.name}</h3>

@@ -8,6 +8,7 @@
  * ------------------------------------------------------------------ */
 
 import { Check } from "lucide-react"
+import { WorkerAvatar } from "@/components/workforce/worker-avatar"
 import { capabilityScores, recommendEvolution, skillExecutionStats } from "@/lib/workforce/evolution"
 import type { MetricRecord, Worker, WorkerTask } from "@/lib/workforce/model"
 
@@ -32,9 +33,7 @@ function WorkerEvolveCard({ worker, metrics, tasks }: { worker: Worker; metrics:
   return (
     <article className="rounded-xl border border-border bg-card p-4">
       <div className="flex items-center gap-2">
-        <span className="flex h-6 w-6 items-center justify-center rounded-md text-[9px] font-bold text-white" style={{ backgroundColor: worker.identity.accent }}>
-          {worker.identity.initials}
-        </span>
+        <WorkerAvatar worker={worker} size="sm" />
         <span className="text-[13px] font-semibold text-foreground">{worker.identity.name}</span>
       </div>
 

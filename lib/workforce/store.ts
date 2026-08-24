@@ -105,6 +105,15 @@ class WorkforceStore {
   private state: WorkforceState = INITIAL
   private listeners = new Set<() => void>()
   private persistTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** In-flight /api/state request, if any — React Strict Mode (dev)
+   * double-invokes effects, so two components/effects can both call
+   * hydrate() before the first `this.state.hydrated` flips true. Without
+   * this, that races two real fetches; whichever resolves LAST silently
+   * overwrites activeWorkerId back to workers[0], clobbering an explicit
+   * selection (e.g. landing on ?worker=<id> from Assemble Worker) made
+   * in between. Sharing one in-flight promise makes hydrate() safe to
+   * call from multiple places concurrently. */
+  private hydratePromise: Promise<void> | null = null
 
   getSnapshot = (): WorkforceState => this.state
   getServerSnapshot = (): WorkforceState => INITIAL
@@ -124,25 +133,29 @@ class WorkforceStore {
    * zero workers — that would silently populate a real production
    * organization with a fake Worker the first time someone signs in.
    * See loadExampleWorker() for the explicit, user-initiated version. */
-  async hydrate() {
-    if (this.state.hydrated) return
-    try {
-      const data = await api<{ workers: Worker[]; tasks: WorkerTask[]; executions: WorkerExecution[]; outputs: WorkerOutput[]; events: WorkerEvent[]; metrics: MetricRecord[]; businessEvents: BusinessEvent[] }>("/api/state")
-      this.set({
-        hydrated: true,
-        workers: data.workers,
-        tasks: data.tasks,
-        executions: data.executions,
-        outputs: data.outputs,
-        events: data.events,
-        metrics: data.metrics,
-        businessEvents: data.businessEvents,
-        activeWorkerId: data.workers[0]?.id ?? null,
-      })
-    } catch (err) {
-      console.log("[v0] hydrate failed", err)
-      this.set({ hydrated: true, notice: err instanceof Error ? err.message : "Failed to load workers." })
-    }
+  hydrate(): Promise<void> {
+    if (this.state.hydrated) return Promise.resolve()
+    if (this.hydratePromise) return this.hydratePromise
+    this.hydratePromise = (async () => {
+      try {
+        const data = await api<{ workers: Worker[]; tasks: WorkerTask[]; executions: WorkerExecution[]; outputs: WorkerOutput[]; events: WorkerEvent[]; metrics: MetricRecord[]; businessEvents: BusinessEvent[] }>("/api/state")
+        this.set({
+          hydrated: true,
+          workers: data.workers,
+          tasks: data.tasks,
+          executions: data.executions,
+          outputs: data.outputs,
+          events: data.events,
+          metrics: data.metrics,
+          businessEvents: data.businessEvents,
+          activeWorkerId: data.workers[0]?.id ?? null,
+        })
+      } catch (err) {
+        console.log("[v0] hydrate failed", err)
+        this.set({ hydrated: true, notice: err instanceof Error ? err.message : "Failed to load workers." })
+      }
+    })()
+    return this.hydratePromise
   }
 
   /** Explicit, user-initiated: adds the example Worker (Atlas) to the

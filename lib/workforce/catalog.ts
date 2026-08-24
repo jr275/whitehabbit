@@ -58,6 +58,36 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     requiredTools: ["tool_analytics", "tool_llm"],
     inputs: [{ key: "query", label: "What should it look at?", type: "text", required: false, placeholder: "Last week's posts" }],
   },
+  {
+    id: "skill_lead_qualification",
+    name: "Lead Research & Qualification",
+    category: "sales",
+    description: "Searches real sources and uses an LLM to identify and score genuine candidate companies against a target profile.",
+    outputType: "lead_qualification",
+    taskTitle: "Research and qualify leads",
+    requiredTools: ["tool_web_search", "tool_llm"],
+    inputs: [{ key: "query", label: "What kind of leads should it find?", type: "text", required: true, placeholder: "Enterprise SaaS companies expanding into new markets" }],
+  },
+  {
+    id: "skill_seo_opportunity",
+    name: "SEO Opportunity Planning",
+    category: "content",
+    description: "Searches real sources and uses an LLM to identify genuine topic/page opportunities and produce a structured page plan.",
+    outputType: "seo_opportunity_plan",
+    taskTitle: "Plan SEO page opportunities",
+    requiredTools: ["tool_web_search", "tool_llm"],
+    inputs: [{ key: "query", label: "What topic area or site focus should it plan for?", type: "text", required: true, placeholder: "Comparison and how-to pages for a project management tool" }],
+  },
+  {
+    id: "skill_customer_conversation",
+    name: "Customer Conversation",
+    category: "communication",
+    description: "Responds to a real customer request using an LLM grounded in this worker's real Domain Profile and rules, and records a real, honest handling decision.",
+    outputType: "conversation_response",
+    taskTitle: "Handle a customer request",
+    requiredTools: ["tool_llm"],
+    inputs: [{ key: "query", label: "What is the customer asking or saying?", type: "textarea", required: true, placeholder: "Hi, I need to change my reservation to next weekend instead — is that possible?" }],
+  },
 ]
 
 export interface ToolTemplate {
