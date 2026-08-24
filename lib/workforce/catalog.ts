@@ -78,6 +78,16 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     requiredTools: ["tool_web_search", "tool_llm"],
     inputs: [{ key: "query", label: "What topic area or site focus should it plan for?", type: "text", required: true, placeholder: "Comparison and how-to pages for a project management tool" }],
   },
+  {
+    id: "skill_customer_conversation",
+    name: "Customer Conversation",
+    category: "communication",
+    description: "Responds to a real customer request using an LLM grounded in this worker's real Domain Profile and rules, and records a real, honest handling decision.",
+    outputType: "conversation_response",
+    taskTitle: "Handle a customer request",
+    requiredTools: ["tool_llm"],
+    inputs: [{ key: "query", label: "What is the customer asking or saying?", type: "textarea", required: true, placeholder: "Hi, I need to change my reservation to next weekend instead — is that possible?" }],
+  },
 ]
 
 export interface ToolTemplate {

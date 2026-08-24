@@ -111,17 +111,30 @@ function developmentSeoOpportunityFixture(): string {
   })
 }
 
+/** The matching fixture for customer-conversation.ts's parseConversation(). */
+function developmentConversationFixture(): string {
+  return JSON.stringify({
+    response:
+      "[DEV] This is a deterministic development fixture, not a real model response — LLM_DEV_MODE is enabled, so no external provider was called.",
+    action: "answered",
+    confidence: 70,
+    reasoning_summary: "[DEV] Local pipeline exercise — answered using the fixture response.",
+  })
+}
+
 /** Every real skill that parses structured JSON out of callLlm() has a
  * distinct expected shape, spelled out verbatim in that skill's own
  * system prompt (see trend-research.ts / lead-qualification.ts /
- * seo-opportunity.ts). The fixture is picked by matching that shape
- * string — never a skill id, since LlmCallInput deliberately carries
- * no skill identity (the same contract every real provider
- * implements) — so a new skill only needs a matching fixture function
- * here, no changes to the call boundary. */
+ * seo-opportunity.ts / customer-conversation.ts). The fixture is
+ * picked by matching that shape string — never a skill id, since
+ * LlmCallInput deliberately carries no skill identity (the same
+ * contract every real provider implements) — so a new skill only
+ * needs a matching fixture function here, no changes to the call
+ * boundary. */
 function developmentFixtureFor(input: LlmCallInput): string {
   if (input.system.includes('"leads":[')) return developmentLeadsFixture()
   if (input.system.includes('"opportunities":[')) return developmentSeoOpportunityFixture()
+  if (input.system.includes('"reasoning_summary"')) return developmentConversationFixture()
   return developmentTrendsFixture()
 }
 

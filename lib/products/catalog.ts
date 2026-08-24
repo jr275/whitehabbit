@@ -13,11 +13,13 @@
  * same Product behave differently (see lib/products/domain-profile.ts
  * and lib/workforce/seed.ts's buildWorkerFromProduct()).
  *
- * Multiple Products deliberately reuse the SAME underlying Skill
- * (Content Intelligence and Discover both use skill_trend_research) —
- * that's the point: the capability layer is shared, the product layer
- * is what differentiates them, via onboarding + Domain Profile +
- * mission framing, never via forked skill code.
+ * Products are free to share an underlying Skill when their real
+ * capability genuinely is the same one — the capability layer stays
+ * shared, the product layer differentiates via onboarding + Domain
+ * Profile + mission framing, never via forked skill code. They are
+ * equally free to need a genuinely distinct Skill (Discover's real
+ * work — responding to a customer request — is not the same
+ * capability as researching a topic, so it has its own).
  * ================================================================== */
 
 export type ProductProfileBucket = "business" | "audience" | "data" | "process" | "rules"
@@ -70,7 +72,7 @@ export const PRODUCT_CATALOG: ProductTemplate[] = [
     name: "Content Intelligence",
     tagline: "Know what to write, for this business specifically.",
     description:
-      "A Worker that researches real content and market signals through the lens of your actual business, audience and brand rules — not a generic content-ideas generator.",
+      "AI content intelligence workforce specialized in discovering trends, identifying content opportunities and producing high-performing content.",
     accent: "#a855f7",
     icon: "PenLine",
     deliverableLabel: "Content opportunity briefs, grounded in real sources",
@@ -96,7 +98,7 @@ export const PRODUCT_CATALOG: ProductTemplate[] = [
     name: "Programmatic SEO",
     tagline: "Real page opportunities, planned for your actual site.",
     description:
-      "A Worker that turns real topic signals into structured, source-cited page plans — scoped to your real site, existing pages and publishing constraints.",
+      "AI SEO workforce specialized in discovering entities, search opportunities and scalable programmatic page opportunities.",
     accent: "#f59e0b",
     icon: "Layers",
     deliverableLabel: "Page-opportunity plans with title, intent and outline",
@@ -120,27 +122,27 @@ export const PRODUCT_CATALOG: ProductTemplate[] = [
     id: "product_discover",
     slug: "discover",
     name: "Discover",
-    tagline: "Real signals about your market, not a generic dashboard.",
+    tagline: "Understands your customer, in your real context.",
     description:
-      "A Worker that surfaces genuine market and opportunity signals — trends, and if relevant, real qualified leads — filtered through your real industry, audience and rules.",
+      "AI customer operations workforce specialized in understanding conversations, using context and taking actions.",
     accent: "#14b8a6",
     icon: "Compass",
-    deliverableLabel: "Market/opportunity signal reports, grounded in real sources",
+    deliverableLabel: "A real, grounded response to a customer request, plus a real handling decision",
     workerRoleLabel: "Discover Worker",
-    primarySkillId: "skill_trend_research",
-    secondarySkillIds: ["skill_lead_qualification"],
+    primarySkillId: "skill_customer_conversation",
+    secondarySkillIds: [],
     onboarding: [
-      { key: "business", bucket: "business", label: "What industry/market are you in?", type: "textarea", required: true, placeholder: "Regional airline operating short-haul routes in Southern Europe." },
-      { key: "audience", bucket: "audience", label: "Whose behavior/decisions matter to you?", type: "textarea", required: true, placeholder: "Leisure travellers booking 2-8 weeks out, and corporate travel managers." },
-      { key: "data", bucket: "data", label: "What signals matter most — competitors, pricing, demand, something else?", type: "textarea", required: false, placeholder: "Competitor route/pricing moves and seasonal demand signals." },
-      { key: "process", bucket: "process", label: "How do you currently track market changes?", type: "textarea", required: false, placeholder: "Manually — someone checks competitor sites weekly." },
-      { key: "rules", bucket: "rules", label: "Anything Discover should never report on, or should flag for human review?", type: "textarea", required: false, placeholder: "Never make pricing recommendations — flag pricing signals for review instead." },
+      { key: "business", bucket: "business", label: "What does your business do?", type: "textarea", required: true, placeholder: "We run a 40-room boutique hotel in Lisbon focused on business travellers." },
+      { key: "audience", bucket: "audience", label: "Who are your customers?", type: "textarea", required: true, placeholder: "Corporate travellers and leisure guests booking directly or via OTAs." },
+      { key: "data", bucket: "data", label: "What kind of requests/conversations do customers bring you?", type: "textarea", required: false, placeholder: "Booking changes, cancellations, amenity questions, complaints." },
+      { key: "process", bucket: "process", label: "How do you currently handle these requests?", type: "textarea", required: false, placeholder: "Front desk answers by phone/email; a manager handles complaints." },
+      { key: "rules", bucket: "rules", label: "Anything that should always be escalated to a human, or flagged for review?", type: "textarea", required: false, placeholder: "Always escalate refund requests over €200. Never promise a specific room." },
     ],
     realCapabilities: [
-      "Real web-search-grounded market/trend signal discovery (Trend Research skill), framed by your real market + audience",
-      "Real, source-cited candidate/lead discovery when the signal is about companies, not just trends (Lead Qualification skill)",
+      "Real, LLM-grounded responses to a real customer request, using this worker's real Domain Profile and rules (Customer Conversation skill)",
+      "A real, honest handling decision per request — answered / escalated / flagged for review — never a fabricated external action",
     ],
-    notYetConnected: ["Google Trends", "X/Twitter firehose", "CRM sync"],
+    notYetConnected: ["Live chat/email/voice channel connection", "CRM sync", "Actually executing an action (booking change, refund) in an external system"],
   },
 ]
 
