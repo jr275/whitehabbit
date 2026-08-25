@@ -122,6 +122,77 @@ function developmentConversationFixture(): string {
   })
 }
 
+/** The matching fixture for cultural-intelligence.ts's parseSignals().
+ * Velocity is deliberately kept below scoreOpportunity()'s reject
+ * threshold (70) so this fixture always yields at least one "open"
+ * opportunity regardless of the real worker's brand/audience text —
+ * exercising the full signal -> opportunity path end to end without
+ * depending on real keyword overlap against fixture text. */
+function developmentSignalsFixture(): string {
+  return JSON.stringify({
+    signals: [
+      {
+        topic: "[DEV] Local pipeline exercise — short-form video trend",
+        category: "culture",
+        geography: null,
+        velocity: 45,
+        acceleration: 30,
+        volume: 40,
+        sentiment: 20,
+        novelty: 55,
+        confidence: 70,
+        source_indices: [0],
+      },
+      {
+        topic: "[DEV] Local pipeline exercise — high-velocity unrelated trend",
+        category: "technology",
+        geography: null,
+        velocity: 85,
+        acceleration: 60,
+        volume: 70,
+        sentiment: 10,
+        novelty: 40,
+        confidence: 60,
+        source_indices: [0],
+      },
+    ],
+  })
+}
+
+/** The matching fixture for creative-territory-generation.ts's
+ * parseConcepts() — exactly 6 concepts, each a distinct
+ * emotionalIntent so the real diversity check always scores well. */
+function developmentConceptsFixture(): string {
+  const territories = [
+    { emotionalIntent: "awe", title: "[DEV] The Impossible" },
+    { emotionalIntent: "humor", title: "[DEV] The Gag" },
+    { emotionalIntent: "nostalgia", title: "[DEV] The Throwback" },
+    { emotionalIntent: "aspiration", title: "[DEV] The Ascent" },
+    { emotionalIntent: "belonging", title: "[DEV] The Circle" },
+    { emotionalIntent: "curiosity", title: "[DEV] The Question" },
+  ]
+  return JSON.stringify({
+    concepts: territories.map((t) => ({
+      title: t.title,
+      thesis: "This is a deterministic development fixture, not a real model response — LLM_DEV_MODE is enabled, so no external provider was called.",
+      hook: "[DEV] Local pipeline exercise opening moment.",
+      story: "[DEV] Local pipeline exercise story beat, included so the evaluator's completeness check has real text to score.",
+      emotionalIntent: t.emotionalIntent,
+      audience: "[DEV] Local pipeline exercise audience.",
+      brandRole: "[DEV] Local pipeline exercise brand role.",
+      productRole: "[DEV] Local pipeline exercise product role.",
+      visualStyle: "[DEV] Local pipeline exercise visual style.",
+      world: "[DEV] Local pipeline exercise world.",
+      characters: ["[DEV] Fixture character"],
+      cameraLanguage: "[DEV] Local pipeline exercise camera language.",
+      duration: "15s",
+      platform: "Instagram Reels",
+      cta: "[DEV] Local pipeline exercise CTA.",
+      rationale: "[DEV] Local pipeline exercise rationale — not a real creative judgment.",
+    })),
+  })
+}
+
 /** Every real skill that parses structured JSON out of callLlm() has a
  * distinct expected shape, spelled out verbatim in that skill's own
  * system prompt (see trend-research.ts / lead-qualification.ts /
@@ -135,6 +206,8 @@ function developmentFixtureFor(input: LlmCallInput): string {
   if (input.system.includes('"leads":[')) return developmentLeadsFixture()
   if (input.system.includes('"opportunities":[')) return developmentSeoOpportunityFixture()
   if (input.system.includes('"reasoning_summary"')) return developmentConversationFixture()
+  if (input.system.includes('"signals":[')) return developmentSignalsFixture()
+  if (input.system.includes('"concepts":[')) return developmentConceptsFixture()
   return developmentTrendsFixture()
 }
 

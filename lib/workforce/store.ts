@@ -437,18 +437,28 @@ class WorkforceStore {
   /* ---- Run Worker — a real, streamed execution of a specific,
    * immutable WorkerVersion. mode "release" (default) runs the
    * worker's live released version; mode "test" runs the version
-   * Build just produced from the current draft. ---- */
-  async runWorker(workerId: string, opts: { mode?: "release" | "test" } = {}): Promise<"completed" | "blocked" | "failed" | "pending_approval" | "error"> {
+   * Build just produced from the current draft. Defaults to the
+   * worker's first enabled skill with `{query: worker.mission}` as
+   * input — the existing Studio "Build & run test" behavior, unchanged.
+   * `skillId`/`input` are optional overrides so a caller that knows
+   * exactly which of a worker's several enabled skills it wants to run,
+   * and with what real input (e.g. the Marketing Command Center running
+   * Creative Territory Generation with a chosen opportunity's real
+   * topic), can do so without a second run-picker mechanism. ---- */
+  async runWorker(
+    workerId: string,
+    opts: { mode?: "release" | "test"; skillId?: string; input?: Record<string, string> } = {},
+  ): Promise<"completed" | "blocked" | "failed" | "pending_approval" | "error"> {
     const worker = this.state.workers.find((w) => w.id === workerId)
     if (!worker) return "error"
     if (this.isRunning(workerId)) return "error"
-    const skill = worker.skills.find((s) => s.enabled)
+    const skill = opts.skillId ? worker.skills.find((s) => s.id === opts.skillId && s.enabled) : worker.skills.find((s) => s.enabled)
     if (!skill) {
-      this.set({ notice: "Enable a skill before running this worker." })
+      this.set({ notice: opts.skillId ? "That skill is not enabled on this worker." : "Enable a skill before running this worker." })
       return "error"
     }
     const template = SKILL_CATALOG.find((t) => t.id === skill.id)
-    const input: Record<string, string> = { query: worker.mission || worker.identity.description || "" }
+    const input: Record<string, string> = opts.input ?? { query: worker.mission || worker.identity.description || "" }
 
     this.set({ runningWorkerIds: [...this.state.runningWorkerIds, workerId] })
     let outcome: "completed" | "blocked" | "failed" | "pending_approval" | "error" = "error"
@@ -499,6 +509,29 @@ class WorkforceStore {
     this.set({ runningWorkerIds: this.state.runningWorkerIds.filter((id) => id !== workerId) })
     await this.refetchState()
     return outcome
+  }
+
+  /** Runs one specific, real skill on a worker with real input — the
+   * mechanism the Marketing Command Center (and any future surface
+   * that needs to run a particular one of a worker's several enabled
+   * skills, not just "the first enabled one") uses instead of the
+   * generic Test/Run buttons. If the worker has never been released,
+   * this builds first (freezing the current draft into a runnable
+   * version — the exact same real step testWorker() already performs)
+   * so `runWorker`'s test-mode path always has a version to run;
+   * released workers skip straight to running their real live version. */
+  async runWorkerSkill(workerId: string, skillId: string, input: Record<string, string>): Promise<"completed" | "blocked" | "failed" | "pending_approval" | "error"> {
+    const worker = this.state.workers.find((w) => w.id === workerId)
+    if (!worker) return "error"
+    if (!worker.releasedVersionId) {
+      try {
+        await api(`/api/workers/${workerId}/build`, { method: "POST" })
+      } catch (err) {
+        this.set({ notice: err instanceof Error ? err.message : "Build failed." })
+        return "error"
+      }
+    }
+    return this.runWorker(workerId, { mode: worker.releasedVersionId ? "release" : "test", skillId, input })
   }
 
   /** Applies one real event to local state for instant feedback, and

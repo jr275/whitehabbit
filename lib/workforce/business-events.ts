@@ -20,6 +20,8 @@
  *   Sales           lead_qualified            -> qualified_leads
  *   Marketing       content_opportunity_identified -> content_opportunities_identified
  *   Marketing       page_opportunity_planned  -> page_opportunities_planned
+ *   Marketing       opportunity_scored        -> opportunities_scored
+ *   Marketing       creative_territories_generated -> creative_concepts_generated
  *   Customer Success ticket_resolved          -> tickets_resolved
  *   Customer Success ticket_escalated         -> escalations
  *   Customer Success ticket_flagged           -> tickets_flagged
@@ -27,10 +29,15 @@
  * NOT yet real (need a real Connector Connection this product
  * doesn't have — Connector Foundation Phase 1 is architecture only):
  * opportunity_created, meeting_booked, campaign_published,
- * invoice_processed, cost_saved, customer_retained. These are never
+ * invoice_processed, cost_saved, customer_retained, and every
+ * Marketing performance/business-outcome metric (impressions, CTR,
+ * ROAS, attributed revenue...) — these need a real production/
+ * distribution/ads provider this product doesn't have yet (see
+ * lib/marketing/model.ts's PRODUCTION_PROVIDERS). These are never
  * fabricated here.
  * ================================================================== */
 
+import type { CreativeConceptsPayload, IntelligenceReportPayload } from "@/lib/marketing/model"
 import type { WorkerOutput } from "./model"
 
 export interface DerivedBusinessEvent {
@@ -138,6 +145,47 @@ function fromConversation(structured: ConversationPayload): DerivedBusinessEvent
   ]
 }
 
+/** Only the real, brand-relevance-checked opportunities (status
+ * "open") are a business event — a rejected signal is real work the
+ * agent did, but it is not a business result, so it never becomes one
+ * here (its rejection is still visible in the output itself). */
+function fromIntelligenceReport(structured: IntelligenceReportPayload): DerivedBusinessEvent[] {
+  const open = (structured.opportunities ?? []).filter((o) => o.status === "open")
+  if (open.length === 0) return []
+  const signalById = new Map((structured.signals ?? []).map((s) => [s.id, s]))
+  const avgConfidence = Math.round(
+    open.reduce((s, o) => s + (o.signalIds.map((id) => signalById.get(id)?.confidence ?? 0).reduce((a, b) => a + b, 0) / Math.max(1, o.signalIds.length)), 0) / open.length,
+  )
+  return [
+    {
+      type: "opportunity_scored",
+      entityType: "signal_batch",
+      numericValue: open.length,
+      confidence: avgConfidence,
+      source: "skill:skill_cultural_intelligence",
+      payload: { opportunities: open.map((o) => ({ topic: o.topic, opportunityScore: o.opportunityScore, brandRelevance: o.brandRelevance, audienceRelevance: o.audienceRelevance, rationale: o.rationale })) },
+      relatedMetricKeys: ["opportunities_scored"],
+    },
+  ]
+}
+
+function fromCreativeConcepts(structured: CreativeConceptsPayload): DerivedBusinessEvent[] {
+  const concepts = structured.concepts ?? []
+  if (concepts.length === 0) return []
+  return [
+    {
+      type: "creative_territories_generated",
+      entityType: "creative_batch",
+      numericValue: concepts.length,
+      // No structural "confidence" analog exists for generated
+      // creative territories — never inventing one here.
+      source: "skill:skill_creative_territory_generation",
+      payload: { concepts: concepts.map((c) => ({ title: c.title, emotionalIntent: c.emotionalIntent, brandFitScore: c.brandFitScore, noveltyScore: c.noveltyScore, predictedPerformanceScore: c.predictedPerformanceScore })) },
+      relatedMetricKeys: ["creative_concepts_generated"],
+    },
+  ]
+}
+
 /** Returns [] when there's genuinely no real business event to
  * record — a failed/blocked execution, or a skill whose output type
  * has no mapping yet. Never guesses. */
@@ -152,6 +200,10 @@ export function deriveBusinessEvents(output: WorkerOutput): DerivedBusinessEvent
       return fromSeoOpportunity(output.structured as { opportunities: SeoOpportunityItem[] })
     case "conversation_response":
       return fromConversation(output.structured as ConversationPayload)
+    case "intelligence_report":
+      return fromIntelligenceReport(output.structured as IntelligenceReportPayload)
+    case "creative_concepts":
+      return fromCreativeConcepts(output.structured as CreativeConceptsPayload)
     default:
       return []
   }
@@ -181,7 +233,16 @@ export const DOMAIN_METRIC_TAXONOMY: Record<string, DomainMetricDef[]> = {
   marketing: [
     { key: "trends_identified", label: "Content opportunities identified", real: true },
     { key: "opportunities_identified", label: "Page opportunities planned", real: true },
+    { key: "signals_detected", label: "Signals detected", real: true },
+    { key: "opportunities_scored", label: "Opportunities scored", real: true },
+    { key: "creative_concepts_generated", label: "Creative concepts generated", real: true },
     { key: "leads_generated", label: "Leads generated", real: false },
+    { key: "impressions", label: "Impressions", real: false },
+    { key: "video_views", label: "Video views", real: false },
+    { key: "completion_rate", label: "Completion rate", real: false },
+    { key: "ctr", label: "CTR", real: false },
+    { key: "roas", label: "ROAS", real: false },
+    { key: "attributed_revenue", label: "Attributed revenue", real: false },
     { key: "campaign_revenue", label: "Campaign revenue", real: false },
     { key: "cac", label: "CAC", real: false },
     { key: "engagement", label: "Engagement", real: false },

@@ -1,6 +1,8 @@
 import "server-only"
 
 import { contentIntelligenceSkill } from "./content-intelligence"
+import { creativeTerritoryGenerationSkill } from "./creative-territory-generation"
+import { culturalIntelligenceSkill } from "./cultural-intelligence"
 import { customerConversationSkill } from "./customer-conversation"
 import { engagementAnalysisSkill } from "./engagement-analysis"
 import { leadQualificationSkill } from "./lead-qualification"
@@ -22,6 +24,8 @@ export const SKILL_REGISTRY: SkillDefinition[] = [
   leadQualificationSkill,
   seoOpportunitySkill,
   customerConversationSkill,
+  culturalIntelligenceSkill,
+  creativeTerritoryGenerationSkill,
 ]
 
 export function getSkill(id: string): SkillDefinition | undefined {

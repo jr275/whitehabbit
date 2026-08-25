@@ -2,8 +2,9 @@
 
 /* ------------------------------------------------------------------ *
  * Operational top nav — a slim, persistent bar across the light
- * surfaces. Studio and Outputs are the one real, connected product;
- * that's the whole primary nav.
+ * surfaces. Every link here is a real, connected surface backed by
+ * the real runtime — no link points at a page with no real data
+ * behind it.
  *
  * Overview (home), Library, and Insights are deliberately NOT linked
  * here — they're a different, disconnected visual language with no
@@ -22,6 +23,7 @@ const LINKS = [
   { href: "/products", label: "Products" },
   { href: "/studio", label: "Studio" },
   { href: "/outputs", label: "Outputs" },
+  { href: "/marketing", label: "Marketing" },
   { href: "/connections", label: "Connections" },
 ]
 

@@ -268,7 +268,15 @@ export interface EvaluationBreakdown {
   breakdown: { label: string; score: number; note: string }[]
 }
 
-export type OutputKind = "trend_report" | "content_analysis" | "engagement_analysis" | "lead_qualification" | "seo_opportunity_plan" | "conversation_response"
+export type OutputKind =
+  | "trend_report"
+  | "content_analysis"
+  | "engagement_analysis"
+  | "lead_qualification"
+  | "seo_opportunity_plan"
+  | "conversation_response"
+  | "intelligence_report"
+  | "creative_concepts"
 
 export type OutputStatus = "completed" | "failed"
 
@@ -388,6 +396,8 @@ export const OUTPUT_TYPE_META: Record<string, { label: string; plural: string; f
   lead_qualification: { label: "Lead qualification", plural: "Lead qualifications", filter: "Sales" },
   seo_opportunity_plan: { label: "SEO opportunity plan", plural: "SEO opportunity plans", filter: "Content" },
   conversation_response: { label: "Conversation response", plural: "Conversation responses", filter: "Communication" },
+  intelligence_report: { label: "Intelligence report", plural: "Intelligence reports", filter: "Research" },
+  creative_concepts: { label: "Creative concepts", plural: "Creative concept batches", filter: "Content" },
 }
 
 export const OUTPUT_STATUS_META: Record<OutputStatus, { label: string; tone: "good" | "info" | "warn" | "bad" | "muted" }> = {

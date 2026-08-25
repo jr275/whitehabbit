@@ -8,10 +8,9 @@
  * server registries exactly; that correspondence is what lets Studio
  * show real inputs/instructions for a skill that actually executes.
  *
- * This is intentionally small: ONE vertical (Marketing Intelligence),
- * 3 real skills, 4 real tools. Every entry here has a real, working
- * (or honestly not-yet-connected) implementation on the server — there
- * is no metadata for a skill or tool that doesn't actually exist.
+ * Every entry here has a real, working (or honestly not-yet-connected)
+ * implementation on the server — there is no metadata for a skill or
+ * tool that doesn't actually exist.
  * ================================================================== */
 
 import type { ChannelId, SkillCategory, ToolPermission, ToolRisk } from "./model"
@@ -87,6 +86,26 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     taskTitle: "Handle a customer request",
     requiredTools: ["tool_llm"],
     inputs: [{ key: "query", label: "What is the customer asking or saying?", type: "textarea", required: true, placeholder: "Hi, I need to change my reservation to next weekend instead — is that possible?" }],
+  },
+  {
+    id: "skill_cultural_intelligence",
+    name: "Cultural Intelligence",
+    category: "research",
+    description: "Searches real sources, identifies genuine cultural/market signals, and scores each one into a real, brand-relevance-checked opportunity — trend velocity alone is never treated as a reason to create.",
+    outputType: "intelligence_report",
+    taskTitle: "Scan for cultural and market signals",
+    requiredTools: ["tool_web_search", "tool_llm"],
+    inputs: [{ key: "query", label: "What cultural or market space should it monitor?", type: "text", required: true, placeholder: "Consumer trends among Gen Z in short-form video" }],
+  },
+  {
+    id: "skill_creative_territory_generation",
+    name: "Creative Territory Generation",
+    category: "content",
+    description: "Generates exactly 6 genuinely distinct creative territories for a real opportunity, grounded in this worker's real brand context — never minor variations of the same idea.",
+    outputType: "creative_concepts",
+    taskTitle: "Generate creative territories",
+    requiredTools: ["tool_llm"],
+    inputs: [{ key: "query", label: "Which opportunity or cultural moment should it develop creative territories for?", type: "text", required: true, placeholder: "A surge of interest in retro gaming nostalgia among 25-34 year olds" }],
   },
 ]
 
