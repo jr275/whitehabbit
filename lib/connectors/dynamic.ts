@@ -18,10 +18,12 @@ import "server-only"
  * ================================================================== */
 
 import { getCustomConnector, getCustomConnectorCredential, listCustomConnectors } from "@/lib/db/repo"
+import { customConnectorConnectorId } from "./custom-connector-id"
 import { buildCustomRestTools } from "./custom-rest"
 import { mcpCallTool, mcpInitialize, mcpListTools, McpClientError, type McpToolDescriptor } from "./mcp-client"
+import { emitConnectorExecutionCompleted, emitConnectorExecutionFailed, emitConnectorExecutionStarted, type ConnectorExecutionFields } from "./observability"
 import type { ConnectorAction, CustomConnector, CustomConnectorMcpConfig } from "./types"
-import type { ToolActionResult, ToolContext, ToolDefinition } from "@/lib/agent/types"
+import type { ToolAction, ToolActionResult, ToolContext, ToolDefinition } from "@/lib/agent/types"
 
 function isMcpConfig(config: CustomConnector["config"]): config is CustomConnectorMcpConfig {
   return "endpointUrl" in config
@@ -93,6 +95,31 @@ function buildDynamicMcpTools(row: CustomConnector): ToolDefinition[] {
   ]
 }
 
+/** Wraps one real dynamic-connector ToolAction.run so every call —
+ * built-in's own registry.ts's getConnectorTools() equivalent —
+ * emits the real connector_execution_started/completed/failed events
+ * (connector platform audit, Fase D9). connectionId is deliberately
+ * omitted: a custom connector's default credential path has no live
+ * Connection identity driving THIS execution in this phase (see
+ * lib/connectors/observability.ts's ConnectorExecutionFields comment)
+ * — never a fabricated correlation to a row nothing here actually
+ * consulted. */
+function withConnectorObservability(row: CustomConnector, toolId: string, action: ToolAction): (input: unknown, ctx: ToolContext) => Promise<ToolActionResult> {
+  const fields: ConnectorExecutionFields = { connectorId: customConnectorConnectorId(row.id), toolId, actionId: action.id }
+  return async (input, ctx) => {
+    const started = Date.now()
+    emitConnectorExecutionStarted(ctx, fields)
+    const result = await action.run(input, ctx)
+    const durationMs = result.durationMs ?? Date.now() - started
+    if (result.ok) {
+      emitConnectorExecutionCompleted(ctx, fields, { durationMs, httpStatus: result.httpStatus })
+    } else {
+      emitConnectorExecutionFailed(ctx, fields, { durationMs, httpStatus: result.httpStatus, errorCode: result.errorCode })
+    }
+    return result
+  }
+}
+
 /** The one real integration point: toolsMapForOrg() calls this for
  * every real, connected custom_connectors row alongside its existing
  * static-connector loop — same "honest empty list" contract
@@ -104,9 +131,11 @@ function buildDynamicMcpTools(row: CustomConnector): ToolDefinition[] {
  * loop needs no extra DB round trip. */
 export function buildDynamicConnectorTools(row: CustomConnector): ToolDefinition[] {
   if (row.status !== "connected") return []
-  if (row.kind === "rest") return buildCustomRestTools(row)
-  if (row.kind === "mcp") return buildDynamicMcpTools(row)
-  return []
+  let tools: ToolDefinition[]
+  if (row.kind === "rest") tools = buildCustomRestTools(row)
+  else if (row.kind === "mcp") tools = buildDynamicMcpTools(row)
+  else return []
+  return tools.map((tool) => ({ ...tool, actions: tool.actions.map((action) => ({ ...action, run: withConnectorObservability(row, tool.id, action) })) }))
 }
 
 /** Org-scoped single-connector lookup + build — used by routes that

@@ -57,6 +57,13 @@ export interface ToolActionResult<T = unknown> {
   errorCode?: Exclude<ExecutionReasonCode, "missing_credential">
   blocked?: boolean
   blockedReason?: string
+  /** The real HTTP status code the provider responded with, when this
+   * result came from an HTTP call (lib/connectors/custom-rest.ts) —
+   * absent for a call that never got a response at all (a blocked/
+   * unsafe URL, a network failure) or for a non-HTTP action. Feeds
+   * lib/connectors/observability.ts's connector.* execution events;
+   * never itself a place to smuggle a raw header or body. */
+  httpStatus?: number
   /** real, measurable facts about this call — never estimated */
   durationMs: number
   costUsd?: number
@@ -235,6 +242,20 @@ export type RuntimeEventType =
   | "stage_failed"
   | "stage_blocked"
   | "stage_skipped"
+  /** Connector platform audit, Fase D9 — real, structured events for
+   * every connector action call (built-in AND custom/dynamic), distinct
+   * from the generic tool_called/tool_completed/tool_failed a skill
+   * emits by hand around ANY tool call (native or connector). Emitted
+   * from exactly two real chokepoints — lib/connectors/registry.ts's
+   * getConnectorTools() wrapping for built-in connectors, and
+   * lib/connectors/dynamic.ts's buildDynamicConnectorTools() wrapping
+   * for custom ones — never scattered per-provider. Payload is always
+   * built by lib/connectors/observability.ts's allowlisted emitters,
+   * which structurally cannot accept a raw headers/credential object —
+   * see that file for the real redaction guarantee. */
+  | "connector_execution_started"
+  | "connector_execution_completed"
+  | "connector_execution_failed"
 
 /** A required credential/tool was never configured. Maps to execution
  * status "blocked" — the NOT_CONFIGURED state. Thrown before any

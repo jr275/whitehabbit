@@ -468,6 +468,12 @@ export type WorkerEventType =
   | "stage_failed"
   | "stage_blocked"
   | "stage_skipped"
+  // Connector platform audit, Fase D9 — must mirror lib/agent/
+  // types.ts's RuntimeEventType exactly (see that file's own comment
+  // for what emits these and why they're distinct from tool_*).
+  | "connector_execution_started"
+  | "connector_execution_completed"
+  | "connector_execution_failed"
 
 export interface WorkerEvent {
   id: string

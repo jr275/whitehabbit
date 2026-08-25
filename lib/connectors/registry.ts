@@ -12,12 +12,13 @@ import type { Connection, ConnectorAction, ConnectorCapability, ConnectorDefinit
 import { customConnectorConnectorId } from "./custom-connector-id"
 import { listDynamicConnectorSummaries } from "./dynamic"
 import { buildMcpConnector } from "./mcp-connector"
+import { emitConnectorExecutionCompleted, emitConnectorExecutionFailed, emitConnectorExecutionStarted, type ConnectorExecutionFields } from "./observability"
 import { googleAnalyticsConnector } from "./providers/google-analytics"
 import { salesforceConnector } from "./providers/salesforce"
 import { slackConnector } from "./providers/slack"
 import { testConnector } from "./test-connector"
 import { classifyNormalizedError } from "@/lib/agent/errors"
-import type { ToolActionResult, ToolContext, ToolDefinition } from "@/lib/agent/types"
+import type { ToolAction, ToolActionResult, ToolContext, ToolDefinition } from "@/lib/agent/types"
 import { recordConnectionHealth } from "@/lib/db/repo"
 
 /** The one MCP server this deployment knows about, if any. Real: reads
@@ -270,19 +271,27 @@ export async function listAllConnectors(orgId: string): Promise<ConnectorSummary
 
 /** Wraps one real ToolAction.run so every real connector call —
  * regardless of provider, regardless of whether it succeeds or fails —
- * opportunistically records real connection health (section 23/27):
- * the single chokepoint every connector action already flows through
- * (getConnectorTools() is what toolsMapForOrg() and the direct-Approve
- * path both call), so this is the ONE place that needed the health
- * write, not a change scattered across every provider adapter. Never
- * changes the action's own real result — purely an observability
- * side effect after the fact. */
-function withHealthTracking(connection: Connection, run: (input: unknown, ctx: ToolContext) => Promise<ToolActionResult>): (input: unknown, ctx: ToolContext) => Promise<ToolActionResult> {
+ * opportunistically records real connection health (section 23/27)
+ * AND emits the real connector_execution_started/completed/failed
+ * events (connector platform audit, Fase D9): the single chokepoint
+ * every connector action already flows through (getConnectorTools()
+ * is what toolsMapForOrg() and the direct-Approve path both call), so
+ * this is the ONE place that needed either write, not a change
+ * scattered across every provider adapter. Never changes the action's
+ * own real result — purely observability side effects after the fact. */
+function withHealthTracking(connection: Connection, toolId: string, action: ToolAction): (input: unknown, ctx: ToolContext) => Promise<ToolActionResult> {
   return async (input, ctx) => {
     const started = Date.now()
-    const result = await run(input, ctx)
+    const fields: ConnectorExecutionFields = { connectorId: connection.connectorId, connectionId: connection.id, toolId, actionId: action.id }
+    emitConnectorExecutionStarted(ctx, fields)
+    const result = await action.run(input, ctx)
     const latencyMs = result.durationMs ?? Date.now() - started
     const normalized = result.ok ? undefined : classifyNormalizedError({ errorCode: result.errorCode, error: result.error, retryAfterMs: result.retryAfterMs })
+    if (result.ok) {
+      emitConnectorExecutionCompleted(ctx, fields, { durationMs: latencyMs, httpStatus: result.httpStatus })
+    } else {
+      emitConnectorExecutionFailed(ctx, fields, { durationMs: latencyMs, httpStatus: result.httpStatus, errorCode: result.errorCode })
+    }
     // Awaited (one small, already-indexed UPDATE) so health is
     // immediately consistent with the call that just happened — but a
     // health-write failure itself must never fail or mask the real
@@ -306,5 +315,5 @@ export function getConnectorTools(connection: Connection): ToolDefinition[] {
   if (!connector || !connector.enabled) return []
   if (connection.status !== "connected") return []
   const tools = connector.buildTools(connection)
-  return tools.map((tool) => ({ ...tool, actions: tool.actions.map((action) => ({ ...action, run: withHealthTracking(connection, action.run) })) }))
+  return tools.map((tool) => ({ ...tool, actions: tool.actions.map((action) => ({ ...action, run: withHealthTracking(connection, tool.id, action) })) }))
 }

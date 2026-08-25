@@ -106,9 +106,9 @@ async function callRest(row: CustomConnector, input: RestCallInput, timeoutMs: n
     const data = contentType.includes("application/json") ? (() => { try { return JSON.parse(bodyText) } catch { return null } })() : bodyText
 
     if (!res.ok) {
-      return { ok: false, errorCode: res.status === 401 || res.status === 403 ? "invalid_credential" : "provider_error", error: `HTTP ${res.status}: ${typeof data === "string" ? data.slice(0, 300) : JSON.stringify(data).slice(0, 300)}`, durationMs, retryAfterMs: parseRetryAfter(res.headers.get("retry-after")) }
+      return { ok: false, errorCode: res.status === 401 || res.status === 403 ? "invalid_credential" : "provider_error", error: `HTTP ${res.status}: ${typeof data === "string" ? data.slice(0, 300) : JSON.stringify(data).slice(0, 300)}`, httpStatus: res.status, durationMs, retryAfterMs: parseRetryAfter(res.headers.get("retry-after")) }
     }
-    return { ok: true, data, durationMs }
+    return { ok: true, data, httpStatus: res.status, durationMs }
   } catch (err) {
     // A blocked/unsafe URL is never a transient provider error — it
     // must never be retried, and must be classified distinctly from a
