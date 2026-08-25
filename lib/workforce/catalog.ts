@@ -124,8 +124,11 @@ export const TOOL_CATALOG: ToolTemplate[] = [
   { id: "tool_analytics", name: "Analytics", provider: "Not connected", description: "Reads engagement and performance metrics from a connected provider.", risk: "low", permission: "read" },
   // "provider" here is only the seed default — the server overwrites it
   // live on every read (lib/agent/hydrate.ts) with whichever LLM_PROVIDER
-  // is actually configured (Anthropic or Gemini).
+  // is actually configured (Anthropic, Gemini, OpenAI, or Local).
   { id: "tool_llm", name: "LLM", provider: "Anthropic", description: "Reasons over collected information to analyze, rank and explain.", risk: "low", permission: "read" },
+  { id: "tool_news", name: "News", provider: "Not connected", description: "Searches real, current news coverage as a cultural/market intelligence source.", risk: "low", permission: "read" },
+  { id: "tool_google_trends", name: "Google Trends", provider: "Not connected", description: "Reads real search-interest trend data as a cultural/market intelligence source.", risk: "low", permission: "read" },
+  { id: "tool_social_signals", name: "Social Signals", provider: "Not connected", description: "Reads real social conversation volume and sentiment as a cultural/market intelligence source.", risk: "low", permission: "read" },
 ]
 
 /* ---- channels ---- */

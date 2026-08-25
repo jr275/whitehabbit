@@ -13,7 +13,9 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { CreativeDetail } from "@/components/marketing/creative-detail"
 import { CreativeWall } from "@/components/marketing/creative-wall"
+import { ObservabilityPanel } from "@/components/marketing/observability-panel"
 import { SignalsPanel } from "@/components/marketing/signals-panel"
+import { SystemHealth } from "@/components/marketing/system-health"
 import { ProvenanceBadge } from "@/components/outputs/provenance-badge"
 import { getProduct } from "@/lib/products/catalog"
 import { latestCreativeConcepts, latestIntelligenceReport, worldRightNow } from "@/lib/marketing/selectors"
@@ -23,7 +25,7 @@ import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 const PRODUCT = getProduct("product_marketing_superagent")!
 
 export function MarketingCommandCenter() {
-  const { hydrated, workers, executions, outputs, metrics } = useWorkforce()
+  const { hydrated, workers, tasks, executions, outputs, metrics, events } = useWorkforce()
   const [query, setQuery] = useState("")
   const [running, setRunning] = useState<"scan" | "creative" | null>(null)
   const [openConcept, setOpenConcept] = useState<CreativeConcept | null>(null)
@@ -86,6 +88,10 @@ export function MarketingCommandCenter() {
         <p className="mt-1 text-[13px] text-muted-foreground">{worker.identity.name} — {worker.identity.role}</p>
       </header>
 
+      <div className="mt-6">
+        <SystemHealth />
+      </div>
+
       {/* WORLD RIGHT NOW */}
       <section className="mt-6 overflow-hidden rounded-xl border border-border">
         <div className="border-b border-border bg-secondary/30 px-5 py-2">
@@ -145,6 +151,11 @@ export function MarketingCommandCenter() {
           generating={running === "creative"}
         />
       </section>
+
+      {/* OBSERVABILITY */}
+      <div className="mt-8">
+        <ObservabilityPanel workerId={worker.id} tasks={tasks} executions={executions} outputs={outputs} events={events} />
+      </div>
 
       {openConcept && (
         <CreativeDetail

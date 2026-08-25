@@ -15,6 +15,8 @@ import "server-only"
 import { anthropicProvider } from "./llm-providers/anthropic"
 import { developmentProvider } from "./llm-providers/development"
 import { geminiProvider } from "./llm-providers/gemini"
+import { localProvider } from "./llm-providers/local"
+import { openaiProvider } from "./llm-providers/openai"
 import type { LlmCallInput, LlmCallOutput, LlmProvider } from "./llm-providers/types"
 import type { ToolActionResult, ToolDefinition } from "@/lib/agent/types"
 import { isDevModeAllowed } from "@/lib/runtime-mode"
@@ -24,6 +26,15 @@ export type { LlmCallInput, LlmCallOutput } from "./llm-providers/types"
 const PROVIDERS: Record<string, LlmProvider> = {
   anthropic: anthropicProvider,
   gemini: geminiProvider,
+  openai: openaiProvider,
+  local: localProvider,
+}
+
+/** Every real provider this deployment can select via LLM_PROVIDER —
+ * used by the System Health panel to report each one's real, live
+ * isConfigured() state without guessing which ids exist. */
+export function allLlmProviders(): LlmProvider[] {
+  return Object.values(PROVIDERS)
 }
 
 const DEFAULT_PROVIDER_ID = "anthropic"
