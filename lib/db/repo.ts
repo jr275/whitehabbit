@@ -1423,6 +1423,91 @@ export async function getCustomConnectorCredential(id: string, orgId: string): P
   return JSON.parse(decryptSecret(row.credential_encrypted)) as CustomConnectorCredential
 }
 
+/* ================================================================== *
+ * CUSTOM CONNECTOR CREDENTIALS (plural) — connector platform audit,
+ * Fase D2: a Custom Connector's DEFINITION (custom_connectors, above)
+ * and its CREDENTIAL are now separable — an organization can hold
+ * more than one labeled credential per Custom Connector, each its own
+ * row in migrations/0012_custom_connector_credentials.sql. Additive:
+ * the single credential_encrypted column on custom_connectors above
+ * is untouched and remains what execution resolves in this phase —
+ * see that migration's header comment for why. Every function here is
+ * doubly scoped (org_id AND custom_connector_id) so a caller can never
+ * reach a credential belonging to a connector — or an organization —
+ * it doesn't own, even with a guessed id.
+ * ================================================================== */
+
+export interface CustomConnectorCredentialSummary {
+  id: string
+  customConnectorId: string
+  label: string
+  createdAt: number
+  updatedAt: number
+}
+
+interface CustomConnectorCredentialRow {
+  id: string
+  org_id: string
+  custom_connector_id: string
+  label: string
+  credential_encrypted: string
+  created_at: string
+  updated_at: string
+}
+
+function rowToCredentialSummary(r: CustomConnectorCredentialRow): CustomConnectorCredentialSummary {
+  return { id: r.id, customConnectorId: r.custom_connector_id, label: r.label, createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) }
+}
+
+/** Real metadata only — id/label/timestamps, never the decrypted (or
+ * even encrypted) secret. This is the shape safe to hand to any API
+ * response or UI list; see getCustomConnectorCredentialValue for the
+ * separate, server-only path that actually decrypts one. */
+export async function listCustomConnectorCredentials(customConnectorId: string, orgId: string): Promise<CustomConnectorCredentialSummary[]> {
+  const rows = await query<CustomConnectorCredentialRow>(
+    "SELECT * FROM custom_connector_credentials WHERE custom_connector_id = $1 AND org_id = $2 ORDER BY created_at ASC",
+    [customConnectorId, orgId],
+  )
+  return rows.map(rowToCredentialSummary)
+}
+
+/** Creates one new labeled credential for a Custom Connector this org
+ * owns. Verifies ownership of the parent connector first (rather than
+ * relying on the FK alone) so the error is an honest "not found" —
+ * never a raw constraint-violation leaking whether some other org's
+ * connector id happens to exist. */
+export async function createCustomConnectorCredential(input: { customConnectorId: string; orgId: string; userId?: string; label?: string; credential: CustomConnectorCredential }): Promise<CustomConnectorCredentialSummary> {
+  const parent = await getCustomConnector(input.customConnectorId, input.orgId)
+  if (!parent) throw new Error("Custom connector not found.")
+  const id = `cconncred_${randomUUID()}`
+  const now = Date.now()
+  await query(
+    `INSERT INTO custom_connector_credentials (id, org_id, custom_connector_id, label, credential_encrypted, created_at, updated_at, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $6, $7)`,
+    [id, input.orgId, input.customConnectorId, input.label ?? "Default", encryptSecret(JSON.stringify(input.credential)), now, input.userId ?? null],
+  )
+  const row = await queryOne<CustomConnectorCredentialRow>("SELECT * FROM custom_connector_credentials WHERE id = $1 AND org_id = $2", [id, input.orgId])
+  return rowToCredentialSummary(row!)
+}
+
+/** Real, decrypted credential — server-only callers (a REST/MCP
+ * adapter resolving a specific Connection's credential), never an API
+ * response. Doubly scoped: id, custom_connector_id, AND org_id must
+ * all agree, so a caller can't decrypt credential X by supplying the
+ * right id but the wrong parent/org. */
+export async function getCustomConnectorCredentialValue(id: string, customConnectorId: string, orgId: string): Promise<CustomConnectorCredential | null> {
+  const row = await queryOne<{ credential_encrypted: string }>(
+    "SELECT credential_encrypted FROM custom_connector_credentials WHERE id = $1 AND custom_connector_id = $2 AND org_id = $3",
+    [id, customConnectorId, orgId],
+  )
+  if (!row) return null
+  return JSON.parse(decryptSecret(row.credential_encrypted)) as CustomConnectorCredential
+}
+
+export async function deleteCustomConnectorCredential(id: string, orgId: string): Promise<void> {
+  await query("DELETE FROM custom_connector_credentials WHERE id = $1 AND org_id = $2", [id, orgId])
+}
+
 export async function listConnections(orgId: string): Promise<Connection[]> {
   const rows = await query<ConnectionRow>("SELECT * FROM connections WHERE org_id = $1 ORDER BY created_at ASC", [orgId])
   return rows.map(rowToConnection)
