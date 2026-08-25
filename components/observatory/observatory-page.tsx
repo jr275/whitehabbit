@@ -96,10 +96,10 @@ export function ObservatoryPage() {
 
   return (
     <div className="mx-auto max-w-[1400px] px-5 py-10 sm:px-8">
-      <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.3em] text-muted-foreground">Operational activity</p>
-      <h1 className="text-balance text-3xl font-semibold tracking-tight text-foreground">Observatory</h1>
+      <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.3em] text-muted-foreground">Execution control plane</p>
+      <h1 className="text-balance text-3xl font-semibold tracking-tight text-foreground">Executions</h1>
       <p className="mt-2 max-w-2xl text-[14px] leading-relaxed text-muted-foreground">
-        What is actually happening across every real Worker execution in this workspace — read directly from the runtime, not a simulation.
+        What is actually happening across every real Agent execution in this workspace — read directly from the runtime, not a simulation.
       </p>
 
       {error && <p className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">{error}</p>}

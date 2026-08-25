@@ -9,7 +9,7 @@
  * `integrations` array — never inferred from the manifest alone.
  * ================================================================== */
 
-import { AlertTriangle, CheckCircle2, Circle, Plug } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Circle, Plug, Search } from "lucide-react"
 import { useSession } from "next-auth/react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
@@ -37,19 +37,27 @@ async function api<T>(path: string): Promise<T> {
   return body as T
 }
 
-type Bucket = "connected" | "needs_attention" | "available" | "not_configured"
+// The Internal Test Connector (connector_test) is a dev/validation-only
+// entry per its own description — never meant to be end-user-visible,
+// so it's filtered out of this customer-facing grid before anything
+// else runs (bucketing, search, category counts).
+function isCustomerFacing(connector: ConnectorSummary): boolean {
+  return connector.id !== "connector_test"
+}
+
+type Bucket = "connected" | "needs_attention" | "available" | "coming_soon"
 
 function bucketFor(connector: ConnectorSummary, health: IntegrationHealthState | undefined): Bucket {
   if (health === "healthy") return "connected"
   if (health === "auth_error" || health === "rate_limited" || health === "error" || health === "degraded") return "needs_attention"
-  return connector.enabled ? "available" : "not_configured"
+  return connector.enabled ? "available" : "coming_soon"
 }
 
 const BUCKET_META: Record<Bucket, { label: string; tone: string }> = {
   connected: { label: "Connected", tone: "text-grow" },
   needs_attention: { label: "Needs attention", tone: "text-warn" },
   available: { label: "Available", tone: "text-primary" },
-  not_configured: { label: "Not configured", tone: "text-muted-foreground" },
+  coming_soon: { label: "Coming soon", tone: "text-muted-foreground" },
 }
 
 export function IntegrationHub() {
@@ -59,6 +67,8 @@ export function IntegrationHub() {
   const [health, setHealth] = useState<IntegrationHealth[]>([])
   const [error, setError] = useState<string | null>(searchParams.get("error"))
   const [notice, setNotice] = useState<string | null>(searchParams.get("connected") ? `${searchParams.get("connected")} connected.` : null)
+  const [search, setSearch] = useState("")
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
 
   async function refresh() {
     try {
@@ -90,16 +100,57 @@ export function IntegrationHub() {
     return <div className="mx-auto max-w-[1100px] px-5 py-10 sm:px-8 font-mono text-[11px] uppercase tracking-[0.3em] text-muted-foreground">Loading…</div>
   }
 
-  const withBucket = connectors.map((c) => ({ connector: c, bucket: bucketFor(c, health.find((h) => h.id === c.id)?.state), health: health.find((h) => h.id === c.id) }))
-  const order: Bucket[] = ["needs_attention", "connected", "available", "not_configured"]
+  const customerFacing = connectors.filter(isCustomerFacing)
+  const categories = Array.from(new Set(customerFacing.map((c) => c.category))).sort()
+  const bySearchAndCategory = customerFacing.filter((c) => {
+    if (categoryFilter && c.category !== categoryFilter) return false
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      if (!c.name.toLowerCase().includes(q) && !c.description.toLowerCase().includes(q)) return false
+    }
+    return true
+  })
+  const withBucket = bySearchAndCategory.map((c) => ({ connector: c, bucket: bucketFor(c, health.find((h) => h.id === c.id)?.state), health: health.find((h) => h.id === c.id) }))
+  const order: Bucket[] = ["needs_attention", "connected", "available", "coming_soon"]
 
   return (
     <div className="mx-auto max-w-[1100px] px-5 py-10 sm:px-8">
-      <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.3em] text-muted-foreground">Integration Runtime</p>
-      <h1 className="text-balance text-3xl font-semibold tracking-tight text-foreground">Integration Hub</h1>
+      <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.3em] text-muted-foreground">Connector Runtime</p>
+      <h1 className="text-balance text-3xl font-semibold tracking-tight text-foreground">Connector Hub</h1>
       <p className="mt-2 max-w-2xl text-[14px] leading-relaxed text-muted-foreground">
         Every provider WhiteHabbit can connect to, and its real, live state — never inferred from the catalog alone.
       </p>
+
+      <div className="mt-5 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5">
+          <Search className="h-3.5 w-3.5 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search connectors…"
+            className="w-40 bg-transparent font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <button
+          onClick={() => setCategoryFilter(null)}
+          className={`rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-colors ${
+            categoryFilter === null ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          All
+        </button>
+        {categories.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => setCategoryFilter(cat)}
+            className={`rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-colors ${
+              categoryFilter === cat ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
 
       {notice && (
         <p className="mt-4 rounded-lg border border-grow/30 bg-grow/5 px-3 py-2 text-[13px] text-grow">
@@ -118,24 +169,30 @@ export function IntegrationHub() {
         </p>
       )}
 
-      <div className="mt-8 flex flex-col gap-8">
-        {order.map((bucket) => {
-          const items = withBucket.filter((x) => x.bucket === bucket)
-          if (items.length === 0) return null
-          return (
-            <section key={bucket}>
-              <h2 className={`font-mono text-[11px] uppercase tracking-[0.2em] ${BUCKET_META[bucket].tone}`}>
-                {BUCKET_META[bucket].label} · {items.length}
-              </h2>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                {items.map(({ connector, health: h }) => (
-                  <ConnectorCard key={connector.id} connector={connector} health={h} />
-                ))}
-              </div>
-            </section>
-          )
-        })}
-      </div>
+      {withBucket.length === 0 ? (
+        <p className="mt-8 rounded-xl border border-dashed border-border bg-card/40 px-5 py-8 text-center text-[13px] text-muted-foreground">
+          No connectors match &ldquo;{search || categoryFilter}&rdquo;.
+        </p>
+      ) : (
+        <div className="mt-8 flex flex-col gap-8">
+          {order.map((bucket) => {
+            const items = withBucket.filter((x) => x.bucket === bucket)
+            if (items.length === 0) return null
+            return (
+              <section key={bucket}>
+                <h2 className={`font-mono text-[11px] uppercase tracking-[0.2em] ${BUCKET_META[bucket].tone}`}>
+                  {BUCKET_META[bucket].label} · {items.length}
+                </h2>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {items.map(({ connector, health: h }) => (
+                    <ConnectorCard key={connector.id} connector={connector} health={h} />
+                  ))}
+                </div>
+              </section>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

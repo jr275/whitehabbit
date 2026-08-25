@@ -14,8 +14,8 @@ export function ObservatoryEmptyState() {
     <EmptyState
       title="No runtime activity yet."
       description="Nothing has run in this workspace — real executions, events and outputs will appear here the moment a Worker actually runs."
-      ctaHref="/"
-      ctaLabel="Run your first Worker"
+      ctaHref="/new"
+      ctaLabel="Run your first Agent"
     />
   )
 }

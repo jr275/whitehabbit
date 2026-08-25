@@ -6,12 +6,24 @@
  * the real runtime — no link points at a page with no real data
  * behind it.
  *
- * Overview (home), Library, and Insights are deliberately NOT linked
- * here — they're a different, disconnected visual language with no
- * real Worker data behind them yet (see the product audit). Their
- * routes and code are untouched and still reachable directly
- * (/, /library, /insights) for future work — this is a navigation
- * decision only, not a removal.
+ * The AI Agent Operating System information architecture (Overview /
+ * Agents / Studio / Connectors / Executions / Outputs / Knowledge /
+ * Settings): "/" is now Overview (real, DB-backed — the old precedent
+ * here about Overview having "no real Worker data behind it" no
+ * longer holds, now that Observatory/Outputs are fully real).
+ * Approvals is a real, separate actionable inbox — kept as a
+ * secondary link on the right rather than one of the primary 8, no
+ * live badge count yet (would need a new global fetch this bar
+ * doesn't have today).
+ *
+ * Products, Marketing, Library, and Insights are deliberately NOT
+ * linked here — same reasoning this bar already applied to Library/
+ * Insights: a different, disconnected surface with no place in the
+ * new IA yet. Their routes and code are untouched and still reachable
+ * directly (/products, /marketing, /library, /insights) — a
+ * navigation decision only, never a removal. /evolve and /outcomes
+ * are still demo-store-backed (see lib/workforce-demo/) and are left
+ * off this bar for the same reason — reachable directly, unchanged.
  * ------------------------------------------------------------------ */
 
 import { Circle, LogOut } from "lucide-react"
@@ -20,13 +32,14 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 
 const LINKS = [
-  { href: "/products", label: "Products" },
+  { href: "/", label: "Overview" },
+  { href: "/workforce", label: "Agents" },
   { href: "/studio", label: "Studio" },
+  { href: "/integrations", label: "Connectors" },
+  { href: "/observatory", label: "Executions" },
   { href: "/outputs", label: "Outputs" },
-  { href: "/marketing", label: "Marketing" },
-  { href: "/integrations", label: "Integrations" },
-  { href: "/approvals", label: "Approvals" },
-  { href: "/observatory", label: "Observatory" },
+  { href: "/knowledge", label: "Knowledge" },
+  { href: "/settings", label: "Settings" },
 ]
 
 export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview" | "production" }) {
@@ -50,7 +63,10 @@ export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview
         {/* section links */}
         <nav className="flex items-center gap-1">
           {LINKS.map((l) => {
-            const active = pathname.startsWith(l.href)
+            // "/" (Overview) must match exactly — every path "starts
+            // with" "/", which would otherwise mark Overview active
+            // everywhere.
+            const active = l.href === "/" ? pathname === "/" : pathname.startsWith(l.href)
             return (
               <Link
                 key={l.href}
@@ -67,8 +83,18 @@ export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview
           })}
         </nav>
 
-        {/* right — real runtime mode, real authenticated organization, real sign-out */}
+        {/* right — Approvals (a real, separate actionable inbox — see
+         * header comment), real runtime mode, real authenticated
+         * organization, real sign-out */}
         <div className="ml-auto flex items-center gap-2">
+          <Link
+            href="/approvals"
+            className={`rounded-md px-2.5 py-1.5 text-[12px] transition-colors ${
+              pathname.startsWith("/approvals") ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Approvals
+          </Link>
           {runtimeMode && runtimeMode !== "production" && (
             <span className="hidden rounded-full border border-warn/30 bg-warn/10 px-2.5 py-1 font-mono text-[9.5px] uppercase tracking-wider text-warn sm:inline">
               {runtimeMode}

@@ -23,7 +23,7 @@ export function OutputsHeader({ metrics }: { metrics: HeaderMetrics }) {
     <section className="border-b border-border pb-8">
       <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">Today</p>
       <div className="mt-1 flex items-baseline justify-between gap-4">
-        <h1 className="text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Worker Outputs</h1>
+        <h1 className="text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Agent Outputs</h1>
         <span className="hidden text-[13px] text-muted-foreground sm:inline">{TODAY}</span>
       </div>
 

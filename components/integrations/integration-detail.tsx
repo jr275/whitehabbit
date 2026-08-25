@@ -12,6 +12,9 @@ import Link from "next/link"
 import { useSession } from "next-auth/react"
 import { useEffect, useState } from "react"
 import type { IntegrationHealth } from "@/app/api/system/health/route"
+import { TonePill } from "@/components/shared/tone-pill"
+import { toolPermissionLabel, toolPermissionTone } from "@/lib/ui/permission-label"
+import type { ToolPermission } from "@/lib/agent/types"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
 interface ConnectorAction {
@@ -150,7 +153,7 @@ export function IntegrationDetail({ id }: { id: string }) {
   return (
     <div className="mx-auto max-w-[900px] px-5 py-10 sm:px-8">
       <Link href="/integrations" className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground">
-        ← Integration Hub
+        ← Connector Hub
       </Link>
 
       <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
@@ -254,7 +257,7 @@ export function IntegrationDetail({ id }: { id: string }) {
           <table className="w-full min-w-[500px] border-collapse text-left">
             <thead>
               <tr className="border-b border-border bg-secondary/40">
-                {["Action", "Permission", "Risk"].map((h) => (
+                {["Action", "Type", "Permission", "Risk"].map((h) => (
                   <th key={h} className="px-3 py-2 font-mono text-[9.5px] font-medium uppercase tracking-wider text-muted-foreground">
                     {h}
                   </th>
@@ -267,13 +270,16 @@ export function IntegrationDetail({ id }: { id: string }) {
                   <td className="px-3 py-2 text-[12.5px] text-foreground" title={a.description}>
                     {a.label}
                   </td>
+                  <td className="px-3 py-2">
+                    <TonePill label={toolPermissionLabel(a.permission as ToolPermission)} tone={toolPermissionTone(a.permission as ToolPermission)} />
+                  </td>
                   <td className="px-3 py-2 font-mono text-[11px] text-muted-foreground">{a.permission}</td>
                   <td className="px-3 py-2 font-mono text-[11px] text-muted-foreground">{a.riskLevel}</td>
                 </tr>
               ))}
               {connector.actions.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="px-3 py-4 text-center text-[12.5px] text-muted-foreground">
+                  <td colSpan={4} className="px-3 py-4 text-center text-[12.5px] text-muted-foreground">
                     No real actions declared for this connector yet.
                   </td>
                 </tr>

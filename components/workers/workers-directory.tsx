@@ -49,7 +49,7 @@ export function WorkersDirectory() {
         if (!res.ok) throw new Error(body?.error ?? `Request failed (${res.status})`)
         setWorkers(body.workers)
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not load Workers."))
+      .catch((err) => setError(err instanceof Error ? err.message : "Could not load Agents."))
   }, [])
 
   const rows = useMemo(() => {
@@ -101,16 +101,16 @@ export function WorkersDirectory() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.3em] text-muted-foreground">Who is working</p>
-          <h1 className="text-balance text-3xl font-semibold tracking-tight text-foreground">Workers</h1>
+          <h1 className="text-balance text-3xl font-semibold tracking-tight text-foreground">Agents</h1>
           <p className="mt-2 max-w-2xl text-[14px] leading-relaxed text-muted-foreground">
-            Every real Worker in this workspace — its lifecycle state, released version, and real execution/output history.
+            Every real Agent in this workspace — its lifecycle state, released version, and real execution/output history.
           </p>
         </div>
         <Link
-          href="/"
+          href="/new"
           className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.16em] text-primary-foreground transition-opacity hover:opacity-90"
         >
-          Create Worker
+          New Agent
           <ArrowRight className="h-3.5 w-3.5" />
         </Link>
       </div>
@@ -120,7 +120,7 @@ export function WorkersDirectory() {
       {!hydrated ? (
         <p className="mt-8 font-mono text-[11px] uppercase tracking-[0.3em] text-muted-foreground">Loading…</p>
       ) : isEmpty ? (
-        <EmptyState title="No Workers yet." description="Create your first Worker from the Factory and it will appear here immediately." ctaHref="/" ctaLabel="Create a Worker" />
+        <EmptyState title="No Agents yet." description="Describe a job in plain language and it will appear here immediately." ctaHref="/new" ctaLabel="New Agent" />
       ) : (
         <>
           <div className="mt-5 flex flex-wrap items-center gap-2">
@@ -129,7 +129,7 @@ export function WorkersDirectory() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search Workers…"
+                placeholder="Search Agents…"
                 className="w-40 bg-transparent font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground"
               />
             </div>
@@ -151,7 +151,7 @@ export function WorkersDirectory() {
             <table className="w-full min-w-[980px] text-left text-[13px]">
               <thead>
                 <tr className="border-b border-border/60 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                  <Th label="Worker" onClick={() => toggleSort("name")} />
+                  <Th label="Agent" onClick={() => toggleSort("name")} />
                   <Th label="Status" onClick={() => toggleSort("status")} />
                   <th className="px-4 py-2.5 font-medium">Health</th>
                   <th className="px-4 py-2.5 font-medium">Version</th>
@@ -189,7 +189,7 @@ export function WorkersDirectory() {
               </tbody>
             </table>
           </div>
-          {rows.length === 0 && <p className="mt-4 rounded-xl border border-dashed border-border bg-card/40 px-5 py-8 text-center text-[13px] text-muted-foreground">No Workers match these filters.</p>}
+          {rows.length === 0 && <p className="mt-4 rounded-xl border border-dashed border-border bg-card/40 px-5 py-8 text-center text-[13px] text-muted-foreground">No Agents match these filters.</p>}
         </>
       )}
     </div>

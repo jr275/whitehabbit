@@ -1,6 +1,10 @@
 /* ------------------------------------------------------------------ *
- * /integrations — the Integration Hub. A dedicated product surface
- * (section "PHASE 2"), not a rename of /connections.
+ * /integrations — the Connector Hub (nav label "Connectors"; on-page
+ * heading "Connector Hub" — see components/integrations/integration-
+ * hub.tsx). A dedicated product surface (section "PHASE 2"), not a
+ * rename of /connections. Component/file names kept as "integration-*"
+ * — a route/file rename, unlike the label, isn't required for the new
+ * IA and would be a pure churn risk for zero product benefit.
  * ------------------------------------------------------------------ */
 
 import { Suspense } from "react"

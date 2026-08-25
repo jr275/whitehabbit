@@ -19,6 +19,7 @@ import type { Autonomy, ChannelId, SkillCategory, Worker } from "@/lib/workforce
 import { OUTCOME_PRESETS, SKILL_CATEGORIES, SKILL_CATEGORY_LABEL, TOOL_BOUNDARY_META, toolExecutionBoundary } from "@/lib/workforce/model"
 import { computeReadiness } from "@/lib/workforce/selectors"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
+import { toolPermissionLabel, toolPermissionTone } from "@/lib/ui/permission-label"
 
 export type StepKey = "identity" | "mission" | "knowledge" | "skills" | "tools" | "integrations" | "behavior" | "channels" | "test" | "release"
 
@@ -489,6 +490,7 @@ function ToolsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => voi
               <span className={`flex-1 text-left text-[12.5px] font-medium ${tool.enabled ? "text-foreground" : "text-muted-foreground"}`}>
                 {tool.name}
               </span>
+              <PermissionTag permission={tool.permission} />
               <RiskTag risk={tool.risk} />
             </button>
             <div className="mt-1.5 flex items-start justify-between gap-2 pl-[1.625rem]">
@@ -590,7 +592,7 @@ function IntegrationsStep({ worker, onAdvance }: { worker: Worker; onAdvance: ()
         <p className="text-[12.5px] text-muted-foreground">
           No connected integrations yet.{" "}
           <a href="/integrations" target="_blank" rel="noreferrer" className="text-primary underline">
-            Connect one in the Integration Hub
+            Connect one in the Connector Hub
           </a>
           , then come back here.
         </p>
@@ -616,6 +618,7 @@ function IntegrationsStep({ worker, onAdvance }: { worker: Worker; onAdvance: ()
                       <button onClick={() => toggleAction(connector.id, action.id)} className="flex flex-1 items-center gap-1.5 text-left">
                         <Switch on={actionCfg.enabled} />
                         <span className={`truncate text-[11.5px] ${actionCfg.enabled ? "text-foreground" : "text-muted-foreground"}`}>{action.label}</span>
+                        <PermissionTag permission={action.permission as "read" | "write" | "publish" | "delete" | "financial" | "external_communication"} />
                       </button>
                       <select
                         value={actionCfg.permission}
@@ -656,6 +659,16 @@ function BoundaryTag({ boundary }: { boundary: ReturnType<typeof toolExecutionBo
 function RiskTag({ risk }: { risk: "low" | "medium" | "high" | "critical" }) {
   const cls = risk === "critical" || risk === "high" ? "text-destructive bg-destructive/10" : risk === "medium" ? "text-warn bg-warn/10" : "text-grow bg-grow/10"
   return <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider ${cls}`}>{risk}</span>
+}
+
+/* Read-only / Write / Destructive — the same lib/ui/permission-label.ts
+ * mapping Agent Detail's Tools tab and Connector Detail's actions
+ * table use, so this label is identical everywhere a Tool/Action's
+ * permission is shown. */
+function PermissionTag({ permission }: { permission: "read" | "write" | "publish" | "delete" | "financial" | "external_communication" }) {
+  const tone = toolPermissionTone(permission)
+  const cls = tone === "bad" ? "text-destructive bg-destructive/10" : tone === "warn" ? "text-warn bg-warn/10" : "text-grow bg-grow/10"
+  return <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider ${cls}`}>{toolPermissionLabel(permission)}</span>
 }
 
 /* ---- 06 Behavior ---- */
