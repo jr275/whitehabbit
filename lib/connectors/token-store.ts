@@ -37,8 +37,8 @@ export async function clearTokens(connectionId: string): Promise<void> {
  * the provider's real refresh endpoint and persists the new real
  * token before returning it. Returns null when there's genuinely no
  * usable credential (never connected, or a refresh actually failed) —
- * callers report that as NOT_CONNECTED/AUTH_ERROR, never substitute a
- * stale or fabricated token. */
+ * callers report that as NOT_CONNECTED/REAUTH_REQUIRED, never
+ * substitute a stale or fabricated token. */
 export async function getValidAccessToken(connectionId: string, orgId: string, oauthConfig: OAuth2Config, extraFields: string[] = []): Promise<{ accessToken: string; extra?: Record<string, string> } | null> {
   const row = await getOAuthCredential(connectionId)
   if (!row) return null
@@ -49,9 +49,11 @@ export async function getValidAccessToken(connectionId: string, orgId: string, o
   }
 
   if (!row.refreshTokenEncrypted) {
-    // Real, expired, and nothing to refresh with — an honest AUTH_ERROR,
-    // not a stale token quietly reused.
-    await updateConnectionStatus(connectionId, orgId, { status: "error", errorReason: "Access token expired and no refresh token is available. Reconnect required." })
+    // Real, expired, and nothing to refresh with — an operator must
+    // reconnect. REAUTH_REQUIRED, not a generic "error" (connector
+    // platform audit, gap #4) — distinct and actionable, never a
+    // stale token quietly reused.
+    await updateConnectionStatus(connectionId, orgId, { status: "reauth_required", errorReason: "Access token expired and no refresh token is available. Reconnect required." })
     return null
   }
 
@@ -60,8 +62,12 @@ export async function getValidAccessToken(connectionId: string, orgId: string, o
     await storeTokens(connectionId, { ...refreshed, refreshToken: refreshed.refreshToken ?? decryptSecret(row.refreshTokenEncrypted) })
     return { accessToken: refreshed.accessToken, extra: refreshed.extra }
   } catch (err) {
+    // The provider itself rejected the refresh (revoked/expired
+    // refresh token) — also REAUTH_REQUIRED, never a generic "error":
+    // this is specifically the "must reconnect" case, distinguishable
+    // from a transient provider outage.
     const message = err instanceof Error ? err.message : "Token refresh failed."
-    await updateConnectionStatus(connectionId, orgId, { status: "error", errorReason: message })
+    await updateConnectionStatus(connectionId, orgId, { status: "reauth_required", errorReason: message })
     return null
   }
 }

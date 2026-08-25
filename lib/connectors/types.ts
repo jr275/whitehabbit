@@ -188,10 +188,25 @@ export type IntegrationHealthState = "healthy" | "degraded" | "not_configured" |
  * and REVOKED are kept distinct (a user-initiated disconnect vs. the
  * provider itself invalidating access) even though both currently
  * resolve to the same "not usable" behavior — real audit/observability
- * value in keeping them apart, per section 12's event list. */
-export type ConnectionStatus = "not_connected" | "connecting" | "connected" | "error" | "revoked" | "disconnected"
+ * value in keeping them apart, per section 12's event list.
+ *
+ * REAUTH_REQUIRED is real and wired: lib/connectors/token-store.ts's
+ * getValidAccessToken() sets it in the two cases that genuinely mean
+ * "an operator must reconnect" — no refresh token available, or a real
+ * refresh attempt was rejected by the provider — replacing what used
+ * to be a generic "error" for those two specific, actionable cases.
+ *
+ * EXPIRED is declared for completeness (connector platform audit,
+ * gap #4) but deliberately NOT set by any code path yet: a token's
+ * real expiresAt lives only in the encrypted oauth_credentials row,
+ * never surfaced on the Connection object any API response returns —
+ * proactively computing/displaying "expired" (as opposed to the
+ * REAUTH_REQUIRED the system already detects reactively, the moment a
+ * call actually needs the token) would need that expiry timestamp
+ * exposed first. Never fabricate a state nothing can actually observe. */
+export type ConnectionStatus = "not_connected" | "connecting" | "connected" | "expired" | "reauth_required" | "error" | "revoked" | "disconnected"
 
-export const CONNECTION_STATUSES: ConnectionStatus[] = ["not_connected", "connecting", "connected", "error", "revoked", "disconnected"]
+export const CONNECTION_STATUSES: ConnectionStatus[] = ["not_connected", "connecting", "connected", "expired", "reauth_required", "error", "revoked", "disconnected"]
 
 /* ================================================================== *
  * DYNAMIC CONNECTORS — section 4/11/14: MCP servers and Custom REST

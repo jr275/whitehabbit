@@ -36,24 +36,38 @@ export type ToolPermission = "read" | "write" | "publish" | "delete" | "financia
  * and the Studio UI's tool-boundary badge, so they can never disagree
  * about which actions are "high risk". */
 export const HIGH_RISK_PERMISSIONS: ToolPermission[] = ["write", "publish", "delete", "financial", "external_communication"]
+const HIGH_RISK_LEVELS: ToolRisk[] = ["high", "critical"]
+
+/** The one real rule for "does this action require a human gate by
+ * default" — permission OR risk level, whichever is higher (connector
+ * platform audit, gap #3: permission alone let a hypothetical
+ * read+critical action skip approval; every real connector/native tool
+ * today keeps read+low together, but the rule must not depend on that
+ * discipline holding as more connectors are added). Client-safe, so
+ * both this file's toolExecutionBoundary() (a UI-facing preview) and
+ * lib/agent/tool-runner.ts's runToolAction() (the actual server-side
+ * gate) call this exact same function — never two independent copies
+ * of the same decision that could silently drift apart. */
+export function requiresApprovalByDefault(action: { permission: ToolPermission; riskLevel: ToolRisk }): boolean {
+  return HIGH_RISK_PERMISSIONS.includes(action.permission) || HIGH_RISK_LEVELS.includes(action.riskLevel)
+}
 
 /** The real, current relationship between a worker and a tool — distinct
  * from the single "connected" boolean, per the product requirement that
  * a tool must never be treated as executable just because it's listed:
  *   not_available    — the worker hasn't enabled this tool at all
  *   not_connected     — enabled, but the real credential/integration isn't present
- *   requires_approval — connected, but its permission (write/publish/delete/
- *                        financial/external_communication) means the runtime
+ *   requires_approval — connected, but its permission/risk (see
+ *                        requiresApprovalByDefault) means the runtime
  *                        will halt with PENDING_APPROVAL rather than auto-run it
- *   executable         — connected, read-permission (or otherwise low-risk):
- *                        the runtime will actually call it
+ *   executable         — connected, low-risk: the runtime will actually call it
  */
 export type ToolExecutionBoundary = "not_available" | "not_connected" | "requires_approval" | "executable"
 
 export function toolExecutionBoundary(tool: WorkforceTool): ToolExecutionBoundary {
   if (!tool.enabled) return "not_available"
   if (!tool.connected) return "not_connected"
-  if (HIGH_RISK_PERMISSIONS.includes(tool.permission)) return "requires_approval"
+  if (requiresApprovalByDefault({ permission: tool.permission, riskLevel: tool.risk })) return "requires_approval"
   return "executable"
 }
 

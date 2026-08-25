@@ -164,6 +164,10 @@ export function IntegrationDetail({ id }: { id: string }) {
               <span className="flex items-center gap-1 rounded-full border border-grow/30 bg-grow/8 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-grow">
                 <CheckCircle2 className="h-3 w-3" /> Connected
               </span>
+            ) : connection?.status === "reauth_required" ? (
+              <span className="flex items-center gap-1 rounded-full border border-warn/30 bg-warn/8 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-warn">
+                <AlertTriangle className="h-3 w-3" /> Reauth required
+              </span>
             ) : (
               <span className="flex items-center gap-1 rounded-full border border-border bg-secondary/60 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
                 <Plug className="h-3 w-3" /> Not connected

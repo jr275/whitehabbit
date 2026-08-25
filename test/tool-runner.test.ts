@@ -72,4 +72,37 @@ describe("runToolAction — server-side permission enforcement (section 7)", () 
     const integrations: WorkerIntegrationConfig[] = [{ connectorId: "connector_salesforce", connectionId: "conn_1", actions: [{ actionId: "create_opportunity", enabled: true, permission: "allow" }] }]
     await expect(runToolAction("connector_salesforce.actions", "Salesforce", action, { id: "1" }, ctx(integrations))).rejects.toBeInstanceOf(ApprovalRequiredError)
   })
+
+  // Connector platform audit, gap #3: with no explicit override, riskLevel
+  // alone (not just permission) must also gate approval — a hypothetical
+  // action declared permission:"read" but riskLevel:"high"/"critical" must
+  // never slip through just because "read" itself isn't in
+  // HIGH_RISK_PERMISSIONS. No real connector today declares this
+  // combination (every real "read" action is "low" risk) — this proves
+  // the gate doesn't depend on that discipline holding.
+  it("with no explicit override, a read+critical action still requires approval (risk level, not just permission, gates the default rule)", async () => {
+    const action = makeAction({ id: "run_sensitive_report", permission: "read", riskLevel: "critical" })
+    await expect(runToolAction("connector_x.actions", "Connector X", action, {}, ctx())).rejects.toBeInstanceOf(ApprovalRequiredError)
+    expect(action.run).not.toHaveBeenCalled()
+  })
+
+  it("with no explicit override, a read+high action also requires approval", async () => {
+    const action = makeAction({ id: "run_sensitive_query", permission: "read", riskLevel: "high" })
+    await expect(runToolAction("connector_x.actions", "Connector X", action, {}, ctx())).rejects.toBeInstanceOf(ApprovalRequiredError)
+  })
+
+  it("an explicit 'allow' override still runs a read+critical action — an operator's deliberate override always wins, exactly like it does for a high-risk permission", async () => {
+    const action = makeAction({ id: "run_sensitive_report", permission: "read", riskLevel: "critical" })
+    const integrations: WorkerIntegrationConfig[] = [{ connectorId: "connector_x", connectionId: "conn_1", actions: [{ actionId: "run_sensitive_report", enabled: true, permission: "allow" }] }]
+    const result = await runToolAction("connector_x.actions", "Connector X", action, {}, ctx(integrations))
+    expect(result.ok).toBe(true)
+    expect(action.run).toHaveBeenCalledOnce()
+  })
+
+  it("with no explicit override, a read+low/medium action runs immediately (the common, honest case every real connector today uses)", async () => {
+    const lowAction = makeAction({ id: "list_items", permission: "read", riskLevel: "low" })
+    const mediumAction = makeAction({ id: "list_items_2", permission: "read", riskLevel: "medium" })
+    await expect(runToolAction("connector_x.actions", "Connector X", lowAction, {}, ctx())).resolves.toMatchObject({ ok: true })
+    await expect(runToolAction("connector_x.actions", "Connector X", mediumAction, {}, ctx())).resolves.toMatchObject({ ok: true })
+  })
 })
