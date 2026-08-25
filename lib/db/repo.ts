@@ -518,16 +518,157 @@ export async function insertOutput(output: WorkerOutput, orgId: string): Promise
 /* ---- business events + metrics -------------------------------------- */
 export async function insertBusinessEvent(be: BusinessEvent, orgId: string): Promise<void> {
   await query(
-    "INSERT INTO business_events (id, org_id, worker_id, output_id, type, payload, occurred_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-    [be.id, orgId, be.workerId, be.outputId ?? null, be.type, JSON.stringify(be.payload), be.occurredAt],
+    `INSERT INTO business_events (id, org_id, worker_id, output_id, execution_id, type, entity_id, entity_type, numeric_value, currency, confidence, source, payload, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+    [
+      be.id,
+      orgId,
+      be.workerId,
+      be.outputId ?? null,
+      be.executionId ?? null,
+      be.type,
+      be.entityId ?? null,
+      be.entityType ?? null,
+      be.numericValue ?? null,
+      be.currency ?? null,
+      be.confidence ?? null,
+      be.source ?? null,
+      JSON.stringify(be.payload),
+      be.occurredAt,
+    ],
   )
 }
 
 export async function insertMetric(metric: MetricRecord, orgId: string): Promise<void> {
   await query(
-    "INSERT INTO metrics (id, org_id, worker_id, execution_id, business_event_id, key, kind, value, unit, recorded_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-    [metric.id, orgId, metric.workerId, metric.executionId ?? null, metric.businessEventId ?? null, metric.key, metric.kind, metric.value, metric.unit ?? null, metric.recordedAt],
+    `INSERT INTO metrics (id, org_id, worker_id, execution_id, business_event_id, key, kind, value, unit, source, currency, confidence, recorded_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [
+      metric.id,
+      orgId,
+      metric.workerId,
+      metric.executionId ?? null,
+      metric.businessEventId ?? null,
+      metric.key,
+      metric.kind,
+      metric.value,
+      metric.unit ?? null,
+      metric.source ?? null,
+      metric.currency ?? null,
+      metric.confidence ?? null,
+      metric.recordedAt,
+    ],
   )
+}
+
+/** Real, org-scoped aggregation for the Business Impact rollup —
+ * section 3/11. Sums MetricRecord.value per key, split strictly by
+ * whether the underlying execution was real or ran through the local
+ * development fixture (executions.execution_mode) — a demo number can
+ * never silently blend into a real total. `previousValue`/`delta` are
+ * computed by comparing two equal-length real time windows (this
+ * period vs. the one immediately before it), never a fabricated
+ * trend. workerId is optional — omit it to aggregate across every
+ * business-kind metric the org's workers have produced. */
+export interface BusinessMetricSummary {
+  key: string
+  kind: string
+  realValue: number
+  demoValue: number
+  previousRealValue: number
+  delta: number | null
+  count: number
+  lastRecordedAt: number
+}
+
+export async function getBusinessMetricSummary(orgId: string, opts: { workerId?: string; sinceMs?: number } = {}): Promise<BusinessMetricSummary[]> {
+  const windowMs = opts.sinceMs ?? 30 * 24 * 60 * 60 * 1000 // 30 real days, not a fabricated "period"
+  const now = Date.now()
+  const currentStart = now - windowMs
+  const previousStart = currentStart - windowMs
+
+  const params: unknown[] = [orgId, currentStart, previousStart, now]
+  let workerFilter = ""
+  if (opts.workerId) {
+    workerFilter = "AND m.worker_id = $5"
+    params.push(opts.workerId)
+  }
+
+  const rows = await query<{
+    key: string
+    kind: string
+    real_value: string | null
+    demo_value: string | null
+    previous_real_value: string | null
+    count: string
+    last_recorded_at: string
+  }>(
+    `SELECT
+       m.key,
+       m.kind,
+       SUM(CASE WHEN m.recorded_at >= $2 AND e.execution_mode IS NULL THEN m.value ELSE 0 END) AS real_value,
+       SUM(CASE WHEN m.recorded_at >= $2 AND e.execution_mode = 'development' THEN m.value ELSE 0 END) AS demo_value,
+       SUM(CASE WHEN m.recorded_at >= $3 AND m.recorded_at < $2 AND e.execution_mode IS NULL THEN m.value ELSE 0 END) AS previous_real_value,
+       COUNT(*) FILTER (WHERE m.recorded_at >= $2) AS count,
+       MAX(m.recorded_at) AS last_recorded_at
+     FROM metrics m
+     LEFT JOIN executions e ON e.id = m.execution_id
+     WHERE m.org_id = $1 AND m.kind = 'business' AND m.recorded_at >= $3 AND m.recorded_at <= $4 ${workerFilter}
+     GROUP BY m.key, m.kind`,
+    params,
+  )
+
+  return rows.map((r) => {
+    const realValue = Number(r.real_value ?? 0)
+    const previousRealValue = Number(r.previous_real_value ?? 0)
+    return {
+      key: r.key,
+      kind: r.kind,
+      realValue,
+      demoValue: Number(r.demo_value ?? 0),
+      previousRealValue,
+      delta: previousRealValue > 0 ? Math.round(((realValue - previousRealValue) / previousRealValue) * 1000) / 10 : null,
+      count: Number(r.count ?? 0),
+      lastRecordedAt: Number(r.last_recorded_at ?? 0),
+    }
+  })
+}
+
+/** Real evidence for one BusinessEvent, org-scoped — the "click a
+ * metric, inspect its evidence" chain (section 4). Never another
+ * org's row: same 404-not-403 discipline as getWorker(). */
+export async function getBusinessEvent(id: string, orgId: string): Promise<BusinessEvent | null> {
+  const row = await queryOne<{
+    id: string
+    worker_id: string
+    output_id: string | null
+    execution_id: string | null
+    type: string
+    entity_id: string | null
+    entity_type: string | null
+    numeric_value: number | null
+    currency: string | null
+    confidence: number | null
+    source: string | null
+    payload: Record<string, unknown>
+    occurred_at: string
+  }>("SELECT * FROM business_events WHERE id = $1 AND org_id = $2", [id, orgId])
+  if (!row) return null
+  return {
+    id: row.id,
+    workerId: row.worker_id,
+    outputId: row.output_id ?? undefined,
+    executionId: row.execution_id ?? undefined,
+    type: row.type,
+    entityId: row.entity_id ?? undefined,
+    entityType: row.entity_type ?? undefined,
+    numericValue: row.numeric_value ?? undefined,
+    currency: row.currency ?? undefined,
+    confidence: row.confidence ?? undefined,
+    source: row.source ?? undefined,
+    payload: row.payload,
+    occurredAt: Number(row.occurred_at),
+  }
 }
 
 /* ---- bootstrap read: everything the client needs in one shot --------- */
@@ -614,7 +755,20 @@ export async function getBootstrapState(orgId: string): Promise<BootstrapState> 
     sequence: r.sequence,
   }))
 
-  const metricRows = await query<{ id: string; worker_id: string; execution_id: string | null; business_event_id: string | null; key: string; kind: string; value: number; unit: string | null; recorded_at: string }>(
+  const metricRows = await query<{
+    id: string
+    worker_id: string
+    execution_id: string | null
+    business_event_id: string | null
+    key: string
+    kind: string
+    value: number
+    unit: string | null
+    source: string | null
+    currency: string | null
+    confidence: number | null
+    recorded_at: string
+  }>(
     `SELECT * FROM metrics WHERE org_id = $1 AND worker_id IN (${placeholders}) ORDER BY recorded_at DESC LIMIT 1000`,
     [orgId, ...workerIds],
   )
@@ -627,10 +781,27 @@ export async function getBootstrapState(orgId: string): Promise<BootstrapState> 
     kind: r.kind as MetricRecord["kind"],
     value: r.value,
     unit: r.unit ?? undefined,
+    source: r.source ?? undefined,
+    currency: r.currency ?? undefined,
+    confidence: r.confidence ?? undefined,
     recordedAt: Number(r.recorded_at),
   }))
 
-  const beRows = await query<{ id: string; worker_id: string; output_id: string | null; type: string; payload: Record<string, unknown>; occurred_at: string }>(
+  const beRows = await query<{
+    id: string
+    worker_id: string
+    output_id: string | null
+    execution_id: string | null
+    type: string
+    entity_id: string | null
+    entity_type: string | null
+    numeric_value: number | null
+    currency: string | null
+    confidence: number | null
+    source: string | null
+    payload: Record<string, unknown>
+    occurred_at: string
+  }>(
     `SELECT * FROM business_events WHERE org_id = $1 AND worker_id IN (${placeholders}) ORDER BY occurred_at DESC LIMIT 500`,
     [orgId, ...workerIds],
   )
@@ -638,7 +809,14 @@ export async function getBootstrapState(orgId: string): Promise<BootstrapState> 
     id: r.id,
     workerId: r.worker_id,
     outputId: r.output_id ?? undefined,
+    executionId: r.execution_id ?? undefined,
     type: r.type,
+    entityId: r.entity_id ?? undefined,
+    entityType: r.entity_type ?? undefined,
+    numericValue: r.numeric_value ?? undefined,
+    currency: r.currency ?? undefined,
+    confidence: r.confidence ?? undefined,
+    source: r.source ?? undefined,
     payload: r.payload,
     occurredAt: Number(r.occurred_at),
   }))

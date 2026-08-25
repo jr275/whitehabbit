@@ -297,6 +297,7 @@ export type WorkerEventType =
   | "reasoning_started"
   | "reasoning_completed"
   | "output_created"
+  | "business_event_recorded"
   | "metric_recorded"
   | "task_completed"
   | "task_failed"
@@ -317,12 +318,47 @@ export interface WorkerEvent {
   sequence?: number
 }
 
-/* ---- Business Event -> Metric -> Outcome ---- */
+/* ---- Business Event -> Metric -> Outcome ----
+ *
+ * WorkerExecution -> WorkerOutput -> BusinessEvent -> MetricRecord is
+ * the real provenance chain (section 4/13 of the Business Impact
+ * brief): a BusinessEvent is derived from one real WorkerOutput
+ * (lib/workforce/business-events.ts's deriveBusinessEvents(), called
+ * once per completed execution in lib/agent/runtime.ts — never
+ * invented when a skill's output doesn't support one), and a
+ * MetricRecord that summarizes it carries that BusinessEvent's id in
+ * `businessEventId` — the literal, queryable link the "click a metric,
+ * see its evidence" experience walks backwards. */
 export interface BusinessEvent {
   id: string
   workerId: string
   outputId?: string
+  /** The exact execution this event came from — never inferred, never
+   * shared across executions (section 10: "the same execution should
+   * not create multiple contradictory business results" — each
+   * execution's real events are its own). */
+  executionId?: string
+  /** e.g. "lead_qualified", "page_opportunity_planned",
+   * "ticket_resolved" — an open, extensible vocabulary (section 6),
+   * never a fixed enum a new Skill would be blocked on. */
   type: string
+  /** What real, named thing this event is about, when the output
+   * names one — a company, a page topic, a conversation. Never a
+   * fabricated identifier. */
+  entityId?: string
+  entityType?: string
+  /** The real count/score this event represents (e.g. 1 qualified
+   * lead, a 91 ICP score) — never a dollar estimate unless the skill
+   * itself produced one as an explicit, labeled estimate. */
+  numericValue?: number
+  currency?: string
+  /** The skill's own real, structural confidence for this event —
+   * never a second, invented confidence number. */
+  confidence?: number
+  /** Real provenance label — "skill:skill_lead_qualification" today;
+   * "connector:google" once a Connection can emit one. Never a
+   * fabricated integration name. */
+  source?: string
   payload: Record<string, unknown>
   occurredAt: number
 }
@@ -338,6 +374,9 @@ export interface MetricRecord {
   kind: MetricKind
   value: number
   unit?: string
+  source?: string
+  currency?: string
+  confidence?: number
   recordedAt: number
 }
 

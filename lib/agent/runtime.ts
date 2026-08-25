@@ -25,7 +25,9 @@ import { toolsMap } from "@/lib/agent/tools/registry"
 import type { ExecutionReasonCode, RuntimeEventType, SkillExecutionResult, WorkerContext } from "@/lib/agent/types"
 import { ApprovalRequiredError, InvalidCredentialError, ProviderError, SkillBlockedError } from "@/lib/agent/types"
 import * as repo from "@/lib/db/repo"
+import { deriveBusinessEvents } from "@/lib/workforce/business-events"
 import type {
+  BusinessEvent,
   MetricRecord,
   Worker,
   WorkerEvent,
@@ -179,11 +181,37 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
       await repo.insertOutput(output, run.orgId)
       emit("output_created", { outputId: output.id, title: output.title, qualityScore: evaluation.qualityScore })
 
+      // Business Event layer: derive real, persistable events from the
+      // output's own structured result (never invented) and record them
+      // before metrics, so each metric can carry the id of the business
+      // event it's evidence for (metrics.business_event_id).
+      const businessEventIdByMetricKey = new Map<string, string>()
+      for (const derived of deriveBusinessEvents(output)) {
+        const businessEvent: BusinessEvent = {
+          id: `be_${randomUUID()}`,
+          workerId: run.worker.id,
+          outputId: output.id,
+          executionId: execution.id,
+          type: derived.type,
+          entityId: derived.entityId,
+          entityType: derived.entityType,
+          numericValue: derived.numericValue,
+          confidence: derived.confidence,
+          source: derived.source,
+          payload: derived.payload,
+          occurredAt: Date.now(),
+        }
+        await repo.insertBusinessEvent(businessEvent, run.orgId)
+        emit("business_event_recorded", { type: businessEvent.type, entityType: businessEvent.entityType, numericValue: businessEvent.numericValue })
+        for (const key of derived.relatedMetricKeys) businessEventIdByMetricKey.set(key, businessEvent.id)
+      }
+
       const emissions = skill.metrics(result, evaluation)
       const metricRecords: MetricRecord[] = emissions.map((m) => ({
         id: `met_${randomUUID()}`,
         workerId: run.worker.id,
         executionId: execution.id,
+        businessEventId: businessEventIdByMetricKey.get(m.key),
         key: m.key,
         kind: m.kind,
         value: m.value,

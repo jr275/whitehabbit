@@ -173,6 +173,7 @@ export type RuntimeEventType =
   | "reasoning_started"
   | "reasoning_completed"
   | "output_created"
+  | "business_event_recorded"
   | "metric_recorded"
   | "task_completed"
   | "task_failed"
