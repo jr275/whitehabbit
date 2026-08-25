@@ -73,6 +73,43 @@ export interface ConnectorAction {
   outputSchema: ConnectorSchema
   permission: ToolPermission
   riskLevel: RiskLevel
+  /** Real-time call budget in ms, when the adapter enforces one beyond
+   * the shared default (see each provider adapter's own fetch call,
+   * e.g. AbortSignal.timeout(...)) — declarative documentation of an
+   * enforced value, never a second timeout mechanism. */
+  timeoutMs?: number
+  /** The exact same RetryPolicy shape lib/agent/retry.ts's withRetry()
+   * already takes — declaring it here documents what an action's own
+   * adapter passes to that shared function, never a parallel retry
+   * implementation. Omitted when an action isn't retried (e.g. a
+   * write the caller must not silently repeat). */
+  retryPolicy?: { maxRetries: number; baseDelayMs: number; maxDelayMs: number }
+  /** Requests/min this provider is documented to allow, when known —
+   * informational (surfaced in Studio/the connector marketplace), not
+   * yet a second enforced limiter; a provider's own 429 + Retry-After
+   * is what the real retry policy above actually reacts to. */
+  rateLimit?: { requestsPerMinute?: number; concurrency?: number }
+  /** Whether calling this action twice with the same input is safe to
+   * treat as a no-op repeat — mirrors the real idempotency ledger
+   * (action_executions, lib/agent/pipeline/idempotency.ts) semantics
+   * a resumable skill already relies on for its own actions; a plain
+   * (non-pipeline) action reads this as documentation only today. */
+  idempotencySupported?: boolean
+  /** This action's own revision, independent of the connector's
+   * overall `version` (ConnectorDefinition) — bumps when its real
+   * input/output shape changes, so a persisted reference (e.g. a
+   * generated-from-OpenAPI action) can detect drift against a
+   * re-imported spec. */
+  version?: string
+  /** Set only for a Custom REST Connector action (lib/connectors/
+   * custom-rest.ts) — the real HTTP method + path template (e.g.
+   * "/v1/leads/{id}") this action calls against its connector's
+   * configured base URL, generated from an OpenAPI operation
+   * (lib/connectors/openapi-import.ts) or hand-declared. Absent for
+   * every native/OAuth2 connector action, which owns its own request
+   * logic directly. */
+  httpMethod?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+  httpPath?: string
 }
 
 /** How this Connector can notify WhiteHabbit that something happened,
@@ -118,6 +155,10 @@ export interface ConnectorDefinition {
    * must show "Authentication coming in a later phase" and must never
    * offer a Connect button that can't actually do anything. */
   enabled: boolean
+  /** This connector definition's own revision — informational, bumped
+   * when its real action/trigger shape changes. Distinct from each
+   * ConnectorAction's own optional `version`. */
+  version?: string
   metadata?: Record<string, unknown>
   /** Builds this connector's REAL ToolDefinitions for one specific,
    * already-CONNECTED Connection. Never called for a disconnected
@@ -152,6 +193,57 @@ export type ConnectionStatus = "not_connected" | "connecting" | "connected" | "e
 
 export const CONNECTION_STATUSES: ConnectionStatus[] = ["not_connected", "connecting", "connected", "error", "revoked", "disconnected"]
 
+/* ================================================================== *
+ * DYNAMIC CONNECTORS — section 4/11/14: MCP servers and Custom REST
+ * Connectors an organization adds itself, rather than a provider this
+ * deployment's own code defines ahead of time. A CustomConnector row
+ * (migrations/0010_custom_connectors.sql) is real, per-organization,
+ * mutable state — same category of fact Connection already is — and
+ * lib/connectors/dynamic.ts turns each row into an ordinary
+ * ConnectorDefinition at request time, merged alongside the static
+ * CONNECTOR_REGISTRY everywhere connectors are resolved. Nothing
+ * downstream needs a second code path for "dynamic" vs. "static".
+ * ================================================================== */
+
+export type CustomConnectorKind = "mcp" | "rest"
+export type CustomConnectorStatus = "not_connected" | "connected" | "error"
+
+export interface CustomConnectorRestConfig {
+  baseUrl: string
+  authType: "none" | "api_key" | "bearer_token" | "basic_auth"
+  /** For api_key auth: which header carries it (e.g. "X-API-Key").
+   * Never the key's own value — that lives only in the encrypted
+   * credential, resolved at call time. */
+  apiKeyHeader?: string
+}
+
+export interface CustomConnectorMcpConfig {
+  endpointUrl: string
+}
+
+export interface CustomConnector {
+  id: string
+  organizationId: string
+  kind: CustomConnectorKind
+  name: string
+  description?: string
+  config: CustomConnectorRestConfig | CustomConnectorMcpConfig
+  /** Real, cached discovery/import result — MCP tool descriptors, or
+   * ConnectorAction entries generated from an OpenAPI import
+   * (lib/connectors/openapi-import.ts). Never hand-authored per row;
+   * always the output of a real discovery/parse step. */
+  discoveredTools: ConnectorAction[]
+  status: CustomConnectorStatus
+  errorReason?: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** The one flexible credential shape every custom-connector authType
+ * maps onto — encrypted as a single JSON blob (see the migration's
+ * header comment), never a secret in `config` or any API response. */
+export type CustomConnectorCredential = { type: "api_key"; value: string } | { type: "bearer_token"; token: string } | { type: "basic_auth"; username: string; password: string } | { type: "mcp_bearer"; token: string }
+
 /** The org-scoped, persisted fact of a connection attempt/result.
  * Never holds a secret directly — `metadata` is for non-secret,
  * real, operator-visible facts only (e.g. which test fixture connected,
@@ -180,4 +272,16 @@ export interface Connection {
   errorReason?: string
   createdAt: number
   updatedAt: number
+  /** Real, persisted health tracking (section 23) — distinct from a
+   * live healthCheck() call: these are facts about the LAST real
+   * check/call, recorded by lib/db/repo.ts's recordConnectionHealth(),
+   * called from POST /api/connections/[id]/test (an explicit check)
+   * and opportunistically after every real connector tool call
+   * (lib/connectors/registry.ts's getConnectorTools() wrapping). Never
+   * inferred from credentials merely existing. */
+  lastCheckedAt?: number
+  lastSuccessAt?: number
+  lastErrorAt?: number
+  lastErrorCode?: string
+  lastLatencyMs?: number
 }

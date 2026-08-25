@@ -117,6 +117,7 @@ export function buildWorkerFromBlueprint(id: string, blueprint: AgentBlueprint):
     status: "draft",
     tested: false,
     createdAt: now,
+    updatedAt: now,
     releasedAt: null,
     releasedVersionId: null,
   }
@@ -190,6 +191,7 @@ export function buildWorkerFromProduct(
     status: "draft",
     tested: false,
     createdAt: now,
+    updatedAt: now,
     releasedAt: null,
     releasedVersionId: null,
   }
@@ -214,6 +216,7 @@ export function buildEmptyWorker(id: string): Worker {
     status: "draft",
     tested: false,
     createdAt: now,
+    updatedAt: now,
     releasedAt: null,
     releasedVersionId: null,
   }
@@ -261,6 +264,7 @@ export function buildSeedWorker(): Worker {
     status: "ready",
     tested: true,
     createdAt: now,
+    updatedAt: now,
     releasedAt: null,
     releasedVersionId: null,
   }

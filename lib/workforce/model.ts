@@ -210,6 +210,12 @@ export interface Worker {
   status: WorkerStatus
   tested: boolean
   createdAt: number
+  /** Real "last modified" timestamp — the `workers.updated_at` column,
+   * bumped on every upsertWorker()/build/release/etc. write. Used by
+   * the real Worker Directory (/workforce); not present on Workers
+   * persisted before this field existed only in the sense that it
+   * simply mirrors createdAt at read time for those (see rowToWorker). */
+  updatedAt: number
   releasedAt: number | null
   /** The one authoritative "is this worker live" fact — the id of the
    * WorkerVersion currently released, or null. Run Worker always

@@ -54,6 +54,12 @@ export interface ActivityItem {
 export interface WorkerHealth {
   workerId: string
   workerName: string
+  workerStatus: "draft" | "building" | "ready" | "live"
+  tested: boolean
+  releasedVersionId: string | null
+  releasedVersionNumber: number | null
+  createdAt: number
+  updatedAt: number
   executions: number
   completed: number
   failed: number

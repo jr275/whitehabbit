@@ -6,12 +6,16 @@
  * UI component asks this registry, never hardcodes a provider name.
  * ================================================================== */
 
+import "server-only"
+
 import type { Connection, ConnectorCapability, ConnectorDefinition } from "./types"
 import { buildMcpConnector } from "./mcp-connector"
 import { salesforceConnector } from "./providers/salesforce"
 import { slackConnector } from "./providers/slack"
 import { testConnector } from "./test-connector"
-import type { ToolDefinition } from "@/lib/agent/types"
+import { classifyNormalizedError } from "@/lib/agent/errors"
+import type { ToolActionResult, ToolContext, ToolDefinition } from "@/lib/agent/types"
+import { recordConnectionHealth } from "@/lib/db/repo"
 
 /** The one MCP server this deployment knows about, if any. Real: reads
  * real env vars, registers a real (if unconfigured) Connector either
@@ -182,6 +186,34 @@ export function getConnectorCapabilities(id: string): ConnectorCapability[] {
   return getConnector(id)?.capabilities ?? []
 }
 
+/** Wraps one real ToolAction.run so every real connector call —
+ * regardless of provider, regardless of whether it succeeds or fails —
+ * opportunistically records real connection health (section 23/27):
+ * the single chokepoint every connector action already flows through
+ * (getConnectorTools() is what toolsMapForOrg() and the direct-Approve
+ * path both call), so this is the ONE place that needed the health
+ * write, not a change scattered across every provider adapter. Never
+ * changes the action's own real result — purely an observability
+ * side effect after the fact. */
+function withHealthTracking(connection: Connection, run: (input: unknown, ctx: ToolContext) => Promise<ToolActionResult>): (input: unknown, ctx: ToolContext) => Promise<ToolActionResult> {
+  return async (input, ctx) => {
+    const started = Date.now()
+    const result = await run(input, ctx)
+    const latencyMs = result.durationMs ?? Date.now() - started
+    const normalized = result.ok ? undefined : classifyNormalizedError({ errorCode: result.errorCode, error: result.error, retryAfterMs: result.retryAfterMs })
+    // Awaited (one small, already-indexed UPDATE) so health is
+    // immediately consistent with the call that just happened — but a
+    // health-write failure itself must never fail or mask the real
+    // action's own already-real result.
+    try {
+      await recordConnectionHealth(connection.id, connection.organizationId, { ok: result.ok, errorCode: normalized, latencyMs })
+    } catch {
+      /* observability write failure — never masks the real action result */
+    }
+    return result
+  }
+}
+
 /** Real ToolDefinitions for one specific Connection — only ever
  * meaningful for a connector that's actually enabled AND a connection
  * that's actually connected; returns [] otherwise rather than
@@ -191,5 +223,6 @@ export function getConnectorTools(connection: Connection): ToolDefinition[] {
   const connector = getConnector(connection.connectorId)
   if (!connector || !connector.enabled) return []
   if (connection.status !== "connected") return []
-  return connector.buildTools(connection)
+  const tools = connector.buildTools(connection)
+  return tools.map((tool) => ({ ...tool, actions: tool.actions.map((action) => ({ ...action, run: withHealthTracking(connection, action.run) })) }))
 }

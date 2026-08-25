@@ -11,8 +11,9 @@ import "server-only"
  * ================================================================== */
 
 import { randomUUID } from "node:crypto"
+import { decryptSecret, encryptSecret } from "@/lib/crypto/secret-box"
 import { query, queryOne, withTransaction } from "./client"
-import type { Connection } from "@/lib/connectors/types"
+import type { Connection, ConnectorAction, CustomConnector, CustomConnectorCredential } from "@/lib/connectors/types"
 import type {
   Approval,
   BusinessEvent,
@@ -144,6 +145,10 @@ function rowToWorker(r: WorkerRow): Worker {
     tested: r.tested,
     releasedVersionId: r.released_version_id,
     createdAt: Number(r.created_at),
+    // A row persisted before updated_at existed has it defaulted to
+    // created_at by Postgres (same column-default convention as every
+    // other backfilled column in this file) — never undefined.
+    updatedAt: r.updated_at ? Number(r.updated_at) : Number(r.created_at),
     releasedAt: r.released_at ? Number(r.released_at) : null,
   }
 }
@@ -739,6 +744,64 @@ export async function insertOutput(output: WorkerOutput, orgId: string): Promise
   )
 }
 
+interface OutputRow {
+  id: string
+  worker_id: string
+  task_id: string
+  execution_id: string
+  type: string
+  title: string
+  content: { content: string; structured?: unknown }
+  sources: unknown
+  quality_score: number | null
+  evaluation: WorkerOutput["evaluation"] | null
+  status: string
+  created_at: string
+}
+
+function rowToOutput(r: OutputRow): WorkerOutput {
+  return {
+    id: r.id,
+    workerId: r.worker_id,
+    taskId: r.task_id,
+    executionId: r.execution_id,
+    type: r.type,
+    title: r.title,
+    content: r.content.content,
+    structured: r.content.structured,
+    sources: (r.sources as WorkerOutput["sources"]) ?? [],
+    qualityScore: r.quality_score ?? undefined,
+    evaluation: r.evaluation ?? undefined,
+    status: r.status as WorkerOutput["status"],
+    createdAt: Number(r.created_at),
+  }
+}
+
+/** Org-scoped real outputs for ONE execution — never capped by the
+ * client bootstrap store's 500-row window. This is what makes
+ * OutputDrawer's execution-detail resolution correct regardless of
+ * how old the execution is (see GET /api/executions/[id]). */
+export async function listOutputsForExecution(executionId: string, orgId: string): Promise<WorkerOutput[]> {
+  const rows = await query<OutputRow>("SELECT * FROM outputs WHERE execution_id = $1 AND org_id = $2 ORDER BY created_at ASC", [executionId, orgId])
+  return rows.map(rowToOutput)
+}
+
+/** Bounded, org-scoped, optionally worker-scoped recent outputs — the
+ * real source for Observatory's "Recent outputs" panel. Never the
+ * whole outputs table. */
+export async function listRecentOutputs(orgId: string, opts: { workerId?: string; limit?: number } = {}): Promise<WorkerOutput[]> {
+  const clauses = ["org_id = $1"]
+  const params: unknown[] = [orgId]
+  if (opts.workerId) {
+    params.push(opts.workerId)
+    clauses.push(`worker_id = $${params.length}`)
+  }
+  const limit = Math.min(Math.max(opts.limit ?? 10, 1), 100)
+  params.push(limit)
+  const rows = await query<OutputRow>(`SELECT * FROM outputs WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC LIMIT $${params.length}`, params)
+  return rows.map(rowToOutput)
+}
+
 /* ---- business events + metrics -------------------------------------- */
 export async function insertBusinessEvent(be: BusinessEvent, orgId: string): Promise<void> {
   await query(
@@ -1147,6 +1210,11 @@ interface ConnectionRow {
   error_reason: string | null
   created_at: string
   updated_at: string
+  last_checked_at: string | null
+  last_success_at: string | null
+  last_error_at: string | null
+  last_error_code: string | null
+  last_latency_ms: number | null
 }
 
 function rowToConnection(r: ConnectionRow): Connection {
@@ -1163,7 +1231,129 @@ function rowToConnection(r: ConnectionRow): Connection {
     errorReason: r.error_reason ?? undefined,
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
+    lastCheckedAt: r.last_checked_at ? Number(r.last_checked_at) : undefined,
+    lastSuccessAt: r.last_success_at ? Number(r.last_success_at) : undefined,
+    lastErrorAt: r.last_error_at ? Number(r.last_error_at) : undefined,
+    lastErrorCode: r.last_error_code ?? undefined,
+    lastLatencyMs: r.last_latency_ms ?? undefined,
   }
+}
+
+/** Real, persisted health record — called after a real healthCheck()
+ * (POST /api/connections/[id]/test) or after a real connector tool
+ * call actually ran (lib/connectors/registry.ts's getConnectorTools()
+ * wrapping, the single chokepoint every connector action goes
+ * through). `ok` decides which timestamp advances; last_checked_at
+ * always advances — a real fact about when this was last observed,
+ * successful or not. Org-scoped like every other write in this file. */
+export async function recordConnectionHealth(connectionId: string, orgId: string, result: { ok: boolean; errorCode?: string; latencyMs?: number }): Promise<void> {
+  const now = Date.now()
+  await query(
+    `UPDATE connections SET
+       last_checked_at = $1,
+       last_success_at = CASE WHEN $2 THEN $1 ELSE last_success_at END,
+       last_error_at = CASE WHEN $2 THEN last_error_at ELSE $1 END,
+       last_error_code = CASE WHEN $2 THEN NULL ELSE $3 END,
+       last_latency_ms = COALESCE($4, last_latency_ms)
+     WHERE id = $5 AND org_id = $6`,
+    [now, result.ok, result.errorCode ?? null, result.latencyMs ?? null, connectionId, orgId],
+  )
+}
+
+/* ================================================================== *
+ * CUSTOM CONNECTORS — real, per-organization, mutable connector
+ * configuration (MCP servers, Custom REST Connectors — section 4/11/
+ * 14). See lib/connectors/dynamic.ts for the read-side bridge that
+ * turns these rows into ordinary ConnectorDefinitions.
+ * ================================================================== */
+
+interface CustomConnectorRow {
+  id: string
+  org_id: string
+  kind: string
+  name: string
+  description: string | null
+  config: Record<string, unknown>
+  discovered_tools: ConnectorAction[]
+  status: string
+  error_reason: string | null
+  created_at: string
+  updated_at: string
+}
+
+function rowToCustomConnector(r: CustomConnectorRow): CustomConnector {
+  return {
+    id: r.id,
+    organizationId: r.org_id,
+    kind: r.kind as CustomConnector["kind"],
+    name: r.name,
+    description: r.description ?? undefined,
+    config: r.config as unknown as CustomConnector["config"],
+    discoveredTools: r.discovered_tools ?? [],
+    status: r.status as CustomConnector["status"],
+    errorReason: r.error_reason ?? undefined,
+    createdAt: Number(r.created_at),
+    updatedAt: Number(r.updated_at),
+  }
+}
+
+export async function listCustomConnectors(orgId: string): Promise<CustomConnector[]> {
+  const rows = await query<CustomConnectorRow>("SELECT * FROM custom_connectors WHERE org_id = $1 ORDER BY created_at ASC", [orgId])
+  return rows.map(rowToCustomConnector)
+}
+
+/** Org-scoped by construction: returns null (never another org's row)
+ * if the custom connector doesn't belong to orgId. */
+export async function getCustomConnector(id: string, orgId: string): Promise<CustomConnector | null> {
+  const row = await queryOne<CustomConnectorRow>("SELECT * FROM custom_connectors WHERE id = $1 AND org_id = $2", [id, orgId])
+  return row ? rowToCustomConnector(row) : null
+}
+
+export async function createCustomConnector(input: { orgId: string; userId?: string; kind: CustomConnector["kind"]; name: string; description?: string; config: CustomConnector["config"] }): Promise<CustomConnector> {
+  const id = `cconn_${randomUUID()}`
+  const now = Date.now()
+  await query(
+    `INSERT INTO custom_connectors (id, org_id, kind, name, description, config, created_at, updated_at, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8)`,
+    [id, input.orgId, input.kind, input.name, input.description ?? null, JSON.stringify(input.config), now, input.userId ?? null],
+  )
+  return (await getCustomConnector(id, input.orgId))!
+}
+
+/** Real discovery/import result — replaces the cached tool list
+ * wholesale (a re-sync/re-import is a real, deliberate refresh, never
+ * a merge of stale + new). */
+export async function updateCustomConnectorDiscovery(id: string, orgId: string, patch: { status: CustomConnector["status"]; errorReason?: string | null; discoveredTools?: ConnectorAction[] }): Promise<CustomConnector | null> {
+  const existing = await getCustomConnector(id, orgId)
+  if (!existing) return null
+  const now = Date.now()
+  await query(
+    `UPDATE custom_connectors SET status = $1, error_reason = $2, discovered_tools = COALESCE($3, discovered_tools), updated_at = $4 WHERE id = $5 AND org_id = $6`,
+    [patch.status, patch.errorReason ?? null, patch.discoveredTools ? JSON.stringify(patch.discoveredTools) : null, now, id, orgId],
+  )
+  return getCustomConnector(id, orgId)
+}
+
+export async function deleteCustomConnector(id: string, orgId: string): Promise<void> {
+  await query("DELETE FROM custom_connectors WHERE id = $1 AND org_id = $2", [id, orgId])
+}
+
+/** Encrypts and stores this custom connector's one credential blob —
+ * same AES-256-GCM primitive (lib/crypto/secret-box.ts) every other
+ * real credential in this system already uses. Org-scoped: the UPDATE
+ * only matches a row this org actually owns. */
+export async function setCustomConnectorCredential(id: string, orgId: string, credential: CustomConnectorCredential): Promise<void> {
+  await query("UPDATE custom_connectors SET credential_encrypted = $1, updated_at = $2 WHERE id = $3 AND org_id = $4", [encryptSecret(JSON.stringify(credential)), Date.now(), id, orgId])
+}
+
+/** Real, decrypted credential for one custom connector — null when
+ * genuinely none is stored (never a fabricated fallback). Never
+ * returned by any API response; server-only callers (the REST/MCP
+ * dynamic adapters) only. */
+export async function getCustomConnectorCredential(id: string, orgId: string): Promise<CustomConnectorCredential | null> {
+  const row = await queryOne<{ credential_encrypted: string | null }>("SELECT credential_encrypted FROM custom_connectors WHERE id = $1 AND org_id = $2", [id, orgId])
+  if (!row?.credential_encrypted) return null
+  return JSON.parse(decryptSecret(row.credential_encrypted)) as CustomConnectorCredential
 }
 
 export async function listConnections(orgId: string): Promise<Connection[]> {
@@ -1765,6 +1955,19 @@ export async function listRecentActivity(orgId: string, opts: { workerId?: strin
 export interface WorkerHealth {
   workerId: string
   workerName: string
+  /** Real, persisted Worker lifecycle state (draft/building/ready/live)
+   * — the same authoritative field Studio's own "Release" gate reads,
+   * never inferred from the UI. Used by the real Worker Directory
+   * (/workforce) to classify runtime status (see lib/workforce/health.ts). */
+  workerStatus: Worker["status"]
+  tested: boolean
+  releasedVersionId: string | null
+  /** The version_number of the currently released WorkerVersion, or
+   * null if never released — what the Worker Directory shows as
+   * "Version". Never the draft's in-progress edits. */
+  releasedVersionNumber: number | null
+  createdAt: number
+  updatedAt: number
   executions: number
   completed: number
   failed: number
@@ -1787,6 +1990,12 @@ export async function listWorkerHealth(orgId: string): Promise<WorkerHealth[]> {
   const rows = await query<{
     worker_id: string
     worker_name: string
+    worker_status: string
+    tested: boolean
+    released_version_id: string | null
+    released_version_number: number | null
+    created_at: string
+    updated_at: string
     executions: string
     completed: string
     partially_completed: string
@@ -1800,6 +2009,12 @@ export async function listWorkerHealth(orgId: string): Promise<WorkerHealth[]> {
     `SELECT
        w.id AS worker_id,
        w.name AS worker_name,
+       w.status AS worker_status,
+       w.tested AS tested,
+       w.released_version_id AS released_version_id,
+       (SELECT wv.version_number FROM worker_versions wv WHERE wv.id = w.released_version_id) AS released_version_number,
+       w.created_at AS created_at,
+       w.updated_at AS updated_at,
        count(e.id) AS executions,
        count(e.id) FILTER (WHERE e.status = 'completed') AS completed,
        count(e.id) FILTER (WHERE e.status = 'partially_completed') AS partially_completed,
@@ -1812,7 +2027,7 @@ export async function listWorkerHealth(orgId: string): Promise<WorkerHealth[]> {
      FROM workers w
      LEFT JOIN executions e ON e.worker_id = w.id AND e.org_id = w.org_id
      WHERE w.org_id = $1
-     GROUP BY w.id, w.name
+     GROUP BY w.id, w.name, w.status, w.tested, w.released_version_id, w.created_at, w.updated_at
      ORDER BY count(e.id) DESC, w.name ASC`,
     [orgId],
   )
@@ -1840,6 +2055,12 @@ export async function listWorkerHealth(orgId: string): Promise<WorkerHealth[]> {
     return {
       workerId: r.worker_id,
       workerName: r.worker_name,
+      workerStatus: r.worker_status as Worker["status"],
+      tested: r.tested,
+      releasedVersionId: r.released_version_id,
+      releasedVersionNumber: r.released_version_number,
+      createdAt: Number(r.created_at),
+      updatedAt: Number(r.updated_at),
       executions: Number(r.executions),
       completed,
       failed,
