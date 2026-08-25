@@ -4,8 +4,9 @@
  * Execution / Output / Metric rows — never a hand-typed KPI.
  * ================================================================== */
 
+import { DOMAIN_METRIC_TAXONOMY } from "./business-events"
 import { SKILL_CATALOG } from "./catalog"
-import type { MetricRecord, Worker, WorkerEvent, WorkerEventType, WorkerExecution, WorkerOutput, WorkerTask } from "./model"
+import type { BusinessEvent, MetricRecord, Worker, WorkerEvent, WorkerEventType, WorkerExecution, WorkerOutput, WorkerTask } from "./model"
 import { OUTPUT_TYPE_META } from "./model"
 import { getWorkerVisual } from "./visual-identity"
 
@@ -409,4 +410,220 @@ export function headerMetrics(tasks: WorkerTask[], executions: WorkerExecution[]
 /* ---- real operational totals, e.g. "sources analyzed" ---- */
 export function sumMetric(metrics: MetricRecord[], workerId: string, key: string): number {
   return metrics.filter((m) => m.workerId === workerId && m.key === key).reduce((s, m) => s + m.value, 0)
+}
+
+/* ================================================================== *
+ * BUSINESS IMPACT (Outputs Hub) — turns the REAL, PERSISTED
+ * BusinessEvent/MetricRecord rows lib/agent/runtime.ts already writes
+ * (see lib/workforce/business-events.ts) into what the product
+ * experience shows. Nothing here derives a new number — every value is
+ * a real MetricRecord.value already in the ledger; a domain metric this
+ * worker has never actually produced is OMITTED, never shown as 0, and
+ * a metric this product can't measure at all yet is shown as
+ * `not_connected` with a real connect hint — never guessed.
+ * ================================================================== */
+
+export type ProvenanceState = "real" | "demo" | "not_connected"
+
+export interface DomainImpactMetric {
+  key: string
+  label: string
+  state: ProvenanceState
+  /** null only when state is "not_connected" — never a fabricated 0. */
+  value: number | null
+  unit?: string
+  currency?: string
+  connectHint?: string
+}
+
+/** Real-world action needed to activate a metric this product genuinely
+ * can't measure yet — mirrors the same honest language used in
+ * lib/products/catalog.ts's businessOutcomes/notYetConnected. Kept
+ * local to this display layer so it can grow with the taxonomy without
+ * touching business-events.ts. */
+const CONNECT_HINT: Record<string, string> = {
+  pipeline_influenced: "Connect your CRM to measure pipeline influenced",
+  meetings_booked: "Connect your calendar/CRM to measure meetings booked",
+  opportunities_created: "Connect your CRM to measure opportunities created",
+  revenue_influenced: "Connect your CRM to measure revenue influenced",
+  leads_generated: "Connect your CRM/forms to measure leads generated",
+  campaign_revenue: "Connect your ads/CRM platform to measure campaign revenue",
+  cac: "Connect your ads platform to measure CAC",
+  engagement: "Connect analytics to measure engagement",
+  tickets_resolved: "Connect your helpdesk to measure tickets resolved",
+  resolution_time: "Connect your helpdesk to measure resolution time",
+  csat: "Connect a survey/helpdesk tool to measure CSAT",
+  retention: "Connect your billing/CRM system to measure retention",
+  tasks_automated: "Connect your operations tooling to measure tasks automated",
+  hours_saved: "Connect your operations tooling to measure hours saved",
+  errors_avoided: "Connect your operations tooling to measure errors avoided",
+  cost_saved: "Connect your operations tooling to measure cost saved",
+  invoices_processed: "Connect your accounting system to measure invoices processed",
+  cash_recovered: "Connect your accounting system to measure cash recovered",
+  reconciliation_accuracy: "Connect your accounting system to measure reconciliation accuracy",
+}
+
+/** One Super Agent domain's real Business Impact numbers for one
+ * worker. `domainKey` is lib/products/catalog.ts's ProductTemplate.
+ * metricDomain — a DOMAIN_METRIC_TAXONOMY key. Real and demo metric
+ * rows are never summed together (section 3: "never mix them") — a
+ * key with only demo rows shows as `demo`, only real rows as `real`;
+ * a key with neither is omitted entirely rather than shown as 0. */
+export function domainImpactMetrics(domainKey: string, workerId: string, metrics: MetricRecord[], executions: WorkerExecution[]): DomainImpactMetric[] {
+  const defs = DOMAIN_METRIC_TAXONOMY[domainKey] ?? []
+  const modeById = new Map(executions.map((e) => [e.id, e.executionMode]))
+  const out: DomainImpactMetric[] = []
+  for (const def of defs) {
+    if (!def.real) {
+      out.push({ key: def.key, label: def.label, state: "not_connected", value: null, connectHint: CONNECT_HINT[def.key] ?? `Connect a data source to activate ${def.label.toLowerCase()}` })
+      continue
+    }
+    const rows = metrics.filter((m) => m.workerId === workerId && m.key === def.key && m.kind === "business")
+    if (rows.length === 0) continue
+    const real = rows.filter((m) => !(m.executionId && modeById.get(m.executionId) === "development"))
+    const demo = rows.filter((m) => m.executionId && modeById.get(m.executionId) === "development")
+    if (real.length > 0) {
+      out.push({ key: def.key, label: def.label, state: "real", value: real.reduce((s, m) => s + m.value, 0), unit: real[0].unit, currency: real[0].currency })
+    } else {
+      out.push({ key: def.key, label: def.label, state: "demo", value: demo.reduce((s, m) => s + m.value, 0), unit: demo[0].unit, currency: demo[0].currency })
+    }
+  }
+  return out
+}
+
+/* ---- plain business language for a technical BusinessEvent — UX
+ * principle: the user should never need to know what a BusinessEvent
+ * is (section 15). Unmapped types fall back to a humanized version of
+ * the real type string, never a made-up phrase. ---- */
+const BUSINESS_EVENT_PHRASE: Record<string, (n: number) => string> = {
+  lead_qualified: (n) => `${n} lead${n === 1 ? "" : "s"} qualified`,
+  content_opportunity_identified: (n) => `${n} content opportunit${n === 1 ? "y" : "ies"} identified`,
+  page_opportunity_planned: (n) => `${n} page opportunit${n === 1 ? "y" : "ies"} planned`,
+  ticket_resolved: () => "Ticket resolved",
+  ticket_escalated: () => "Escalated to a human",
+  ticket_flagged: () => "Flagged for review",
+}
+
+export function businessEventLabel(type: string, numericValue?: number): string {
+  const fn = BUSINESS_EVENT_PHRASE[type]
+  if (fn) return fn(numericValue ?? 1)
+  return type.replace(/_/g, " ")
+}
+
+/** Real provenance label for a BusinessEvent/MetricRecord's `source`
+ * field (section 5: "identify whether the source is Worker output,
+ * CRM, Web, Email, Other Connector, Demo"). `source` is always either
+ * "skill:<id>" (today, every real event) or "connector:<id>" (once a
+ * Connection can emit one) — see lib/workforce/model.ts's BusinessEvent
+ * doc comment. Never guesses a source that isn't the real string
+ * written at insert time. */
+export function sourceLabel(source: string | undefined, isDemo: boolean): string {
+  if (isDemo) return "Demo"
+  if (!source) return "Worker output"
+  if (source.startsWith("skill:")) return "Worker output"
+  if (source.startsWith("connector:")) return `Connector — ${source.slice("connector:".length)}`
+  return source
+}
+
+export function resultProvenanceState(execution: WorkerExecution | undefined): "real" | "demo" {
+  return execution?.executionMode === "development" ? "demo" : "real"
+}
+
+/* ---- multi-worker attribution, honestly scoped to today's real
+ * architecture: ONE Worker per Super Agent, with multiple Skills
+ * (see the Business Impact brief's "Multi-Worker Architecture Audit").
+ * A Skill is the real, distinct unit of contribution that exists today
+ * — this groups by skillId, never fabricates a separate Worker that
+ * isn't actually provisioned. Contribution is shown as real counts
+ * (executions, outputs, the real numericValue of each business event
+ * type) — never a financial attribution percentage nothing backs. ---- */
+export interface SkillContributionEvent {
+  type: string
+  label: string
+  /** sum of the real BusinessEvent.numericValue across this skill's
+   * events of this type — a count, never a fabricated share. */
+  count: number
+}
+
+export interface SkillContribution {
+  skillId: string
+  skillName: string
+  executions: number
+  completedOutputs: number
+  events: SkillContributionEvent[]
+}
+
+export function workerSkillContribution(workerId: string, tasks: WorkerTask[], outputs: WorkerOutput[], businessEvents: BusinessEvent[]): SkillContribution[] {
+  const bySkill = new Map<string, WorkerTask[]>()
+  for (const t of tasks) {
+    if (t.workerId !== workerId) continue
+    if (!bySkill.has(t.skillId)) bySkill.set(t.skillId, [])
+    bySkill.get(t.skillId)!.push(t)
+  }
+
+  const out: SkillContribution[] = []
+  for (const [skillId, skillTasks] of bySkill) {
+    const template = SKILL_CATALOG.find((s) => s.id === skillId)
+    const taskIds = new Set(skillTasks.map((t) => t.id))
+    const skillOutputs = outputs.filter((o) => o.workerId === workerId && taskIds.has(o.taskId))
+    const outputIds = new Set(skillOutputs.map((o) => o.id))
+    const events = businessEvents.filter((be) => be.workerId === workerId && be.outputId && outputIds.has(be.outputId))
+
+    const totalsByType = new Map<string, number>()
+    for (const e of events) totalsByType.set(e.type, (totalsByType.get(e.type) ?? 0) + (e.numericValue ?? 1))
+
+    out.push({
+      skillId,
+      skillName: template?.name ?? skillId,
+      executions: skillTasks.length,
+      completedOutputs: skillOutputs.filter((o) => o.status === "completed").length,
+      events: Array.from(totalsByType.entries()).map(([type, count]) => ({ type, label: businessEventLabel(type, count), count })),
+    })
+  }
+  return out.sort((a, b) => b.executions - a.executions)
+}
+
+/* ---- Result Cards / Provenance — the real chain for one output,
+ * assembled from arrays the caller already has (no new fetch, no new
+ * table). A card only ever links to a BusinessEvent/MetricRecord that
+ * actually exists for this exact output/execution — never a nearby or
+ * similar one. ---- */
+export interface ResultCardData {
+  output: WorkerOutput
+  worker: Worker
+  task?: WorkerTask
+  execution?: WorkerExecution
+  businessEvent?: BusinessEvent
+  metrics: MetricRecord[]
+  isDemo: boolean
+}
+
+export function recentResults(
+  workers: Worker[],
+  tasks: WorkerTask[],
+  executions: WorkerExecution[],
+  outputs: WorkerOutput[],
+  businessEvents: BusinessEvent[],
+  metrics: MetricRecord[],
+  opts?: { workerId?: string; limit?: number },
+): ResultCardData[] {
+  const filtered = outputs.filter((o) => o.status === "completed" && (!opts?.workerId || o.workerId === opts.workerId))
+  const sorted = [...filtered].sort((a, b) => b.createdAt - a.createdAt).slice(0, opts?.limit ?? 6)
+
+  const out: ResultCardData[] = []
+  for (const o of sorted) {
+    const worker = workers.find((w) => w.id === o.workerId)
+    if (!worker) continue
+    const execution = executions.find((e) => e.id === o.executionId)
+    out.push({
+      output: o,
+      worker,
+      task: tasks.find((t) => t.id === o.taskId),
+      execution,
+      businessEvent: businessEvents.find((be) => be.outputId === o.id),
+      metrics: metrics.filter((m) => m.executionId === o.executionId),
+      isDemo: execution?.executionMode === "development",
+    })
+  }
+  return out
 }

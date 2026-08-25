@@ -89,6 +89,16 @@ export interface ProductTemplate {
    * directly on the product's page, never silently assumed. */
   realCapabilities: string[]
   notYetConnected: string[]
+  /** Which lib/workforce/business-events.ts DOMAIN_METRIC_TAXONOMY key
+   * this Super Agent's Business Impact numbers are drawn from — e.g.
+   * "sales", "marketing", "customer_success". undefined for a
+   * coming_soon Super Agent (no taxonomy exists for it yet) — the
+   * Outputs Hub never shows a Business Impact header for a Super Agent
+   * without one. This is the one place a Super Agent is tied to a
+   * metric domain; the taxonomy itself stays a single, extensible,
+   * open record so a new domain (Finance, Operations, HR, E-commerce,
+   * Revenue/Growth...) is a catalog entry, not new UI code. */
+  metricDomain?: string
 }
 
 export const PRODUCT_CATALOG: ProductTemplate[] = [
@@ -126,6 +136,7 @@ export const PRODUCT_CATALOG: ProductTemplate[] = [
       "Every candidate scored with real, cited evidence — never a fabricated match",
     ],
     notYetConnected: ["CRM (pipeline value, meetings, deal size)", "Outbound email/calling", "Calendar (meeting booking)"],
+    metricDomain: "sales",
   },
   {
     id: "product_content_intelligence",
@@ -162,6 +173,7 @@ export const PRODUCT_CATALOG: ProductTemplate[] = [
       "Structured, source-cited opportunity output — never a fabricated trend",
     ],
     notYetConnected: ["Google Search Console", "Analytics/CMS performance data (Content Intelligence secondary skill stays honestly blocked until one is connected)", "Auto-publish to a CMS"],
+    metricDomain: "marketing",
   },
   {
     id: "product_programmatic_seo",
@@ -198,6 +210,7 @@ export const PRODUCT_CATALOG: ProductTemplate[] = [
       "Structured page plans (title, search intent, outline) — never fabricated keyword-volume numbers",
     ],
     notYetConnected: ["Google Search Console (real keyword/impression data)", "Rank tracking", "Bulk CMS publish"],
+    metricDomain: "marketing",
   },
   {
     id: "product_discover",
@@ -234,6 +247,7 @@ export const PRODUCT_CATALOG: ProductTemplate[] = [
       "A real, honest handling decision per request — answered / escalated / flagged for review — never a fabricated external action",
     ],
     notYetConnected: ["Live chat/email/voice channel connection", "CRM sync", "Actually executing an action (booking change, refund) in an external system"],
+    metricDomain: "customer_success",
   },
   {
     id: "product_marketing_growth",

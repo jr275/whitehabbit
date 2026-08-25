@@ -12,11 +12,13 @@
 import { ArrowLeft, ArrowUpRight, Check, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { DevModeTag } from "@/components/outputs/output-table"
+import { ProvenanceBadge } from "@/components/outputs/provenance-badge"
+import { ProvenanceGraph } from "@/components/outputs/provenance-graph"
 import { SKILL_CATALOG, TOOL_CATALOG } from "@/lib/workforce/catalog"
 import { deriveBusinessOutcome } from "@/lib/workforce/business-outcome"
-import type { Worker, WorkerEvent, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
+import type { BusinessEvent, MetricRecord, Worker, WorkerEvent, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
 import { EXECUTION_STATUS_META, OUTPUT_TYPE_META } from "@/lib/workforce/model"
-import { buildExecutionStages, isToday, timeOfDay } from "@/lib/workforce/selectors"
+import { buildExecutionStages, businessEventLabel, isToday, resultProvenanceState, sourceLabel, timeOfDay } from "@/lib/workforce/selectors"
 
 export type DrawerFilter = { kind: "type"; workerId: string; type: string; title: string } | { kind: "execution"; executionId: string }
 
@@ -34,6 +36,8 @@ export function OutputDrawer({
   executions,
   outputs,
   events,
+  businessEvents,
+  metrics,
   onClose,
 }: {
   filter: DrawerFilter
@@ -42,6 +46,8 @@ export function OutputDrawer({
   executions: WorkerExecution[]
   outputs: WorkerOutput[]
   events: WorkerEvent[]
+  businessEvents: BusinessEvent[]
+  metrics: MetricRecord[]
   onClose: () => void
 }) {
   const list =
@@ -102,7 +108,7 @@ export function OutputDrawer({
               {list.length === 0 && <p className="px-5 py-8 text-center text-[13px] text-muted-foreground">No outputs to show.</p>}
             </ul>
           ) : (
-            <DetailView output={activeOutput} execution={activeExecution} task={activeTask} events={events} />
+            <DetailView output={activeOutput} execution={activeExecution} task={activeTask} events={events} businessEvents={businessEvents} metrics={metrics} />
           )}
         </div>
       </div>
@@ -189,12 +195,31 @@ export function ExecutionTimeline({ stages, live = false }: { stages: ReturnType
   )
 }
 
-function DetailView({ output, execution, task, events }: { output: WorkerOutput; execution?: WorkerExecution; task?: WorkerTask; events: WorkerEvent[] }) {
+function DetailView({
+  output,
+  execution,
+  task,
+  events,
+  businessEvents,
+  metrics,
+}: {
+  output: WorkerOutput
+  execution?: WorkerExecution
+  task?: WorkerTask
+  events: WorkerEvent[]
+  businessEvents: BusinessEvent[]
+  metrics: MetricRecord[]
+}) {
   const template = task ? SKILL_CATALOG.find((s) => s.id === task.skillId) : undefined
   const toolNames = template?.requiredTools.map((id) => TOOL_CATALOG.find((t) => t.id === id)?.name ?? id).join(", ")
   const isDev = execution?.executionMode === "development"
   const stages = execution ? buildExecutionStages(execution, events, output) : []
   const outcome = deriveBusinessOutcome(output, execution)
+
+  const businessEvent = businessEvents.find((be) => be.outputId === output.id)
+  const relatedMetrics = metrics.filter((m) => m.executionId === output.executionId)
+  const businessMetrics = relatedMetrics.filter((m) => m.kind === "business")
+  const provenance = resultProvenanceState(execution)
 
   return (
     <div className="flex flex-col gap-5 px-5 py-5">
@@ -281,7 +306,58 @@ function DetailView({ output, execution, task, events }: { output: WorkerOutput;
         </div>
       )}
 
+      {/* Evidence & provenance — the real, persisted chain this exact
+       * output produced (never the ephemeral display-only outcome
+       * above): section 5/6/15. Technical ids live here, in the
+       * detail view, never in the plain-language sections above. */}
       <div>
+        <div className="mb-1.5 flex items-center gap-2">
+          <ResultLabel>Evidence &amp; provenance</ResultLabel>
+          <ProvenanceBadge state={provenance} />
+        </div>
+
+        <div id="prov-graph" className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
+          <ProvenanceGraph
+            nodes={[
+              { key: "execution", label: "Worker execution", id: execution?.id, anchorId: "prov-execution" },
+              { key: "output", label: "Worker output", id: output.id, anchorId: "prov-output" },
+              { key: "event", label: "Business event", id: businessEvent?.id, anchorId: businessEvent ? "prov-event" : undefined },
+              { key: "metric", label: "Business metric", id: businessMetrics[0]?.id, anchorId: businessMetrics[0] ? "prov-event" : undefined },
+            ]}
+          />
+
+          {businessEvent ? (
+            <div id="prov-event" className="mt-3 border-t border-border pt-3">
+              <p className="text-[12.5px] font-medium text-foreground">{businessEventLabel(businessEvent.type, businessEvent.numericValue)}</p>
+              <dl className="mt-2 flex flex-col gap-1">
+                <EvidenceRow k="Business event type" v={businessEvent.type} />
+                {businessMetrics.map((m) => (
+                  <EvidenceRow key={m.id} k="Metric" v={`${m.key} = ${m.value}${m.unit ?? ""}`} />
+                ))}
+                <EvidenceRow k="Source" v={sourceLabel(businessEvent.source, isDev)} />
+                {businessEvent.confidence != null && <EvidenceRow k="Confidence" v={`${businessEvent.confidence}%`} />}
+                <EvidenceRow k="Recorded" v={new Date(businessEvent.occurredAt).toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" })} />
+              </dl>
+
+              {Array.isArray((businessEvent.payload as { accounts?: unknown[] })?.accounts) && (
+                <EvidenceList items={(businessEvent.payload as { accounts: { company: string; score: number; evidence: string }[] }).accounts} render={(a) => `${a.company} — score ${a.score}: ${a.evidence}`} />
+              )}
+              {Array.isArray((businessEvent.payload as { trends?: unknown[] })?.trends) && (
+                <EvidenceList items={(businessEvent.payload as { trends: { name: string; why_it_matters: string }[] }).trends} render={(t) => `${t.name} — ${t.why_it_matters}`} />
+              )}
+              {Array.isArray((businessEvent.payload as { opportunities?: unknown[] })?.opportunities) && (
+                <EvidenceList items={(businessEvent.payload as { opportunities: { topic: string; title: string }[] }).opportunities} render={(o) => `${o.topic} — "${o.title}"`} />
+              )}
+            </div>
+          ) : (
+            <p className="mt-3 border-t border-border pt-3 text-[11.5px] text-muted-foreground/70">
+              This output type doesn&apos;t have a mapped Business Event yet — no business result was recorded for it.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div id="prov-output">
         <ResultLabel>Result</ResultLabel>
         <p className="whitespace-pre-line rounded-lg border border-border bg-card px-3.5 py-3 text-[13px] leading-relaxed text-foreground shadow-sm">{output.content}</p>
       </div>
@@ -336,9 +412,10 @@ function DetailView({ output, execution, task, events }: { output: WorkerOutput;
         </div>
       )}
 
-      <div>
+      <div id="prov-execution">
         <SectionLabel>Execution metadata</SectionLabel>
         <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">
+          {execution && <MetaRow k="Execution" v={execution.id} />}
           {isDev && <MetaRow k="Mode" v="Development simulation — no external LLM was called" />}
           <MetaRow k="Timestamp" v={new Date(output.createdAt).toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" })} />
           <MetaRow k="Duration" v={execution?.durationMs ? `${Math.round(execution.durationMs / 1000)}s` : "—"} />
@@ -387,6 +464,35 @@ function MetaRow({ k, v }: { k: string; v: string }) {
     <div className="flex items-center justify-between gap-3 px-3 py-2">
       <dt className="shrink-0 text-[11.5px] text-muted-foreground">{k}</dt>
       <dd className="truncate text-right text-[11.5px] text-foreground">{v}</dd>
+    </div>
+  )
+}
+
+function EvidenceRow({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-[11px]">
+      <dt className="shrink-0 text-muted-foreground">{k}</dt>
+      <dd className="truncate text-right font-mono text-foreground">{v}</dd>
+    </div>
+  )
+}
+
+/** Real evidence already stored in the BusinessEvent's payload — never
+ * hidden chain-of-thought, only the observable evidence a skill's
+ * structured output actually produced (section 5). */
+function EvidenceList<T>({ items, render }: { items: T[]; render: (item: T) => string }) {
+  if (items.length === 0) return null
+  return (
+    <div className="mt-3 border-t border-border pt-2.5">
+      <p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Evidence</p>
+      <ul className="mt-1.5 flex flex-col gap-1">
+        {items.map((item, i) => (
+          <li key={i} className="flex gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
+            <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground/50" />
+            {render(item)}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
