@@ -13,7 +13,7 @@
  * UI reflects, never replaces.
  * ------------------------------------------------------------------ */
 
-import { CheckCircle2, Circle, Loader2, Plug } from "lucide-react"
+import { CheckCircle2, Circle, ChevronDown, Loader2, Plug, Radio } from "lucide-react"
 import { useSession } from "next-auth/react"
 import Link from "next/link"
 import { useEffect, useState } from "react"
@@ -26,13 +26,33 @@ interface ConnectorCapability {
   permission: string
 }
 
+interface ConnectorAction {
+  id: string
+  label: string
+  description: string
+  permission: string
+  riskLevel: string
+}
+
+interface ConnectorTrigger {
+  id: string
+  type: string
+  label: string
+  description: string
+  eventName: string
+  enabled: boolean
+}
+
 interface ConnectorSummary {
   id: string
   name: string
   description: string
   provider: string
+  category: string
   authenticationType: string
   capabilities: ConnectorCapability[]
+  actions: ConnectorAction[]
+  triggers: ConnectorTrigger[]
   enabled: boolean
 }
 
@@ -59,6 +79,7 @@ export function ConnectionsPage({ runtimeMode }: { runtimeMode?: "development" |
   const [connections, setConnections] = useState<ConnectionSummary[]>([])
   const [error, setError] = useState<string | null>(null)
   const [pendingId, setPendingId] = useState<string | null>(null)
+  const [category, setCategory] = useState("All")
 
   async function refresh() {
     try {
@@ -83,6 +104,18 @@ export function ConnectionsPage({ runtimeMode }: { runtimeMode?: "development" |
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not connect.")
+    } finally {
+      setPendingId(null)
+    }
+  }
+
+  async function handleMcpSync() {
+    setPendingId("connector_mcp")
+    try {
+      await api("/api/connectors/mcp/sync", { method: "POST" })
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not sync MCP tools.")
     } finally {
       setPendingId(null)
     }
@@ -123,10 +156,37 @@ export function ConnectionsPage({ runtimeMode }: { runtimeMode?: "development" |
             {!connectors ? (
               <p className="font-mono text-[11px] uppercase tracking-[0.3em] text-muted-foreground">Loading…</p>
             ) : (
-              connectors.map((connector) => {
-                const connection = connections.find((c) => c.connectorId === connector.id)
-                return <ConnectorRow key={connector.id} connector={connector} connection={connection} pending={pendingId} onConnect={handleConnect} onDisconnect={handleDisconnect} />
-              })
+              <>
+                <div className="flex flex-wrap gap-1.5 pb-1">
+                  {["All", ...Array.from(new Set(connectors.map((c) => c.category))).sort()].map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => setCategory(c)}
+                      className={`rounded-full px-3 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors ${
+                        category === c ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+                {connectors
+                  .filter((c) => category === "All" || c.category === category)
+                  .map((connector) => {
+                    const connection = connections.find((c) => c.connectorId === connector.id)
+                    return (
+                      <ConnectorRow
+                        key={connector.id}
+                        connector={connector}
+                        connection={connection}
+                        pending={pendingId}
+                        onConnect={handleConnect}
+                        onDisconnect={handleDisconnect}
+                        onMcpSync={connector.id === "connector_mcp" ? handleMcpSync : undefined}
+                      />
+                    )
+                  })}
+              </>
             )}
           </div>
         )}
@@ -141,15 +201,19 @@ function ConnectorRow({
   pending,
   onConnect,
   onDisconnect,
+  onMcpSync,
 }: {
   connector: ConnectorSummary
   connection: ConnectionSummary | undefined
   pending: string | null
   onConnect: (connectorId: string) => void
   onDisconnect: (connectionId: string) => void
+  onMcpSync?: () => void
 }) {
   const connected = connection?.status === "connected"
   const isPending = pending === connector.id || (connection && pending === connection.id)
+  const [expanded, setExpanded] = useState(false)
+  const hasDetail = connector.actions.length > 0 || connector.triggers.length > 0
 
   return (
     <div className="rounded-xl border border-border bg-card p-5">
@@ -185,8 +249,17 @@ function ConnectorRow({
           </div>
         </div>
 
-        <div className="shrink-0">
-          {!connector.enabled ? (
+        <div className="flex shrink-0 items-center gap-2">
+          {onMcpSync ? (
+            <button
+              onClick={onMcpSync}
+              disabled={!!isPending}
+              className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-[12px] font-medium text-primary-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              <Radio className="h-3.5 w-3.5" /> Sync tools
+            </button>
+          ) : !connector.enabled ? (
             <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">Authentication coming in a later phase</span>
           ) : connected && connection ? (
             <button
@@ -209,6 +282,43 @@ function ConnectorRow({
           )}
         </div>
       </div>
+
+      {hasDetail && (
+        <div className="mt-3 border-t border-border pt-3">
+          <button onClick={() => setExpanded((e) => !e)} className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground">
+            <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? "rotate-180" : ""}`} />
+            {connector.actions.length} action{connector.actions.length === 1 ? "" : "s"} · {connector.triggers.length} trigger{connector.triggers.length === 1 ? "" : "s"}
+          </button>
+          {expanded && (
+            <div className="mt-2 flex flex-col gap-2">
+              {connector.actions.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  {connector.actions.map((a) => (
+                    <div key={a.id} className="rounded-md border border-border bg-secondary/30 px-2.5 py-1.5">
+                      <p className="font-mono text-[11px] font-medium text-foreground">
+                        {a.label} <span className="text-muted-foreground">— {a.permission} · {a.riskLevel} risk</span>
+                      </p>
+                      <p className="mt-0.5 text-[10.5px] text-muted-foreground">{a.description}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {connector.triggers.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  {connector.triggers.map((t) => (
+                    <div key={t.id} className="rounded-md border border-dashed border-border px-2.5 py-1.5">
+                      <p className="font-mono text-[11px] font-medium text-foreground">
+                        {t.label} <span className="text-muted-foreground">— {t.type} · {t.eventName}</span>
+                      </p>
+                      <p className="mt-0.5 text-[10.5px] text-muted-foreground">{t.description}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

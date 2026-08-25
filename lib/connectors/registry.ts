@@ -7,8 +7,23 @@
  * ================================================================== */
 
 import type { Connection, ConnectorCapability, ConnectorDefinition } from "./types"
+import { buildMcpConnector } from "./mcp-connector"
+import { salesforceConnector } from "./providers/salesforce"
+import { slackConnector } from "./providers/slack"
 import { testConnector } from "./test-connector"
 import type { ToolDefinition } from "@/lib/agent/types"
+
+/** The one MCP server this deployment knows about, if any. Real: reads
+ * real env vars, registers a real (if unconfigured) Connector either
+ * way — see lib/connectors/mcp-connector.ts. Setting MCP_SERVER_URL
+ * is a same-shaped change to a .env file; nothing here needs editing
+ * to point WhiteHabbit at a different MCP server. */
+const mcpConnector = buildMcpConnector({
+  id: "connector_mcp",
+  name: process.env.MCP_SERVER_NAME || "MCP Server",
+  endpointUrl: process.env.MCP_SERVER_URL || undefined,
+  authHeaderEnvVar: process.env.MCP_SERVER_URL ? "MCP_SERVER_AUTH_TOKEN" : undefined,
+})
 
 /** Real, functional entries first; disabled placeholders after — kept
  * in the SAME registry (not a separate list) so the UI has one real
@@ -28,6 +43,7 @@ const PLACEHOLDER_CONNECTORS: ConnectorDefinition[] = [
     name: "Google",
     description: "Gmail, Google Sheets, Drive, Calendar. Not yet implemented — architecture only.",
     provider: "google",
+    category: "productivity",
     authenticationType: "oauth2",
     capabilities: [],
     enabled: false,
@@ -38,24 +54,114 @@ const PLACEHOLDER_CONNECTORS: ConnectorDefinition[] = [
     name: "Meta",
     description: "Instagram and other Meta platform capabilities. Not yet implemented — architecture only.",
     provider: "meta",
+    category: "advertising",
     authenticationType: "oauth2",
     capabilities: [],
     enabled: false,
     buildTools: () => [],
   },
   {
-    id: "connector_slack",
-    name: "Slack",
-    description: "Slack workspace integration. Not yet implemented — architecture only.",
-    provider: "slack",
+    id: "connector_microsoft365",
+    name: "Microsoft 365",
+    description: "Outlook, Teams, SharePoint. Not yet implemented — architecture only.",
+    provider: "microsoft",
+    category: "productivity",
     authenticationType: "oauth2",
+    capabilities: [],
+    enabled: false,
+    buildTools: () => [],
+  },
+  {
+    id: "connector_hubspot",
+    name: "HubSpot",
+    description: "CRM, marketing and sales pipeline. Not yet implemented — architecture only.",
+    provider: "hubspot",
+    category: "crm",
+    authenticationType: "oauth2",
+    capabilities: [],
+    enabled: false,
+    buildTools: () => [],
+  },
+  {
+    id: "connector_notion",
+    name: "Notion",
+    description: "Pages, databases, docs. Not yet implemented — architecture only.",
+    provider: "notion",
+    category: "productivity",
+    authenticationType: "oauth2",
+    capabilities: [],
+    enabled: false,
+    buildTools: () => [],
+  },
+  {
+    id: "connector_asana",
+    name: "Asana",
+    description: "Tasks and project tracking. Not yet implemented — architecture only.",
+    provider: "asana",
+    category: "productivity",
+    authenticationType: "oauth2",
+    capabilities: [],
+    enabled: false,
+    buildTools: () => [],
+  },
+  {
+    id: "connector_jira",
+    name: "Jira",
+    description: "Issues and project tracking. Not yet implemented — architecture only.",
+    provider: "atlassian",
+    category: "productivity",
+    authenticationType: "oauth2",
+    capabilities: [],
+    enabled: false,
+    buildTools: () => [],
+  },
+  {
+    id: "connector_google_ads",
+    name: "Google Ads",
+    description: "Campaign management and performance. Not yet implemented — architecture only.",
+    provider: "google",
+    category: "advertising",
+    authenticationType: "oauth2",
+    capabilities: [],
+    enabled: false,
+    buildTools: () => [],
+  },
+  {
+    id: "connector_meta_ads",
+    name: "Meta Ads",
+    description: "Campaign management and performance. Not yet implemented — architecture only.",
+    provider: "meta",
+    category: "advertising",
+    authenticationType: "oauth2",
+    capabilities: [],
+    enabled: false,
+    buildTools: () => [],
+  },
+  {
+    id: "connector_google_analytics",
+    name: "Google Analytics",
+    description: "Real site/app performance data. Not yet implemented — architecture only.",
+    provider: "google",
+    category: "analytics",
+    authenticationType: "oauth2",
+    capabilities: [],
+    enabled: false,
+    buildTools: () => [],
+  },
+  {
+    id: "connector_stripe",
+    name: "Stripe",
+    description: "Payments, subscriptions, revenue. Not yet implemented — architecture only.",
+    provider: "stripe",
+    category: "finance",
+    authenticationType: "api_key",
     capabilities: [],
     enabled: false,
     buildTools: () => [],
   },
 ]
 
-export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [testConnector, ...PLACEHOLDER_CONNECTORS]
+export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [testConnector, slackConnector, salesforceConnector, mcpConnector, ...PLACEHOLDER_CONNECTORS]
 
 export function registerConnector(connector: ConnectorDefinition): void {
   if (CONNECTOR_REGISTRY.some((c) => c.id === connector.id)) {

@@ -19,8 +19,11 @@ export async function GET() {
       name: c.name,
       description: c.description,
       provider: c.provider,
+      category: c.category ?? "other",
       authenticationType: c.authenticationType,
       capabilities: c.capabilities,
+      actions: c.actions ?? [],
+      triggers: c.triggers ?? [],
       enabled: c.enabled,
     }))
     return NextResponse.json({ connectors })

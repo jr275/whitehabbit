@@ -21,7 +21,7 @@ import "server-only"
 import { randomUUID } from "node:crypto"
 import { llmCostUsd } from "@/lib/agent/cost"
 import { getSkill } from "@/lib/agent/skills/registry"
-import { toolsMap } from "@/lib/agent/tools/registry"
+import { toolsMapForOrg } from "@/lib/agent/tools/connector-tools"
 import type { ExecutionReasonCode, RuntimeEventType, SkillExecutionResult, WorkerContext } from "@/lib/agent/types"
 import { ApprovalRequiredError, InvalidCredentialError, ProviderError, SkillBlockedError } from "@/lib/agent/types"
 import * as repo from "@/lib/db/repo"
@@ -152,12 +152,21 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         behaviors: run.worker.behaviors.map((b) => ({ condition: b.condition, action: b.action })),
         knowledge: run.worker.knowledge.map((k) => ({ id: k.id, name: k.name, type: k.type, content: k.content })),
       }
+      // The Integration Runtime merge point (lib/agent/tools/connector-
+      // tools.ts) — a real, CONNECTED Connector's real ToolDefinitions,
+      // merged alongside the native tools every skill already had
+      // access to. This is the one place a Connector Tool actually
+      // becomes reachable by a real execution; skill.execute() below
+      // never knows or cares whether a tool it calls is native or came
+      // from a Connector — it only ever sees ToolDefinition, exactly
+      // the "Agent Runtime must never know a provider by name" contract.
+      const tools = await toolsMapForOrg(run.orgId)
       const result: SkillExecutionResult = await skill.execute({
         workerId: run.worker.id,
         executionId: execution.id,
         taskId: task.id,
         input: run.input,
-        tools: toolsMap(),
+        tools,
         worker: workerContext,
         emit,
       })

@@ -18,12 +18,15 @@ import "server-only"
 
 import { NextResponse } from "next/server"
 import { withApiHandler } from "@/lib/api-error"
+import { listConnections } from "@/lib/db/repo"
 import { query } from "@/lib/db/client"
 import { requireSession } from "@/lib/session"
 import { getTool } from "@/lib/agent/tools/registry"
 import { allLlmProviders } from "@/lib/agent/tools/llm"
 import { isDevModeAllowed } from "@/lib/runtime-mode"
 import { PRODUCTION_PROVIDERS } from "@/lib/marketing/model"
+import { listConnectors } from "@/lib/connectors/registry"
+import type { IntegrationHealthState } from "@/lib/connectors/types"
 
 export type HealthState = "connected" | "not_configured" | "error"
 
@@ -35,9 +38,17 @@ export interface ProviderHealth {
   detail?: string
 }
 
+export interface IntegrationHealth {
+  id: string
+  name: string
+  category: string
+  state: IntegrationHealthState
+  detail?: string
+}
+
 export async function GET() {
   return withApiHandler("system.health", async () => {
-    await requireSession()
+    const { organizationId } = await requireSession()
 
     const providers: ProviderHealth[] = []
 
@@ -69,6 +80,25 @@ export async function GET() {
     }
     providers.push({ id: "database", name: "Database", category: "database", state: dbState, detail: dbDetail })
 
-    return NextResponse.json({ providers })
+    // Real, per-organization Integration health (section "PHASE 12 —
+    // INTEGRATION HEALTH") — a Connector's own real healthCheck() when
+    // it has one (a real live probe against that provider); otherwise
+    // derived from the real, org-scoped Connection row alone. Never a
+    // hardcoded HEALTHY — a connector with no Connection at all is
+    // reported not_configured, not omitted.
+    const connections = await listConnections(organizationId)
+    const integrations: IntegrationHealth[] = []
+    for (const connector of listConnectors()) {
+      const connection = connections.find((c) => c.connectorId === connector.id)
+      if (connector.healthCheck && connection) {
+        const result = await connector.healthCheck(connection)
+        integrations.push({ id: connector.id, name: connector.name, category: connector.category ?? "other", state: result.state, detail: result.detail })
+      } else {
+        const state: IntegrationHealthState = connection?.status === "connected" ? "healthy" : "not_configured"
+        integrations.push({ id: connector.id, name: connector.name, category: connector.category ?? "other", state, detail: connection ? undefined : `${connector.name} is not connected.` })
+      }
+    }
+
+    return NextResponse.json({ providers, integrations })
   })
 }
