@@ -239,9 +239,23 @@ export interface CustomConnectorMcpConfig {
 export interface CustomConnector {
   id: string
   organizationId: string
+  /** Stable, URL-safe identifier derived from `name` at creation time
+   * (lib/connectors/slug.ts) — distinct from `id` (an opaque
+   * cconn_<uuid>), unique per organization
+   * (idx_custom_connectors_org_slug). Never regenerated on rename: a
+   * slug is a stable reference once created, matching how a static
+   * ConnectorDefinition.id never changes either. */
+  slug: string
   kind: CustomConnectorKind
   name: string
   description?: string
+  /** Matches ConnectorDefinition.category (registry.ts) — purely
+   * informational grouping for the Connector Hub UI, never used to
+   * change execution behavior. */
+  category?: string
+  /** A single emoji or short icon token, same convention static
+   * connectors use for their card in the Hub. */
+  icon?: string
   config: CustomConnectorRestConfig | CustomConnectorMcpConfig
   /** Real, cached discovery/import result — MCP tool descriptors, or
    * ConnectorAction entries generated from an OpenAPI import

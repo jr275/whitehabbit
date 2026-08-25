@@ -202,4 +202,63 @@ describe.skipIf(!hasDb)("Category A — dynamic connectors (Custom REST Connecto
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/private|internal/i)
   })
+
+  /* ================================================================ *
+   * Fase D1 — contract normalization: slug/category/icon are real,
+   * persisted fields, and updateCustomConnector() lets the definition
+   * (name/description/category/icon/config) change after creation
+   * without ever touching status/discoveredTools (a different repo
+   * function's job) or the credential (a third, separate function).
+   * ================================================================ */
+
+  it("a new custom connector gets a real, stable, URL-safe slug derived from its name", async () => {
+    const { createOrganization, createCustomConnector } = await import("@/lib/db/repo")
+    const org = await createOrganization(`Slug ${randomUUID()}`)
+    const row = await createCustomConnector({ orgId: org.id, kind: "rest", name: "Acme CRM — Café Ünïcode!", config: { baseUrl, authType: "none" } })
+    expect(row.slug).toBe("acme-crm-cafe-unicode")
+  })
+
+  it("two different names that slugify to the same value get distinct slugs, never a collision (the pre-existing org+name unique constraint means only DIFFERENT names can reach the slug collision path at all)", async () => {
+    const { createOrganization, createCustomConnector } = await import("@/lib/db/repo")
+    const org = await createOrganization(`Slug Collision ${randomUUID()}`)
+    const first = await createCustomConnector({ orgId: org.id, kind: "rest", name: "Duplicate Name!", config: { baseUrl, authType: "none" } })
+    const second = await createCustomConnector({ orgId: org.id, kind: "rest", name: "Duplicate Name?", config: { baseUrl, authType: "none" } })
+    expect(first.slug).toBe("duplicate-name")
+    expect(second.slug).not.toBe(first.slug)
+    expect(second.slug.startsWith("duplicate-name-")).toBe(true)
+  })
+
+  it("category and icon round-trip through creation exactly as given", async () => {
+    const { createOrganization, createCustomConnector } = await import("@/lib/db/repo")
+    const org = await createOrganization(`Category Icon ${randomUUID()}`)
+    const row = await createCustomConnector({ orgId: org.id, kind: "rest", name: "Categorized API", category: "CRM", icon: "🧩", config: { baseUrl, authType: "none" } })
+    expect(row.category).toBe("CRM")
+    expect(row.icon).toBe("🧩")
+  })
+
+  it("updateCustomConnector changes name/description/category/icon/config without touching status or discoveredTools, and never crosses org boundaries", async () => {
+    const { createOrganization, createCustomConnector, updateCustomConnector, updateCustomConnectorDiscovery, getCustomConnector } = await import("@/lib/db/repo")
+    const orgA = await createOrganization(`Update A ${randomUUID()}`)
+    const orgB = await createOrganization(`Update B ${randomUUID()}`)
+    const row = await createCustomConnector({ orgId: orgA.id, kind: "rest", name: "Original Name", description: "original desc", config: { baseUrl, authType: "none" } })
+    await updateCustomConnectorDiscovery(row.id, orgA.id, { status: "connected" })
+    const originalSlug = row.slug
+
+    const updated = await updateCustomConnector(row.id, orgA.id, { name: "Renamed", description: "new desc", category: "CRM", icon: "🔧", config: { baseUrl, authType: "bearer_token" } })
+    expect(updated?.name).toBe("Renamed")
+    expect(updated?.description).toBe("new desc")
+    expect(updated?.category).toBe("CRM")
+    expect(updated?.icon).toBe("🔧")
+    expect((updated?.config as { authType: string }).authType).toBe("bearer_token")
+    // Renaming never regenerates the slug — it's a stable reference.
+    expect(updated?.slug).toBe(originalSlug)
+    // status/discoveredTools are a different function's job — untouched.
+    expect(updated?.status).toBe("connected")
+
+    // Cross-org: org B can never update org A's connector.
+    const blocked = await updateCustomConnector(row.id, orgB.id, { name: "Hijacked" })
+    expect(blocked).toBeNull()
+    const stillOwnedByA = await getCustomConnector(row.id, orgA.id)
+    expect(stillOwnedByA?.name).toBe("Renamed")
+  })
 })

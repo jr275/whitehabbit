@@ -12,6 +12,7 @@ import "server-only"
 
 import { randomUUID } from "node:crypto"
 import { decryptSecret, encryptSecret } from "@/lib/crypto/secret-box"
+import { slugify } from "@/lib/connectors/slug"
 import { query, queryOne, withTransaction } from "./client"
 import type { Connection, ConnectorAction, CustomConnector, CustomConnectorCredential } from "@/lib/connectors/types"
 import type {
@@ -1270,9 +1271,12 @@ export async function recordConnectionHealth(connectionId: string, orgId: string
 interface CustomConnectorRow {
   id: string
   org_id: string
+  slug: string
   kind: string
   name: string
   description: string | null
+  category: string | null
+  icon: string | null
   config: Record<string, unknown>
   discovered_tools: ConnectorAction[]
   status: string
@@ -1285,9 +1289,12 @@ function rowToCustomConnector(r: CustomConnectorRow): CustomConnector {
   return {
     id: r.id,
     organizationId: r.org_id,
+    slug: r.slug,
     kind: r.kind as CustomConnector["kind"],
     name: r.name,
     description: r.description ?? undefined,
+    category: r.category ?? undefined,
+    icon: r.icon ?? undefined,
     config: r.config as unknown as CustomConnector["config"],
     discoveredTools: r.discovered_tools ?? [],
     status: r.status as CustomConnector["status"],
@@ -1309,15 +1316,35 @@ export async function getCustomConnector(id: string, orgId: string): Promise<Cus
   return row ? rowToCustomConnector(row) : null
 }
 
-export async function createCustomConnector(input: { orgId: string; userId?: string; kind: CustomConnector["kind"]; name: string; description?: string; config: CustomConnector["config"] }): Promise<CustomConnector> {
+/** A Postgres unique-violation error carries code '23505' — narrowed
+ * this way (rather than a library-specific error class) because the
+ * `pg` driver throws a plain object with that shape, not a subclass. */
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === "object" && err !== null && "code" in err && (err as { code?: string }).code === "23505"
+}
+
+export async function createCustomConnector(input: { orgId: string; userId?: string; kind: CustomConnector["kind"]; name: string; description?: string; category?: string; icon?: string; config: CustomConnector["config"] }): Promise<CustomConnector> {
   const id = `cconn_${randomUUID()}`
   const now = Date.now()
-  await query(
-    `INSERT INTO custom_connectors (id, org_id, kind, name, description, config, created_at, updated_at, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8)`,
-    [id, input.orgId, input.kind, input.name, input.description ?? null, JSON.stringify(input.config), now, input.userId ?? null],
-  )
-  return (await getCustomConnector(id, input.orgId))!
+  const baseSlug = slugify(input.name)
+  // idx_custom_connectors_org_slug enforces uniqueness per org — on a
+  // real collision (two connectors this org named the same thing),
+  // retry with a short random suffix rather than pre-checking for
+  // existence first (check-then-insert would itself race).
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const slug = attempt === 0 ? baseSlug : `${baseSlug}-${randomUUID().slice(0, 6)}`
+    try {
+      await query(
+        `INSERT INTO custom_connectors (id, org_id, slug, kind, name, description, category, icon, config, created_at, updated_at, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11)`,
+        [id, input.orgId, slug, input.kind, input.name, input.description ?? null, input.category ?? null, input.icon ?? null, JSON.stringify(input.config), now, input.userId ?? null],
+      )
+      return (await getCustomConnector(id, input.orgId))!
+    } catch (err) {
+      if (!isUniqueViolation(err) || attempt === 4) throw err
+    }
+  }
+  throw new Error("createCustomConnector: could not generate a unique slug.")
 }
 
 /** Real discovery/import result — replaces the cached tool list
@@ -1330,6 +1357,46 @@ export async function updateCustomConnectorDiscovery(id: string, orgId: string, 
   await query(
     `UPDATE custom_connectors SET status = $1, error_reason = $2, discovered_tools = COALESCE($3, discovered_tools), updated_at = $4 WHERE id = $5 AND org_id = $6`,
     [patch.status, patch.errorReason ?? null, patch.discoveredTools ? JSON.stringify(patch.discoveredTools) : null, now, id, orgId],
+  )
+  return getCustomConnector(id, orgId)
+}
+
+/** Updates the connector's own definition fields — name, description,
+ * category, icon, config (e.g. a corrected baseUrl). Never touches
+ * status/discoveredTools (updateCustomConnectorDiscovery's job) or the
+ * credential (setCustomConnectorCredential's job) — three different
+ * security surfaces kept in three different functions, matching the
+ * Connector/Connection/Credential separation the audit called for
+ * (only `name` intentionally excluded from slug regeneration: a slug
+ * is a stable reference once created, never silently changed by a
+ * rename). Org-scoped: returns null (never another org's row) if the
+ * connector doesn't belong to orgId. */
+export async function updateCustomConnector(id: string, orgId: string, patch: { name?: string; description?: string | null; category?: string | null; icon?: string | null; config?: CustomConnector["config"] }): Promise<CustomConnector | null> {
+  const existing = await getCustomConnector(id, orgId)
+  if (!existing) return null
+  const now = Date.now()
+  await query(
+    `UPDATE custom_connectors
+     SET name = COALESCE($1, name),
+         description = CASE WHEN $2::boolean THEN $3 ELSE description END,
+         category = CASE WHEN $4::boolean THEN $5 ELSE category END,
+         icon = CASE WHEN $6::boolean THEN $7 ELSE icon END,
+         config = COALESCE($8, config),
+         updated_at = $9
+     WHERE id = $10 AND org_id = $11`,
+    [
+      patch.name ?? null,
+      "description" in patch,
+      patch.description ?? null,
+      "category" in patch,
+      patch.category ?? null,
+      "icon" in patch,
+      patch.icon ?? null,
+      patch.config ? JSON.stringify(patch.config) : null,
+      now,
+      id,
+      orgId,
+    ],
   )
   return getCustomConnector(id, orgId)
 }
