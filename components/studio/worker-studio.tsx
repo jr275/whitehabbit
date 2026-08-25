@@ -11,7 +11,7 @@ import { WorkerAvatar } from "@/components/workforce/worker-avatar"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 import { agentHealth } from "@/lib/workforce/agent-identity"
 
-const STEP_KEYS: StepKey[] = ["identity", "mission", "knowledge", "skills", "tools", "behavior", "channels", "output"]
+const STEP_KEYS: StepKey[] = ["identity", "mission", "skills", "knowledge", "tools", "memory", "behavior", "channels", "output", "evolution"]
 
 const EXAMPLES = [
   "Research high-intent enterprise accounts and brief my sales team",
@@ -92,7 +92,7 @@ function MagicStart({ creating, notice, compact = false, onComplete }: { creatin
         <section>
           <div className="mb-8 flex items-center gap-2"><span className="size-2 rounded-full bg-primary shadow-[0_0_14px_hsl(var(--primary))]" /><span className="font-mono text-[10px] uppercase tracking-[0.28em] text-primary">Objective → Worker</span></div>
           <h1 className="max-w-3xl text-balance text-4xl font-semibold tracking-[-0.045em] text-foreground sm:text-6xl">What outcome should your workforce own?</h1>
-          <p className="mt-5 max-w-2xl text-pretty text-base leading-relaxed text-muted-foreground">Describe the business result. WhiteHabbit will assemble a persistent worker with the right mission, capabilities, tools, and measurable output.</p>
+          <p className="mt-5 max-w-2xl text-pretty text-base leading-relaxed text-muted-foreground">Describe the business result. Menlo Whitehabbit will assemble a persistent worker with the right mission, capabilities, tools, and measurable output.</p>
           <div className="mt-8 overflow-hidden rounded-2xl border border-border bg-card shadow-2xl shadow-background">
             <label htmlFor="worker-objective" className="sr-only">Worker objective</label>
             <textarea id="worker-objective" value={objective} onChange={(event) => setObjective(event.target.value)} maxLength={500} placeholder="Example: Research enterprise accounts showing buying intent and give my sales team a ranked, evidence-backed brief every morning." className="min-h-40 w-full resize-none bg-transparent px-5 py-5 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60" />

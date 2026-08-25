@@ -3,7 +3,7 @@ import { LiveObservatory } from "@/components/observatory/live-observatory"
 import { getRuntimeMode } from "@/lib/runtime-mode"
 
 export const metadata: Metadata = {
-  title: "Observatory | WhiteHabbit",
+  title: "Observatory | Menlo Whitehabbit",
   description: "Observe live AI workforce executions, costs, health, and guardrail events.",
 }
 

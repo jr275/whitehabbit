@@ -40,7 +40,7 @@ function LoginForm() {
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary">
             <Circle className="h-3.5 w-3.5 fill-primary-foreground text-primary-foreground" />
           </span>
-          <span className="font-mono text-[15px] font-semibold tracking-tight text-foreground">WhiteHabbit</span>
+          <span className="font-mono text-[15px] font-semibold tracking-tight text-foreground">Menlo Whitehabbit</span>
         </div>
         <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
           <h1 className="text-[17px] font-semibold text-foreground">Sign in</h1>

@@ -2,7 +2,7 @@ import { MarketingCommandCenter } from "@/components/insights/marketing-command-
 import { TopNav } from "@/components/studio/top-nav"
 
 export const metadata = {
-  title: "Agent Smith Marketing Command Center — WhiteHabbit",
+  title: "Agent Smith Marketing Command Center — Menlo Whitehabbit",
   description: "Inspect market signals, autonomous worker reasoning, creative output, live execution, and measurable marketing impact.",
 }
 

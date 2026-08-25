@@ -20,17 +20,19 @@ import { OUTCOME_PRESETS, SKILL_CATEGORIES, SKILL_CATEGORY_LABEL, TOOL_BOUNDARY_
 import { computeReadiness } from "@/lib/workforce/selectors"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
-export type StepKey = "identity" | "mission" | "knowledge" | "skills" | "tools" | "behavior" | "channels" | "output"
+export type StepKey = "identity" | "mission" | "skills" | "knowledge" | "tools" | "memory" | "behavior" | "channels" | "output" | "evolution"
 
 const STEPS: { key: StepKey; number: string; label: string }[] = [
   { key: "identity", number: "01", label: "Identity" },
   { key: "mission", number: "02", label: "Mission" },
-  { key: "knowledge", number: "03", label: "Knowledge" },
-  { key: "skills", number: "04", label: "Skills" },
+  { key: "skills", number: "03", label: "Skills" },
+  { key: "knowledge", number: "04", label: "Knowledge" },
   { key: "tools", number: "05", label: "Tools" },
-  { key: "behavior", number: "06", label: "Behavior" },
-  { key: "channels", number: "07", label: "Permissions" },
-  { key: "output", number: "08", label: "Output" },
+  { key: "memory", number: "06", label: "Memory" },
+  { key: "behavior", number: "07", label: "Autonomy" },
+  { key: "channels", number: "08", label: "Access" },
+  { key: "output", number: "09", label: "Performance" },
+  { key: "evolution", number: "10", label: "Evolution" },
 ]
 
 function stepSummary(worker: Worker, key: StepKey): string {
@@ -45,12 +47,16 @@ function stepSummary(worker: Worker, key: StepKey): string {
       return `${worker.skills.filter((s) => s.enabled).length} configured`
     case "tools":
       return `${worker.tools.filter((t) => t.connected).length} available`
+    case "memory":
+      return "Learns from recorded outcomes"
     case "behavior":
       return `${worker.behaviors.length} rule${worker.behaviors.length === 1 ? "" : "s"}`
     case "channels":
       return `${worker.channels.filter((c) => c.connected).length} channels · ${worker.autonomy}`
     case "output":
       return worker.releasedVersionId ? "Verified · Live" : worker.tested ? "Verified · Ready to release" : "Needs verification"
+    case "evolution":
+      return worker.releasedVersionId ? "Learning from released work" : "Begins after first release"
   }
 }
 
@@ -138,6 +144,8 @@ function StepEditor({ step, worker, onAdvance }: { step: StepKey; worker: Worker
       return <SkillsStep worker={worker} onAdvance={onAdvance} />
     case "tools":
       return <ToolsStep worker={worker} onAdvance={onAdvance} />
+    case "memory":
+      return <MemoryStep worker={worker} onAdvance={onAdvance} />
     case "behavior":
       return <BehaviorStep worker={worker} onAdvance={onAdvance} />
     case "channels":
@@ -151,7 +159,22 @@ function StepEditor({ step, worker, onAdvance }: { step: StepKey; worker: Worker
           </div>
         </div>
       )
+    case "evolution":
+      return <EvolutionStep worker={worker} />
   }
+}
+
+function MemoryStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => void }) {
+  const state = useWorkforce()
+  const memories = state.events.filter((event) => event.workerId === worker.id && ["output_created", "metric_recorded", "reasoning_completed", "task_completed"].includes(event.type)).sort((a, b) => b.timestamp - a.timestamp).slice(0, 4)
+  return <div className="flex flex-col gap-3"><p className="text-[11.5px] leading-relaxed text-muted-foreground">Memory is formed from real executions, evaluated outcomes, and recorded performance. It is read-only until memory mutation contracts are available.</p>{memories.length ? <div className="flex flex-col gap-2">{memories.map((event) => <div key={event.id} className="rounded-lg border border-border bg-card p-2.5"><p className="text-[11.5px] font-medium text-foreground">{event.type.replaceAll("_", " ")}</p><p className="mt-1 font-mono text-[8px] text-muted-foreground">{new Date(event.timestamp).toLocaleString()} · execution {event.executionId?.slice(0, 8) ?? "ledger"}</p></div>)}</div> : <p className="rounded-lg border border-dashed border-border p-3 text-[11px] leading-relaxed text-muted-foreground">No learned signals yet. Run this Worker and evaluate its outcomes to begin forming memory.</p>}<Continue onClick={onAdvance}/></div>
+}
+
+function EvolutionStep({ worker }: { worker: Worker }) {
+  const state = useWorkforce()
+  const runs = state.executions.filter((execution) => execution.workerId === worker.id)
+  const completed = runs.filter((execution) => execution.status === "completed").length
+  return <div className="flex flex-col gap-3"><p className="text-[11.5px] leading-relaxed text-muted-foreground">Evolution is grounded in released configuration and observed performance. Menlo Whitehabbit will never claim improvement without recorded evidence.</p>{worker.releasedVersionId ? <div className="rounded-lg border border-border bg-card p-3"><div className="flex items-center justify-between"><span className="font-mono text-[9px] uppercase text-primary">Released version</span><span className="font-mono text-[8px] uppercase text-grow">Live</span></div><p className="mt-2 text-[11px] text-muted-foreground">{worker.skills.filter((skill) => skill.enabled).length} skills · {worker.knowledge.length} knowledge sources · {worker.autonomy} autonomy</p><p className="mt-2 font-mono text-[8px] text-muted-foreground">{worker.releasedVersionId.slice(0, 12)}</p></div> : <p className="rounded-lg border border-dashed border-border p-3 text-[11px] text-muted-foreground">Build the first Worker version to establish an evolution baseline.</p>}<p className="font-mono text-[8px] uppercase tracking-[0.14em] text-muted-foreground">{runs.length} persisted execution{runs.length === 1 ? "" : "s"} · {completed} completed</p></div>
 }
 
 function Continue({ onClick, label = "Continue" }: { onClick: () => void; label?: string }) {
