@@ -8,7 +8,9 @@
 
 import "server-only"
 
-import type { Connection, ConnectorCapability, ConnectorDefinition } from "./types"
+import type { Connection, ConnectorAction, ConnectorCapability, ConnectorDefinition, ConnectorTrigger, CustomConnector, CustomConnectorRestConfig, CustomConnectorStatus } from "./types"
+import { customConnectorConnectorId } from "./custom-connector-id"
+import { listDynamicConnectorSummaries } from "./dynamic"
 import { buildMcpConnector } from "./mcp-connector"
 import { googleAnalyticsConnector } from "./providers/google-analytics"
 import { salesforceConnector } from "./providers/salesforce"
@@ -174,6 +176,96 @@ export function listConnectors(): ConnectorDefinition[] {
 
 export function getConnectorCapabilities(id: string): ConnectorCapability[] {
   return getConnector(id)?.capabilities ?? []
+}
+
+/* ================================================================== *
+ * CATALOG MERGE — connector platform audit, Fase D7. GET /api/connectors
+ * (app/api/connectors/route.ts) needs ONE list combining built-in
+ * (CONNECTOR_REGISTRY, static) and custom (custom_connectors, real
+ * per-org rows) connectors, so the Connector Hub and Worker Studio's
+ * Integrations step both see the full, real catalog without either
+ * needing a second fetch or a second merge implemented differently.
+ * A built-in id never collides with a custom one: every custom
+ * connector's summary id is prefixed via customConnectorConnectorId()
+ * (lib/connectors/custom-connector-id.ts) — "custom_cconn_<uuid>" —
+ * which also makes it the exact connectorId a Connection row for that
+ * custom connector uses (see app/api/custom-connectors/[id]/test/
+ * route.ts), so Worker Studio's existing connections-driven UI
+ * (components/studio/build-panel.tsx) picks up a connected custom
+ * connector with ZERO code changes there — genuinely "discovered", not
+ * reimplemented, matching the audit's own section 13 expectation.
+ * ================================================================== */
+export interface ConnectorSummary {
+  id: string
+  name: string
+  description: string
+  provider: string
+  category: string
+  authenticationType: string
+  capabilities: ConnectorCapability[]
+  actions: ConnectorAction[]
+  triggers: ConnectorTrigger[]
+  enabled: boolean
+  /** "built-in" = a static, code-defined ConnectorDefinition; "custom"
+   * = an org-added custom_connectors row. Purely a UI badge signal —
+   * every downstream consumer (Tool Registry, tool-runner, approval
+   * gate) already treats both identically, per the audit's own
+   * confirmation that no second execution path exists. */
+  origin: "built-in" | "custom"
+  /** Only meaningful for origin "custom" — a custom connector has no
+   * separate Connection row to derive this from by default (unlike a
+   * built-in connector, whose live state always comes from its own
+   * Connection). Mirrors CustomConnector.status exactly. */
+  status?: CustomConnectorStatus
+}
+
+function builtinToSummary(c: ConnectorDefinition): ConnectorSummary {
+  return {
+    id: c.id,
+    name: c.name,
+    description: c.description,
+    provider: c.provider,
+    category: c.category ?? "other",
+    authenticationType: c.authenticationType,
+    capabilities: c.capabilities,
+    actions: c.actions ?? [],
+    triggers: c.triggers ?? [],
+    enabled: c.enabled,
+    origin: "built-in",
+  }
+}
+
+function customToSummary(row: CustomConnector): ConnectorSummary {
+  const authenticationType = row.kind === "mcp" ? "mcp" : (row.config as CustomConnectorRestConfig).authType
+  return {
+    id: customConnectorConnectorId(row.id),
+    name: row.name,
+    description: row.description ?? "",
+    provider: row.kind === "mcp" ? "mcp" : "custom-rest",
+    category: row.category ?? "custom",
+    authenticationType,
+    capabilities: [],
+    // The generic "call" action (custom-rest.ts) is deliberately
+    // excluded here — it's always delete/high (Fase D5) by design,
+    // not a friendly per-action toggle; only real, described,
+    // individually-risk-derived discovered actions are ever exposed
+    // to a per-action Worker Studio permission grid.
+    actions: row.discoveredTools,
+    triggers: [],
+    enabled: true,
+    origin: "custom",
+    status: row.status,
+  }
+}
+
+/** Real, org-scoped merge — built-in connectors are the same for
+ * every org (a fact about the deployed code); custom connectors are
+ * this org's own rows only (listDynamicConnectorSummaries is already
+ * org-scoped end to end — see lib/connectors/dynamic.ts). */
+export async function listAllConnectors(orgId: string): Promise<ConnectorSummary[]> {
+  const builtin = CONNECTOR_REGISTRY.map(builtinToSummary)
+  const custom = (await listDynamicConnectorSummaries(orgId)).map(customToSummary)
+  return [...builtin, ...custom]
 }
 
 /** Wraps one real ToolAction.run so every real connector call —

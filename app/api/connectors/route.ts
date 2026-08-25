@@ -1,15 +1,18 @@
 import "server-only"
 
-/* GET /api/connectors — the real, code-defined connector catalog.
- * Never org-scoped (a ConnectorDefinition is a fact about the deployed
- * code, same as the Skill/Tool catalogs) but still requires a real
- * session — no anonymous discovery of what's architecturally
- * available. Returns capabilities but never a credential/secret. */
+/* GET /api/connectors — the real connector catalog: built-in
+ * (code-defined, same for every org) merged with this org's own real
+ * custom connectors (connector platform audit, Fase D7 — see
+ * lib/connectors/registry.ts's listAllConnectors). Requires a real
+ * session both for the org scoping the custom half needs and because
+ * this is real information about what's architecturally available,
+ * never anonymous. Returns capabilities/actions but never a
+ * credential/secret — a CustomConnector's own type never carries one. */
 
 import { NextResponse } from "next/server"
 import { withApiHandler } from "@/lib/api-error"
 import { getOAuthProvider } from "@/lib/connectors/oauth-providers"
-import { listConnectors } from "@/lib/connectors/registry"
+import { listAllConnectors } from "@/lib/connectors/registry"
 import { requireSession } from "@/lib/session"
 
 // Real OAuth2 authorize URL per connector. Every connector registered in
@@ -28,18 +31,13 @@ function oauthAuthorizeUrlFor(connectorId: string): string | undefined {
 
 export async function GET() {
   return withApiHandler("connectors.list", async () => {
-    await requireSession()
-    const connectors = listConnectors().map((c) => ({
-      id: c.id,
-      name: c.name,
-      description: c.description,
-      provider: c.provider,
-      category: c.category ?? "other",
-      authenticationType: c.authenticationType,
-      capabilities: c.capabilities,
-      actions: c.actions ?? [],
-      triggers: c.triggers ?? [],
-      enabled: c.enabled,
+    const { organizationId } = await requireSession()
+    const connectors = (await listAllConnectors(organizationId)).map((c) => ({
+      ...c,
+      // getOAuthProvider only ever recognizes a static registry id — a
+      // custom connector's id (always "custom_cconn_<uuid>") never
+      // matches, so this is naturally undefined for origin: "custom"
+      // with no origin check needed here.
       oauthAuthorizeUrl: c.enabled ? oauthAuthorizeUrlFor(c.id) : undefined,
     }))
     return NextResponse.json({ connectors })

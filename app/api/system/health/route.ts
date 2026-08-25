@@ -18,13 +18,14 @@ import "server-only"
 
 import { NextResponse } from "next/server"
 import { withApiHandler } from "@/lib/api-error"
-import { listConnections } from "@/lib/db/repo"
+import { listConnections, listCustomConnectors } from "@/lib/db/repo"
 import { query } from "@/lib/db/client"
 import { requireSession } from "@/lib/session"
 import { getTool } from "@/lib/agent/tools/registry"
 import { allLlmProviders } from "@/lib/agent/tools/llm"
 import { isDevModeAllowed } from "@/lib/runtime-mode"
 import { PRODUCTION_PROVIDERS } from "@/lib/marketing/model"
+import { customConnectorConnectorId } from "@/lib/connectors/custom-connector-id"
 import { listConnectors } from "@/lib/connectors/registry"
 import type { IntegrationHealthState } from "@/lib/connectors/types"
 
@@ -97,6 +98,18 @@ export async function GET() {
         const state: IntegrationHealthState = connection?.status === "connected" ? "healthy" : "not_configured"
         integrations.push({ id: connector.id, name: connector.name, category: connector.category ?? "other", state, detail: connection ? undefined : `${connector.name} is not connected.` })
       }
+    }
+
+    // Custom connectors (connector platform audit, Fase D7): derived
+    // straight from the row's own real, persisted status — never a
+    // live network probe on every page render (the same "never spend
+    // a real external call just to render a health panel" discipline
+    // this route's own header comment already states for the LLM
+    // providers above; POST /api/custom-connectors/[id]/test is the
+    // only thing that actually performs a live check for these).
+    for (const row of await listCustomConnectors(organizationId)) {
+      const state: IntegrationHealthState = row.status === "connected" ? "healthy" : row.status === "error" ? "error" : "not_configured"
+      integrations.push({ id: customConnectorConnectorId(row.id), name: row.name, category: row.category ?? "custom", state, detail: row.status === "error" ? row.errorReason : undefined })
     }
 
     return NextResponse.json({ providers, integrations })

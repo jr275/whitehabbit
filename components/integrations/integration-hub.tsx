@@ -28,6 +28,11 @@ interface ConnectorSummary {
   triggers: { id: string }[]
   enabled: boolean
   oauthAuthorizeUrl?: string
+  /** "built-in" (a static, code-defined connector) or "custom" (an
+   * org-added Custom REST/MCP connector — connector platform audit,
+   * Fase D7). Absent on any older cached response shape defaults to
+   * "built-in" via the ?? below, never crashes on a missing field. */
+  origin?: "built-in" | "custom"
 }
 
 async function api<T>(path: string): Promise<T> {
@@ -199,14 +204,16 @@ export function IntegrationHub() {
 
 function ConnectorCard({ connector, health }: { connector: ConnectorSummary; health?: IntegrationHealth }) {
   const bucket = bucketFor(connector, health?.state)
-  return (
-    <Link href={`/integrations/${connector.id.replace(/^connector_/, "")}`} className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/40">
+  const isCustom = connector.origin === "custom"
+  const body = (
+    <>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-secondary">
             <Plug className="h-3.5 w-3.5 text-muted-foreground" />
           </span>
           <h3 className="text-[14px] font-semibold text-foreground">{connector.name}</h3>
+          {isCustom && <span className="rounded-full border border-border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Custom</span>}
         </div>
         {bucket === "connected" ? (
           <CheckCircle2 className="h-4 w-4 text-grow" />
@@ -223,6 +230,20 @@ function ConnectorCard({ connector, health }: { connector: ConnectorSummary; hea
         <span>{connector.actions.length} actions</span>
         {health?.detail && <span className="truncate text-warn">· {health.detail}</span>}
       </div>
+    </>
+  )
+
+  // A custom connector has no detail page yet (no self-service UI for
+  // create/credential/test — that's real API-only surface today, per
+  // POST /api/custom-connectors and its sibling routes) — a Link to
+  // /integrations/[id] would 404 or, worse, silently render the wrong
+  // thing. Never point somewhere honest UI can't back up yet.
+  if (isCustom) {
+    return <div className="flex cursor-default flex-col gap-2 rounded-xl border border-border bg-card p-4">{body}</div>
+  }
+  return (
+    <Link href={`/integrations/${connector.id.replace(/^connector_/, "")}`} className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/40">
+      {body}
     </Link>
   )
 }
