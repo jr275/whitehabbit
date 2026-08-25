@@ -360,6 +360,26 @@ export async function updateTaskStatus(id: string, status: WorkerTask["status"])
   await query("UPDATE tasks SET status = $1 WHERE id = $2", [status, id])
 }
 
+interface TaskRow {
+  id: string
+  worker_id: string
+  skill_id: string
+  category: string
+  title: string
+  status: string
+  created_at: string
+}
+
+/** Org-scoped single-task read — needed to know which real skill (and
+ * therefore which skill.retryStage()) an execution belongs to when
+ * retrying a failed pipeline stage outside the Approval flow (which
+ * already carries skillId on the Approval row itself). */
+export async function getTask(id: string, orgId: string): Promise<WorkerTask | null> {
+  const row = await queryOne<TaskRow>("SELECT * FROM tasks WHERE id = $1 AND org_id = $2", [id, orgId])
+  if (!row) return null
+  return { id: row.id, workerId: row.worker_id, skillId: row.skill_id, type: row.category as WorkerTask["type"], title: row.title, status: row.status as WorkerTask["status"], createdAt: Number(row.created_at) }
+}
+
 /* ---- executions ------------------------------------------------------ */
 export async function insertExecution(exec: WorkerExecution, orgId: string): Promise<void> {
   await query(
@@ -440,6 +460,7 @@ interface ExecutionRow {
   output_tokens: number | null
   model: string | null
   execution_mode: string | null
+  pipeline_state: unknown
 }
 
 function rowToExecution(r: ExecutionRow): WorkerExecution {
@@ -459,6 +480,7 @@ function rowToExecution(r: ExecutionRow): WorkerExecution {
     outputTokens: r.output_tokens ?? undefined,
     model: r.model ?? undefined,
     executionMode: (r.execution_mode as WorkerExecution["executionMode"]) ?? undefined,
+    pipelineState: (r.pipeline_state as WorkerExecution["pipelineState"]) ?? undefined,
   }
 }
 
@@ -467,6 +489,99 @@ function rowToExecution(r: ExecutionRow): WorkerExecution {
 export async function getExecution(id: string, orgId: string): Promise<WorkerExecution | null> {
   const row = await queryOne<ExecutionRow>("SELECT * FROM executions WHERE id = $1 AND org_id = $2", [id, orgId])
   return row ? rowToExecution(row) : null
+}
+
+/** Persists a resumable pipeline skill's real, current stage-by-stage
+ * state — called after every stage transition (see lib/agent/
+ * pipeline/driver.ts) so the execution graph UI, "retry failed step",
+ * and Approve-driven resume all read the exact same durable state. */
+export async function updatePipelineState(id: string, orgId: string, state: unknown): Promise<void> {
+  await query("UPDATE executions SET pipeline_state = $1 WHERE id = $2 AND org_id = $3", [JSON.stringify(state), id, orgId])
+}
+
+/* ---- action executions: the real idempotency ledger (section 16) ---- */
+export interface ActionExecutionRow {
+  id: string
+  orgId: string
+  executionId: string
+  provider: string
+  action: string
+  resource?: string
+  idempotencyKey: string
+  status: "pending" | "completed" | "failed"
+  result?: unknown
+  createdAt: number
+  completedAt?: number
+}
+
+function rowToActionExecution(r: {
+  id: string
+  org_id: string
+  execution_id: string
+  provider: string
+  action: string
+  resource: string | null
+  idempotency_key: string
+  status: string
+  result: unknown
+  created_at: string
+  completed_at: string | null
+}): ActionExecutionRow {
+  return {
+    id: r.id,
+    orgId: r.org_id,
+    executionId: r.execution_id,
+    provider: r.provider,
+    action: r.action,
+    resource: r.resource ?? undefined,
+    idempotencyKey: r.idempotency_key,
+    status: r.status as ActionExecutionRow["status"],
+    result: r.result ?? undefined,
+    createdAt: Number(r.created_at),
+    completedAt: r.completed_at ? Number(r.completed_at) : undefined,
+  }
+}
+
+/** Idempotency lookup by key alone — the key string already embeds
+ * the execution id (see lib/agent/pipeline/idempotency.ts), so this
+ * is safe without an org filter: a retried stage checks this BEFORE
+ * ever calling the real external action again. Callable from the
+ * skill layer, which never has direct DB/org-id access — org scoping
+ * happens at insert time via a subquery on executions.org_id instead
+ * (see claimActionExecution). */
+export async function getActionExecutionByKey(idempotencyKey: string): Promise<ActionExecutionRow | null> {
+  const row = await queryOne<Parameters<typeof rowToActionExecution>[0]>("SELECT * FROM action_executions WHERE idempotency_key = $1", [idempotencyKey])
+  return row ? rowToActionExecution(row) : null
+}
+
+/** Claims an idempotency key by inserting a 'pending' row BEFORE the
+ * real external call is attempted — the unique index on
+ * idempotency_key means a concurrent duplicate attempt fails here,
+ * atomically, rather than racing two real external writes. org_id is
+ * derived server-side from the given executionId (a subquery, not a
+ * caller-supplied value) so the skill layer never needs its own
+ * org-id access. Returns null if the key is already claimed (by this
+ * call or an earlier one) — the caller must then re-check
+ * getActionExecutionByKey(). */
+export async function claimActionExecution(input: { executionId: string; provider: string; action: string; resource?: string; idempotencyKey: string }): Promise<ActionExecutionRow | null> {
+  const id = `axn_${randomUUID()}`
+  const now = Date.now()
+  try {
+    await query(
+      `INSERT INTO action_executions (id, org_id, execution_id, provider, action, resource, idempotency_key, status, created_at)
+       VALUES ($1, (SELECT org_id FROM executions WHERE id = $2), $2, $3, $4, $5, $6, 'pending', $7)`,
+      [id, input.executionId, input.provider, input.action, input.resource ?? null, input.idempotencyKey, now],
+    )
+  } catch (err) {
+    // unique_violation on idempotency_key — someone already claimed this key
+    if (err instanceof Error && /duplicate key|unique constraint/i.test(err.message)) return null
+    throw err
+  }
+  return { id, orgId: "", executionId: input.executionId, provider: input.provider, action: input.action, resource: input.resource, idempotencyKey: input.idempotencyKey, status: "pending", createdAt: now }
+}
+
+export async function completeActionExecution(id: string, status: "completed" | "failed", result?: unknown): Promise<void> {
+  await query("UPDATE action_executions SET status = $1, result = $2, completed_at = $3 WHERE id = $4", [status, result != null ? JSON.stringify(result) : null, Date.now(), id])
 }
 
 /* ---- execution events: durable, sequenced -------------------------
@@ -1094,6 +1209,8 @@ interface ApprovalRow {
   requested_at: string
   decided_at: string | null
   decided_by: string | null
+  skill_id: string | null
+  resume_state: unknown
 }
 
 function rowToApproval(r: ApprovalRow): Approval {
@@ -1113,6 +1230,8 @@ function rowToApproval(r: ApprovalRow): Approval {
     requestedAt: Number(r.requested_at),
     decidedAt: r.decided_at ? Number(r.decided_at) : undefined,
     decidedBy: r.decided_by ?? undefined,
+    skillId: r.skill_id ?? undefined,
+    resumeState: (r.resume_state as Approval["resumeState"]) ?? undefined,
   }
 }
 
@@ -1127,13 +1246,30 @@ export async function createApproval(input: {
   permission: string
   reason: string
   input: unknown
+  skillId?: string
+  resumeState?: unknown
 }): Promise<Approval> {
   const id = `appr_${randomUUID()}`
   const now = Date.now()
   await query(
-    `INSERT INTO approvals (id, org_id, worker_id, execution_id, tool_id, tool_name, action_id, action_label, permission, reason, input, status, requested_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12)`,
-    [id, input.orgId, input.workerId, input.executionId ?? null, input.toolId, input.toolName, input.actionId, input.actionLabel, input.permission, input.reason, JSON.stringify(input.input ?? {}), now],
+    `INSERT INTO approvals (id, org_id, worker_id, execution_id, tool_id, tool_name, action_id, action_label, permission, reason, input, status, requested_at, skill_id, resume_state)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13, $14)`,
+    [
+      id,
+      input.orgId,
+      input.workerId,
+      input.executionId ?? null,
+      input.toolId,
+      input.toolName,
+      input.actionId,
+      input.actionLabel,
+      input.permission,
+      input.reason,
+      JSON.stringify(input.input ?? {}),
+      now,
+      input.skillId ?? null,
+      input.resumeState != null ? JSON.stringify(input.resumeState) : null,
+    ],
   )
   return (await getApproval(id, input.orgId))!
 }

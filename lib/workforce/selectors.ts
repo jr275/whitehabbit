@@ -242,10 +242,35 @@ export function activeWork(workers: Worker[], executions: WorkerExecution[], tas
 export interface ExecutionStageStep {
   key: string
   label: string
-  status: "done" | "failed" | "pending"
+  status: "done" | "failed" | "pending" | "blocked" | "waiting_for_approval" | "rejected" | "skipped"
   detail?: string
   timestamp?: number
   durationMs?: number
+}
+
+/** The real execution graph (section 10) for a resumable pipeline
+ * skill — built directly from WorkerExecution.pipelineState, never
+ * inferred from the generic event log the way buildExecutionStages()
+ * below has to for every other skill. Each node's status here is
+ * exactly the real, persisted PipelineStageStatus; "queued"/"running"
+ * both render as "pending" (not yet done) — the live indicator
+ * (ExecutionTimeline's `live` prop) already distinguishes the current
+ * one from the rest. */
+export function buildPipelineStages(execution: WorkerExecution): ExecutionStageStep[] {
+  if (!execution.pipelineState) return []
+  return execution.pipelineState.stages.map((s) => ({
+    key: s.key,
+    label: s.label,
+    status:
+      s.status === "completed"
+        ? "done"
+        : s.status === "queued" || s.status === "running"
+          ? "pending"
+          : (s.status as "failed" | "blocked" | "waiting_for_approval" | "rejected" | "skipped"),
+    detail: s.detail,
+    timestamp: s.completedAt ?? s.startedAt,
+    durationMs: s.latencyMs,
+  }))
 }
 
 export function buildExecutionStages(execution: WorkerExecution, events: WorkerEvent[], output?: WorkerOutput): ExecutionStageStep[] {

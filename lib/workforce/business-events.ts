@@ -18,6 +18,11 @@
  * open — a new Skill adds a new case here, never a schema change:
  *
  *   Sales           lead_qualified            -> qualified_leads
+ *   Sales           lead.researched           -> leads_researched
+ *   Sales           lead.qualified            -> (deterministic, no metric)
+ *   Sales           lead.scored               -> (LLM scoring, no metric)
+ *   Sales           lead.updated              -> leads_updated
+ *   Sales           lead.notification.sent    -> (no metric — see leads_updated)
  *   Marketing       content_opportunity_identified -> content_opportunities_identified
  *   Marketing       page_opportunity_planned  -> page_opportunities_planned
  *   Marketing       opportunity_scored        -> opportunities_scored
@@ -186,39 +191,89 @@ function fromCreativeConcepts(structured: CreativeConceptsPayload): DerivedBusin
   ]
 }
 
-interface ScoredLead {
-  id: string
-  name: string
-  company: string
-  score: number
-  reasoning: string
-  updated: boolean
-  notified: boolean
-}
-interface LeadPipelinePayload {
-  query: string
+interface MarketingLeadOpsPayload {
+  objective: { objective: string; target?: string }
   candidatesFound: number
-  leads: ScoredLead[]
+  research: { id: string; company: string; evidence: string; source: string; confidence: number }[]
+  qualifications: { candidateId: string; qualificationScore: number }[]
+  scores: { id: string; leadScore: number; qualification: "qualified" | "not_qualified"; reasoningSummary: string }[]
+  decision: { candidateId: string; tier: string; action: string } | null
+  topCandidate: { id: string; company: string } | null
+  salesforceAction: { mode: "created" | "updated"; leadId: string; status: string } | null
+  slackNotification: { channel: string; status: string } | null
 }
 
-/** Every lead in this payload was actually, really updated in
- * Salesforce (runToolAction() already threw before a skill could
- * report an unapproved update as if it happened) — a real, external-
- * system-confirmed business event, not a prediction. */
-function fromLeadPipelineSync(structured: LeadPipelinePayload): DerivedBusinessEvent[] {
-  const updated = structured.leads.filter((l) => l.updated)
-  if (updated.length === 0) return []
-  return [
-    {
-      type: "salesforce_lead_updated",
+/** Real, granular business events per pipeline stage (section 14) —
+ * derived only from what actually happened in this real execution.
+ * lead.researched/lead.qualified/lead.scored fire whenever that stage
+ * produced real output; lead.updated and lead.notification.sent only
+ * fire when the real external write/notification actually completed
+ * (runToolAction() already threw before an unapproved write could be
+ * reported as if it happened) — never a prediction, never fabricated. */
+function fromLeadPipelineSync(structured: MarketingLeadOpsPayload): DerivedBusinessEvent[] {
+  const events: DerivedBusinessEvent[] = []
+
+  if (structured.research.length > 0) {
+    events.push({
+      type: "lead.researched",
       entityType: "lead_batch",
-      numericValue: updated.length,
-      confidence: Math.round(updated.reduce((s, l) => s + l.score, 0) / updated.length),
+      numericValue: structured.research.length,
+      confidence: Math.round(structured.research.reduce((s, c) => s + c.confidence, 0) / structured.research.length),
+      source: "tool:tool_web_search",
+      payload: { candidates: structured.research.map((c) => ({ company: c.company, evidence: c.evidence, source: c.source, confidence: c.confidence })) },
+      relatedMetricKeys: ["leads_researched"],
+    })
+  }
+
+  if (structured.qualifications.length > 0) {
+    const qualified = structured.qualifications.filter((q) => q.qualificationScore >= 50)
+    events.push({
+      type: "lead.qualified",
+      entityType: "lead_batch",
+      numericValue: qualified.length,
+      confidence: Math.round(structured.qualifications.reduce((s, q) => s + q.qualificationScore, 0) / structured.qualifications.length),
+      source: "skill:skill_salesforce_lead_pipeline",
+      payload: { qualifications: structured.qualifications },
+      relatedMetricKeys: [],
+    })
+  }
+
+  if (structured.scores.length > 0) {
+    events.push({
+      type: "lead.scored",
+      entityType: "lead_batch",
+      numericValue: structured.scores.filter((s) => s.qualification === "qualified").length,
+      confidence: Math.round(structured.scores.reduce((s, sc) => s + sc.leadScore, 0) / structured.scores.length),
+      source: "skill:skill_salesforce_lead_pipeline",
+      payload: { scores: structured.scores.map((s) => ({ id: s.id, leadScore: s.leadScore, qualification: s.qualification, reasoningSummary: s.reasoningSummary })) },
+      relatedMetricKeys: [],
+    })
+  }
+
+  if (structured.salesforceAction?.status === "completed" && structured.topCandidate) {
+    events.push({
+      type: "lead.updated",
+      entityId: structured.salesforceAction.leadId,
+      entityType: "lead",
+      numericValue: 1,
       source: "connector:salesforce",
-      payload: { leads: updated.map((l) => ({ id: l.id, name: l.name, company: l.company, score: l.score, reasoning: l.reasoning, notified: l.notified })) },
+      payload: { leadId: structured.salesforceAction.leadId, mode: structured.salesforceAction.mode, company: structured.topCandidate.company },
       relatedMetricKeys: ["leads_updated"],
-    },
-  ]
+    })
+  }
+
+  if (structured.slackNotification?.status === "completed" && structured.topCandidate) {
+    events.push({
+      type: "lead.notification.sent",
+      entityType: "lead",
+      numericValue: 1,
+      source: "connector:slack",
+      payload: { channel: structured.slackNotification.channel, company: structured.topCandidate.company },
+      relatedMetricKeys: [],
+    })
+  }
+
+  return events
 }
 
 /** Returns [] when there's genuinely no real business event to
@@ -240,7 +295,7 @@ export function deriveBusinessEvents(output: WorkerOutput): DerivedBusinessEvent
     case "creative_concepts":
       return fromCreativeConcepts(output.structured as CreativeConceptsPayload)
     case "lead_pipeline_sync":
-      return fromLeadPipelineSync(output.structured as LeadPipelinePayload)
+      return fromLeadPipelineSync(output.structured as MarketingLeadOpsPayload)
     default:
       return []
   }
@@ -261,7 +316,7 @@ export interface DomainMetricDef {
 export const DOMAIN_METRIC_TAXONOMY: Record<string, DomainMetricDef[]> = {
   sales: [
     { key: "leads_qualified", label: "Qualified leads", real: true },
-    { key: "candidates_researched", label: "Candidates researched", real: true },
+    { key: "leads_researched", label: "Leads researched", real: true },
     { key: "leads_updated", label: "Salesforce leads updated", real: true },
     { key: "pipeline_influenced", label: "Pipeline influenced", real: false },
     { key: "meetings_booked", label: "Meetings booked", real: false },

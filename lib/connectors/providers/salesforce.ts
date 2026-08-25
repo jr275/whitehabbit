@@ -126,6 +126,20 @@ const ACTIONS: ConnectorAction[] = [
     permission: "write",
     riskLevel: "high",
   },
+  {
+    id: "create_task",
+    label: "Create task",
+    description: "Creates a real Salesforce Task (e.g. a follow-up), related to a Lead or other record.",
+    inputSchema: {
+      Subject: { type: "string", description: "Task subject.", required: true },
+      WhoId: { type: "string", description: "Related Lead/Contact id.", required: true },
+      Description: { type: "string", description: "Task description." },
+      Status: { type: "string", description: "Task status, e.g. Not Started." },
+    },
+    outputSchema: { id: { type: "string", description: "The new real Task's id." } },
+    permission: "write",
+    riskLevel: "medium",
+  },
 ]
 
 const TRIGGERS: ConnectorTrigger[] = [
@@ -170,6 +184,10 @@ async function run(connection: Connection, actionId: string, input: Record<strin
       case "update_opportunity": {
         await sfFetch(connection, `/sobjects/Opportunity/${encodeURIComponent(String(input.id))}`, { method: "PATCH", body: JSON.stringify(input.fields ?? {}) })
         return { ok: true, data: {}, durationMs: Date.now() - started }
+      }
+      case "create_task": {
+        const data = await sfFetch<{ id: string }>(connection, "/sobjects/Task", { method: "POST", body: JSON.stringify({ Subject: input.Subject, WhoId: input.WhoId, Description: input.Description, Status: input.Status ?? "Not Started" }) })
+        return { ok: true, data: { id: data.id }, durationMs: Date.now() - started }
       }
       default:
         return { ok: false, errorCode: "execution_error", error: `Unknown Salesforce action "${actionId}".`, durationMs: Date.now() - started }

@@ -159,6 +159,25 @@ function developmentSignalsFixture(): string {
   })
 }
 
+/** The matching fixture for lib/agent/skills/marketing-lead-ops.ts's
+ * parseScores() — real 0-100 scores, one qualified/one not, so the
+ * deterministic decision engine downstream sees a genuine mix (a
+ * HIGH_PRIORITY-range score exercises the CRM/approval/Slack tail in
+ * local dev even though real research candidates carry weak
+ * firmographic signal — see that skill's own header comment). The
+ * ids matched against real candidates are filled in by the skill
+ * itself (developmentFixtureFor doesn't know the real candidate ids),
+ * so this returns a fixture the skill's own parser re-keys onto
+ * whichever real candidate ids it actually has. */
+function developmentLeadScoresFixture(): string {
+  return JSON.stringify({
+    scores: [
+      { id: "__DEV_TOP__", leadScore: 84, qualification: "qualified", reasoningSummary: "[DEV] Local pipeline exercise — strong match on stated criteria and available evidence. Not a real model judgment.", recommendedAction: "Update Salesforce and notify the sales channel." },
+      { id: "__DEV_SECOND__", leadScore: 52, qualification: "not_qualified", reasoningSummary: "[DEV] Local pipeline exercise — weak evidence, most firmographic fields unknown. Not a real model judgment.", recommendedAction: "Hold — insufficient evidence." },
+    ],
+  })
+}
+
 /** The matching fixture for creative-territory-generation.ts's
  * parseConcepts() — exactly 6 concepts, each a distinct
  * emotionalIntent so the real diversity check always scores well. */
@@ -203,6 +222,7 @@ function developmentConceptsFixture(): string {
  * needs a matching fixture function here, no changes to the call
  * boundary. */
 function developmentFixtureFor(input: LlmCallInput): string {
+  if (input.system.includes('"leadScore"')) return developmentLeadScoresFixture()
   if (input.system.includes('"leads":[')) return developmentLeadsFixture()
   if (input.system.includes('"opportunities":[')) return developmentSeoOpportunityFixture()
   if (input.system.includes('"reasoning_summary"')) return developmentConversationFixture()

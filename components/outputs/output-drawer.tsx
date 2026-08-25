@@ -18,7 +18,7 @@ import { SKILL_CATALOG, TOOL_CATALOG } from "@/lib/workforce/catalog"
 import { deriveBusinessOutcome } from "@/lib/workforce/business-outcome"
 import type { BusinessEvent, MetricRecord, Worker, WorkerEvent, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
 import { EXECUTION_STATUS_META, OUTPUT_TYPE_META } from "@/lib/workforce/model"
-import { buildExecutionStages, businessEventLabel, isToday, resultProvenanceState, sourceLabel, timeOfDay } from "@/lib/workforce/selectors"
+import { buildExecutionStages, buildPipelineStages, businessEventLabel, isToday, resultProvenanceState, sourceLabel, timeOfDay, type ExecutionStageStep } from "@/lib/workforce/selectors"
 
 export type DrawerFilter = { kind: "type"; workerId: string; type: string; title: string } | { kind: "execution"; executionId: string }
 
@@ -118,18 +118,25 @@ export function OutputDrawer({
 
 function BlockedDetail({ execution, task, events }: { execution: WorkerExecution; task?: WorkerTask; events: WorkerEvent[] }) {
   const meta = EXECUTION_STATUS_META[execution.status]
-  const stages = buildExecutionStages(execution, events)
+  const stages = execution.pipelineState ? buildPipelineStages(execution) : buildExecutionStages(execution, events)
   return (
     <div className="flex flex-col gap-4 px-5 py-5">
       <div className="rounded-lg border border-warn/30 bg-warn/5 p-4">
         <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-warn">{meta.label}</p>
         <p className="mt-2 text-[13px] leading-relaxed text-foreground">{execution.blockedReason ?? "No reason recorded."}</p>
+        {execution.reasonCode === "missing_credential" && (execution.blockedReason ?? "").toLowerCase().includes("salesforce") && (
+          <a href="/integrations/connector_salesforce" className="mt-2 inline-block text-[12px] font-medium text-primary hover:underline">
+            Connect Salesforce →
+          </a>
+        )}
       </div>
 
       <div>
-        <SectionLabel>Execution timeline — exactly how far it got</SectionLabel>
+        <SectionLabel>{execution.pipelineState ? "Execution graph — real, per-stage state" : "Execution timeline — exactly how far it got"}</SectionLabel>
         <ExecutionTimeline stages={stages} />
       </div>
+
+      <RetryStepAction execution={execution} stages={stages} />
 
       <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">
         <MetaRow k="Task" v={task?.title ?? "—"} />
@@ -144,10 +151,73 @@ function BlockedDetail({ execution, task, events }: { execution: WorkerExecution
   )
 }
 
+/** Section 18/19 — "retry failed step": only rendered when a real
+ * pipeline stage is genuinely in "failed" and this skill supports
+ * retrying it (POST /api/executions/[id]/retry-step reports the real
+ * reason if not — e.g. a non-retryable stage, or the skill has no
+ * retryStage()). Never replays an already-completed stage. */
+function RetryStepAction({ execution, stages }: { execution: WorkerExecution; stages: ExecutionStageStep[] }) {
+  const [state, setState] = useState<{ busy: boolean; error?: string; done?: boolean }>({ busy: false })
+  const failedStage = stages.find((s) => s.status === "failed")
+  if (!execution.pipelineState || !failedStage) return null
+
+  async function retry() {
+    setState({ busy: true })
+    try {
+      const res = await fetch(`/api/executions/${execution.id}/retry-step`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ stage: failedStage!.key }) })
+      const body = await res.json().catch(() => null)
+      if (!res.ok) {
+        setState({ busy: false, error: body?.error ?? "Retry failed." })
+        return
+      }
+      setState({ busy: false, done: true })
+    } catch (err) {
+      setState({ busy: false, error: err instanceof Error ? err.message : "Retry failed." })
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-secondary/30 p-3">
+      <p className="text-[12px] text-foreground">
+        <span className="font-medium">{failedStage.label}</span> failed — retrying only re-runs this step, never a stage that already completed for real.
+      </p>
+      {state.error && <p className="mt-1.5 text-[11.5px] text-destructive">{state.error}</p>}
+      {state.done ? (
+        <p className="mt-2 text-[11.5px] text-grow">Retried — refresh to see the real result.</p>
+      ) : (
+        <button
+          onClick={retry}
+          disabled={state.busy}
+          className="mt-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-[11.5px] font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-60"
+        >
+          {state.busy ? "Retrying…" : `Retry ${failedStage.label}`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 /** Real stage-by-stage progression — see buildExecutionStages(). A stage
  * the run never reached renders as a hollow, muted step, not a fake
  * checkmark; the stage that actually failed renders red with the real
  * reason. Durations shown are the same real numbers the live stream used. */
+const STAGE_STATUS_STYLE: Record<ExecutionStageStep["status"], { dot: string; text: string }> = {
+  done: { dot: "border-grow bg-grow/15 text-grow", text: "text-foreground" },
+  failed: { dot: "border-destructive bg-destructive/15 text-destructive", text: "text-destructive" },
+  blocked: { dot: "border-warn bg-warn/15 text-warn", text: "text-warn" },
+  waiting_for_approval: { dot: "border-primary bg-primary/15 text-primary", text: "text-primary" },
+  rejected: { dot: "border-destructive bg-destructive/15 text-destructive", text: "text-destructive" },
+  skipped: { dot: "border-border bg-secondary/60 text-muted-foreground", text: "text-muted-foreground" },
+  pending: { dot: "border-border bg-card text-muted-foreground/40", text: "text-muted-foreground/60" },
+}
+
+const STAGE_STATUS_LABEL: Partial<Record<ExecutionStageStep["status"], string>> = {
+  blocked: "Blocked",
+  waiting_for_approval: "Waiting for approval",
+  rejected: "Rejected",
+  skipped: "Skipped",
+}
+
 export function ExecutionTimeline({ stages, live = false }: { stages: ReturnType<typeof buildExecutionStages>; live?: boolean }) {
   // the real stage list is already ordered; while a run is actually in
   // progress (live), the first not-yet-reached stage is the one it's
@@ -157,35 +227,23 @@ export function ExecutionTimeline({ stages, live = false }: { stages: ReturnType
     <ol className="flex flex-col gap-0">
       {stages.map((s, i) => {
         const isCurrent = i === currentIdx
+        const style = STAGE_STATUS_STYLE[s.status]
         return (
           <li key={s.key} className="relative flex gap-3 pb-3 last:pb-0">
             {i < stages.length - 1 && <span className="absolute left-[9px] top-5 h-[calc(100%-0.5rem)] w-px bg-border" />}
-            <span
-              className={`z-10 mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border transition-colors duration-300 ${
-                s.status === "done"
-                  ? "border-grow bg-grow/15 text-grow"
-                  : s.status === "failed"
-                    ? "border-destructive bg-destructive/15 text-destructive"
-                    : isCurrent
-                      ? "border-primary bg-primary/15 text-primary"
-                      : "border-border bg-card text-muted-foreground/40"
-              }`}
-            >
-              {s.status === "done" ? (
-                <Check className="h-2.5 w-2.5" />
-              ) : (
-                <span className={`h-1.5 w-1.5 rounded-full bg-current ${isCurrent ? "animate-pulse" : ""}`} />
-              )}
+            <span className={`z-10 mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border transition-colors duration-300 ${isCurrent && s.status === "pending" ? "border-primary bg-primary/15 text-primary" : style.dot}`}>
+              {s.status === "done" ? <Check className="h-2.5 w-2.5" /> : <span className={`h-1.5 w-1.5 rounded-full bg-current ${isCurrent && s.status === "pending" ? "animate-pulse" : ""}`} />}
             </span>
             <div className="min-w-0 flex-1 pt-px">
               <div className="flex items-baseline justify-between gap-2">
-                <span className={`text-[12.5px] font-medium ${isCurrent ? "text-primary" : s.status === "pending" ? "text-muted-foreground/60" : "text-foreground"}`}>
+                <span className={`text-[12.5px] font-medium ${isCurrent && s.status === "pending" ? "text-primary" : style.text}`}>
                   {s.label}
+                  {STAGE_STATUS_LABEL[s.status] && <span className="ml-1.5 font-mono text-[9px] uppercase tracking-wider opacity-80">{STAGE_STATUS_LABEL[s.status]}</span>}
                 </span>
                 {s.durationMs != null && <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground">{s.durationMs}ms</span>}
               </div>
-              {s.detail && <p className={`mt-0.5 text-[11px] leading-relaxed ${s.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>{s.detail}</p>}
-              {isCurrent && !s.detail && <p className="mt-0.5 text-[11px] text-primary">In progress</p>}
+              {s.detail && <p className={`mt-0.5 text-[11px] leading-relaxed ${s.status === "failed" || s.status === "rejected" ? "text-destructive" : s.status === "blocked" || s.status === "waiting_for_approval" ? "text-warn" : "text-muted-foreground"}`}>{s.detail}</p>}
+              {isCurrent && s.status === "pending" && !s.detail && <p className="mt-0.5 text-[11px] text-primary">In progress</p>}
               {s.status === "pending" && !isCurrent && !s.detail && <p className="mt-0.5 text-[11px] italic text-muted-foreground/60">Not reached</p>}
             </div>
           </li>
@@ -213,7 +271,7 @@ function DetailView({
   const template = task ? SKILL_CATALOG.find((s) => s.id === task.skillId) : undefined
   const toolNames = template?.requiredTools.map((id) => TOOL_CATALOG.find((t) => t.id === id)?.name ?? id).join(", ")
   const isDev = execution?.executionMode === "development"
-  const stages = execution ? buildExecutionStages(execution, events, output) : []
+  const stages = execution ? (execution.pipelineState ? buildPipelineStages(execution) : buildExecutionStages(execution, events, output)) : []
   const outcome = deriveBusinessOutcome(output, execution)
 
   const businessEvent = businessEvents.find((be) => be.outputId === output.id)
@@ -400,10 +458,12 @@ function DetailView({
 
       {stages.length > 0 && (
         <div>
-          <SectionLabel>Execution timeline</SectionLabel>
+          <SectionLabel>{execution?.pipelineState ? "Execution graph" : "Execution timeline"}</SectionLabel>
           <ExecutionTimeline stages={stages} />
         </div>
       )}
+
+      {execution && <RetryStepAction execution={execution} stages={stages} />}
 
       {task && (
         <div>

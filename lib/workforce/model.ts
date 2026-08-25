@@ -296,6 +296,64 @@ export interface WorkerExecution {
    * a past development run can never be mistaken for a real one, even
    * after LLM_DEV_MODE is turned back off. */
   executionMode?: "development"
+  /** Real, per-stage state for a skill that runs as a named, resumable
+   * pipeline (see PipelineState below) — undefined for every other
+   * skill. This is the execution graph's actual source of truth: each
+   * node's status here is real, persisted, server-computed state, never
+   * inferred or animated client-side. */
+  pipelineState?: PipelineState
+}
+
+/* ---- Pipeline execution graph — real, named stages for a skill that
+ * runs as an explicit multi-step operational flow (currently: the
+ * Marketing Agent's Salesforce Lead Operations skill) rather than one
+ * opaque execute() call. Persisted on WorkerExecution.pipelineState
+ * and updated after every stage transition, so:
+ *   - the execution graph UI renders real per-node state, never a
+ *     fabricated animation
+ *   - an Approve decision can CONTINUE the same execution past the
+ *     approved stage (see Approval.resumeState) instead of only
+ *     running the one captured action in isolation
+ *   - "retry failed step" can re-run exactly one stage using the
+ *     already-completed prior stages' real output, never replaying a
+ *     real external action that already succeeded ---- */
+export type PipelineStageStatus = "queued" | "running" | "completed" | "failed" | "blocked" | "waiting_for_approval" | "rejected" | "skipped"
+
+export type PipelineStageKey = "objective_intake" | "research" | "qualification" | "llm_scoring" | "decision" | "salesforce_action" | "slack_notify"
+
+export interface PipelineStageRecord {
+  key: PipelineStageKey
+  label: string
+  status: PipelineStageStatus
+  startedAt?: number
+  completedAt?: number
+  latencyMs?: number
+  /** Human-readable, real detail — a result summary, or the real reason for failed/blocked/skipped/rejected. */
+  detail?: string
+  reasonCode?: ExecutionReasonCode
+  provider?: string
+  action?: string
+  /** Set only for a stage that performed (or attempted) a real
+   * external write — the idempotency ledger key used, so a retry of
+   * this exact stage can be proven never to double-perform it. */
+  idempotencyKey?: string
+  attempts?: number
+  /** This stage's own real output, for the next stage/the retry
+   * mechanism/the UI to read — never re-derived or guessed. */
+  output?: unknown
+}
+
+export interface PipelineObjective {
+  objective: string
+  target?: string
+  constraints: string[]
+  criteria: string[]
+  requestedActions: string[]
+}
+
+export interface PipelineState {
+  objective: PipelineObjective
+  stages: PipelineStageRecord[]
 }
 
 export interface SourceRecord {
@@ -344,6 +402,7 @@ export type WorkerEventType =
   | "tool_called"
   | "tool_completed"
   | "tool_blocked"
+  | "tool_failed"
   | "reasoning_started"
   | "reasoning_completed"
   | "output_created"
@@ -353,6 +412,17 @@ export type WorkerEventType =
   | "task_failed"
   | "task_blocked"
   | "approval_required"
+  | "approval_approved"
+  | "approval_rejected"
+  | "permission_checked"
+  /** A named pipeline stage's own lifecycle — see PipelineStageRecord.
+   * payload always carries { stage: PipelineStageKey, label }, plus
+   * whatever that transition adds (detail/reasonCode/idempotencyKey). */
+  | "stage_started"
+  | "stage_completed"
+  | "stage_failed"
+  | "stage_blocked"
+  | "stage_skipped"
 
 export interface WorkerEvent {
   id: string
@@ -399,6 +469,17 @@ export interface Approval {
   requestedAt: number
   decidedAt?: number
   decidedBy?: string
+  /** Which real skill this blocked action belongs to — set so Approve
+   * knows which SkillDefinition.resume() to call, if any. Undefined
+   * for an approval created before this field existed. */
+  skillId?: string
+  /** A resumable skill's own real, in-progress PipelineState at the
+   * moment it hit this approval gate — never a secret, the same
+   * research/qualification/score data an operator can already see in
+   * the execution. Undefined means this approval has no resumable
+   * continuation: Approve runs the one captured action in isolation,
+   * exactly like the prior phase's honestly-scoped behavior. */
+  resumeState?: PipelineState
 }
 
 /* ---- Business Event -> Metric -> Outcome ----

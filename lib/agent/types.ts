@@ -171,6 +171,27 @@ export interface SkillDefinition {
   execute: (ctx: SkillExecutionContext) => Promise<SkillExecutionResult>
   evaluate: (result: SkillExecutionResult) => SkillEvaluation
   metrics: (result: SkillExecutionResult, evaluation: SkillEvaluation) => MetricEmission[]
+  /** Only implemented by a skill that runs as a named, resumable
+   * pipeline (see lib/agent/pipeline/) and threw ApprovalRequiredError
+   * with a real resumeState attached. Called by POST /api/approvals/
+   * [id]/decide (via lib/agent/runtime.ts's resumeTask()) on Approve:
+   * runs the exact approved action for real, then CONTINUES the same
+   * pipeline from the next stage — never re-runs a stage this
+   * resumeState already recorded as completed. Returns exactly the
+   * same SkillExecutionResult shape execute() does, or throws another
+   * ApprovalRequiredError if a LATER stage also needs approval. A
+   * skill with no resume() falls back to the prior phase's honestly-
+   * scoped behavior: Approve runs the one captured action in
+   * isolation, no continuation. */
+  resume?: (ctx: SkillExecutionContext, resumeState: unknown) => Promise<SkillExecutionResult>
+  /** Section 19 — "retry failed step": re-runs exactly one FAILED
+   * stage of a resumable pipeline using its own already-completed
+   * prior stages, never replaying a real external action that already
+   * succeeded. Only implemented by a skill that also implements
+   * resume(); `stage` is one of that skill's own real
+   * PipelineStageKey values. Called by POST /api/executions/[id]/
+   * retry-step via lib/agent/runtime.ts's retryFailedStage(). */
+  retryStage?: (ctx: SkillExecutionContext, currentState: unknown, stage: string) => Promise<SkillExecutionResult>
 }
 
 /* ---- runtime events — every one must correspond to something real ---- */
@@ -180,6 +201,7 @@ export type RuntimeEventType =
   | "tool_called"
   | "tool_completed"
   | "tool_blocked"
+  | "tool_failed"
   | "reasoning_started"
   | "reasoning_completed"
   | "output_created"
@@ -189,6 +211,14 @@ export type RuntimeEventType =
   | "task_failed"
   | "task_blocked"
   | "approval_required"
+  | "approval_approved"
+  | "approval_rejected"
+  | "permission_checked"
+  | "stage_started"
+  | "stage_completed"
+  | "stage_failed"
+  | "stage_blocked"
+  | "stage_skipped"
 
 /** A required credential/tool was never configured. Maps to execution
  * status "blocked" — the NOT_CONFIGURED state. Thrown before any
@@ -243,6 +273,19 @@ export class ApprovalRequiredError extends Error {
      * an operator already sees before deciding. */
     public actionId: string,
     public input: unknown,
+    /** Set only by a resumable pipeline skill that catches this error
+     * locally (see SkillDefinition.resume) and re-throws it with its
+     * own real, current PipelineState attached — so Approve can
+     * continue the SAME execution past this action instead of only
+     * running it in isolation. Undefined for every other skill; never
+     * a secret, the same structured state the execution graph UI
+     * already shows. */
+    public resumeState?: unknown,
+    /** Which real pipeline stage this approval blocks, for a
+     * resumable skill — lets the runtime fold this into the right
+     * PipelineStageRecord (status "waiting_for_approval") without
+     * runtime.ts knowing anything skill-specific. */
+    public stage?: string,
   ) {
     super(`"${actionLabel}" on ${toolName} requires human approval (${permission}) before it can run.`)
     this.name = "ApprovalRequiredError"

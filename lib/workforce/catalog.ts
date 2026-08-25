@@ -109,11 +109,11 @@ export const SKILL_CATALOG: SkillTemplate[] = [
   },
   {
     id: "skill_salesforce_lead_pipeline",
-    name: "Salesforce Lead Pipeline",
+    name: "Marketing Lead Operations",
     category: "sales",
-    description: "Searches real Salesforce leads, researches each one, scores them with a real LLM, and updates the real Salesforce record — the full Salesforce → Research → LLM → Salesforce → Slack golden flow.",
+    description: "The Marketing Agent's real operational pipeline: research → deterministic qualification → schema-validated LLM scoring → deterministic decision → Salesforce action → human approval when required → Slack notification.",
     outputType: "lead_pipeline_sync",
-    taskTitle: "Sync and score Salesforce leads",
+    taskTitle: "Research, qualify, and act on leads",
     // connector_salesforce.actions is a dynamic, Connector-provided
     // tool id — never in TOOL_CATALOG, so Studio's readiness bar won't
     // pre-flight-warn about it the way it does for a native tool; the
@@ -121,7 +121,13 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     // if Salesforce isn't connected. See the Studio Integrations step
     // for where a Worker is actually wired to a real Connection.
     requiredTools: ["tool_web_search", "tool_llm"],
-    inputs: [{ key: "query", label: "Which Salesforce leads should it work on?", type: "text", required: true, placeholder: "Recently created leads in the software industry" }],
+    inputs: [
+      { key: "objective", label: "Business objective", type: "textarea", required: true, placeholder: "Find high-quality enterprise leads in Brazil and identify which ones are most likely to book a meeting." },
+      { key: "target", label: "Target (optional)", type: "text", required: false, placeholder: "Brazil, enterprise segment" },
+      { key: "criteria", label: "Criteria — comma-separated (optional)", type: "text", required: false, placeholder: "high likelihood to book a meeting, enterprise scale" },
+      { key: "constraints", label: "Constraints — comma-separated (optional)", type: "text", required: false, placeholder: "exclude existing customers" },
+      { key: "requestedActions", label: "Requested actions — comma-separated (optional)", type: "text", required: false, placeholder: "update_lead, notify_slack" },
+    ],
   },
 ]
 
