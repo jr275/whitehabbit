@@ -11,6 +11,8 @@ import { WorkerAvatar } from "@/components/workforce/worker-avatar"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 import { agentHealth } from "@/lib/workforce/agent-identity"
 
+const STEP_KEYS: StepKey[] = ["identity", "mission", "knowledge", "skills", "tools", "behavior", "channels", "output"]
+
 const EXAMPLES = [
   "Research high-intent enterprise accounts and brief my sales team",
   "Monitor our market and turn emerging trends into content opportunities",
@@ -24,9 +26,13 @@ export function WorkerStudio({ runtimeMode }: { runtimeMode?: "development" | "p
   const { hydrated, workers, activeWorkerId, tasks, executions, outputs, events, creatingWorker, notice } = useWorkforce()
   const searchParams = useSearchParams()
   const requestedWorkerId = searchParams.get("worker")
+  const requestedStep = searchParams.get("step")
   const appliedRequestedWorkerId = useRef<string | null>(null)
 
   useEffect(() => { workforceStore.hydrate() }, [])
+  useEffect(() => {
+    if (requestedStep && STEP_KEYS.includes(requestedStep as StepKey)) setActiveStep(requestedStep as StepKey)
+  }, [requestedStep])
   useEffect(() => {
     if (!hydrated || !requestedWorkerId || appliedRequestedWorkerId.current === requestedWorkerId) return
     if (!workers.some((worker) => worker.id === requestedWorkerId)) return
