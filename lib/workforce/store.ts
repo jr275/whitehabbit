@@ -18,6 +18,7 @@
 
 import { useSyncExternalStore } from "react"
 import { SKILL_CATALOG } from "./catalog"
+import type { AgentBlueprint } from "./seed"
 import type {
   Autonomy,
   BusinessEvent,
@@ -275,9 +276,13 @@ class WorkforceStore {
     if (this.state.creatingWorker || !objective.trim()) return null
     this.set({ creatingWorker: true, notice: null })
     try {
-      const { worker } = await api<{ worker: Worker }>("/api/agents/blueprint", {
+      const { blueprint } = await api<{ blueprint: AgentBlueprint }>("/api/agents/blueprint", {
         method: "POST",
         body: JSON.stringify({ objective: objective.trim() }),
+      })
+      const { worker } = await api<{ worker: Worker }>("/api/workers", {
+        method: "POST",
+        body: JSON.stringify({ blueprint }),
       })
       this.set({ workers: [worker, ...this.state.workers.filter((item) => item.id !== worker.id)], activeWorkerId: worker.id })
       return worker.id
