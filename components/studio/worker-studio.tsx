@@ -11,7 +11,7 @@ import { WorkerAvatar } from "@/components/workforce/worker-avatar"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 import { agentHealth } from "@/lib/workforce/agent-identity"
 
-const STEP_KEYS: StepKey[] = ["identity", "mission", "knowledge", "skills", "tools", "behavior", "channels", "output"]
+const STEP_KEYS: StepKey[] = ["identity", "mission", "skills", "knowledge", "tools", "memory", "behavior", "channels", "output", "evolution"]
 
 const EXAMPLES = [
   "Research high-intent enterprise accounts and brief my sales team",
