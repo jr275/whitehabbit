@@ -5,12 +5,9 @@
  * surfaces. Studio and Outputs are the one real, connected product;
  * that's the whole primary nav.
  *
- * Overview (home), Library, and Insights are deliberately NOT linked
- * here — they're a different, disconnected visual language with no
- * real Worker data behind them yet (see the product audit). Their
- * routes and code are untouched and still reachable directly
- * (/, /library, /insights) for future work — this is a navigation
- * decision only, not a removal.
+ * The Marketing Command Center at /insights now joins the operational
+ * navigation because it combines clearly labeled demo intelligence with
+ * the same persisted Worker execution ledger used by Studio and Outputs.
  * ------------------------------------------------------------------ */
 
 import { Circle, LogOut } from "lucide-react"
@@ -20,6 +17,7 @@ import { usePathname } from "next/navigation"
 
 const LINKS = [
   { href: "/products", label: "Products" },
+  { href: "/insights", label: "Command Center" },
   { href: "/studio", label: "Studio" },
   { href: "/outputs", label: "Outputs" },
 ]
