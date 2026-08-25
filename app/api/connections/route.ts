@@ -16,24 +16,22 @@ import "server-only"
 import { NextResponse } from "next/server"
 import { withApiHandler, ValidationError, NotFoundError } from "@/lib/api-error"
 import { getConnector } from "@/lib/connectors/registry"
+import { MetadataValidationError, sanitizeConnectionMetadata } from "@/lib/connectors/sanitize-metadata"
 import { createConnection, listConnections, recordAudit } from "@/lib/db/repo"
 import { enforceRateLimit } from "@/lib/rate-limit"
 import { requireSession } from "@/lib/session"
 
-const METADATA_KEY_DENYLIST = /token|secret|password|api[_-]?key|credential/i
-
-/** Non-secret only, by construction — never trust the request body to
- * hold a real credential, even though nothing in Phase 1 has one to
- * offer. Any key that even LOOKS like it might carry a secret is
- * rejected outright rather than silently persisted. */
-function sanitizeMetadata(input: unknown): Record<string, unknown> {
-  if (!input || typeof input !== "object") return {}
-  const result: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
-    if (METADATA_KEY_DENYLIST.test(key)) throw new ValidationError(`"${key}" is not allowed in connection metadata.`)
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") result[key] = value
+/** sanitizeConnectionMetadata is deliberately dependency-free (see its
+ * own comment) and throws a plain MetadataValidationError; every real
+ * route re-raises that as api-error.ts's real ValidationError, which
+ * is what withApiHandler actually maps to a 400 response. */
+function sanitizeMetadataOrThrow(input: unknown): Record<string, unknown> {
+  try {
+    return sanitizeConnectionMetadata(input)
+  } catch (err) {
+    if (err instanceof MetadataValidationError) throw new ValidationError(err.message)
+    throw err
   }
-  return result
 }
 
 export async function GET() {
@@ -57,7 +55,7 @@ export async function POST(req: Request) {
     if (!connector) throw new NotFoundError()
     if (!connector.enabled) throw new ValidationError(`${connector.name} is not yet available — architecture only in this phase.`)
 
-    const metadata = sanitizeMetadata(body?.metadata)
+    const metadata = sanitizeMetadataOrThrow(body?.metadata)
     const displayName = typeof body?.displayName === "string" ? body.displayName.slice(0, 120) : undefined
 
     // "none" auth genuinely completes here — there is nothing external

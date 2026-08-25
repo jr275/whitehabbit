@@ -110,6 +110,24 @@ export function IntegrationDetail({ id }: { id: string }) {
     }
   }
 
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ state: string; detail?: string } | null>(null)
+
+  async function handleTestConnection() {
+    if (!connection) return
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const res = await api<{ health: { state: string; detail?: string } }>(`/api/connections/${encodeURIComponent(connection.id)}/test`, { method: "POST" })
+      setTestResult(res.health)
+      await refresh()
+    } catch (err) {
+      setTestResult({ state: "error", detail: err instanceof Error ? err.message : "Test failed." })
+    } finally {
+      setTesting(false)
+    }
+  }
+
   if (sessionStatus !== "authenticated") {
     return (
       <div className="mx-auto max-w-[900px] px-5 py-10 text-center sm:px-8">
@@ -159,7 +177,7 @@ export function IntegrationDetail({ id }: { id: string }) {
             </button>
           ) : connector.oauthAuthorizeUrl ? (
             <a href={connector.oauthAuthorizeUrl} className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-[12px] font-medium text-primary-foreground hover:opacity-90">
-              Connect Salesforce <ExternalLink className="h-3.5 w-3.5" />
+              Connect {connector.name} <ExternalLink className="h-3.5 w-3.5" />
             </a>
           ) : (
             <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">Authentication coming in a later phase</span>
@@ -186,26 +204,47 @@ export function IntegrationDetail({ id }: { id: string }) {
             <Row k="Status" v={connection.status} />
             {connection.displayName && <Row k="Account" v={connection.displayName} />}
             {typeof connection.metadata?.instanceUrl === "string" && connection.metadata.instanceUrl && <Row k="Instance URL" v={connection.metadata.instanceUrl} />}
+            {typeof connection.metadata?.defaultPropertyId === "string" && connection.metadata.defaultPropertyId && <Row k="Default property" v={connection.metadata.defaultPropertyId} />}
             <Row k="Connected since" v={new Date(connection.createdAt).toLocaleString()} />
             {connection.errorReason && <Row k="Error" v={connection.errorReason} />}
           </dl>
         ) : (
           <p className="text-[13px] text-muted-foreground">No connection exists yet.</p>
         )}
+        {/* "Connected" above is AUTHENTICATED — a stored, valid OAuth
+         * credential. It is not proof the provider is reachable right
+         * now (an expired/revoked token, an outage, a rate limit all
+         * still read "connected" here) — that's what Health below,
+         * from a real live call, actually verifies. */}
       </Section>
+
+      {connectorId === "connector_google_analytics" && connected && <GoogleAnalyticsPropertyPicker connection={connection!} onSaved={refresh} />}
 
       {/* HEALTH */}
       <Section title="Health">
-        {health ? (
-          <div className={`flex items-center gap-2 rounded-lg border px-3.5 py-2.5 ${health.state === "healthy" ? "border-grow/30 bg-grow/5" : health.state === "not_configured" ? "border-border bg-secondary/30" : "border-warn/30 bg-warn/5"}`}>
-            {health.state === "healthy" ? <CheckCircle2 className="h-4 w-4 text-grow" /> : <AlertTriangle className="h-4 w-4 text-warn" />}
-            <div>
-              <p className="font-mono text-[11px] uppercase tracking-wider text-foreground">{health.state.replace(/_/g, " ")}</p>
-              {health.detail && <p className="text-[12px] text-muted-foreground">{health.detail}</p>}
+        <div className="flex flex-wrap items-center gap-3">
+          {health ? (
+            <div className={`flex items-center gap-2 rounded-lg border px-3.5 py-2.5 ${health.state === "healthy" ? "border-grow/30 bg-grow/5" : health.state === "not_configured" ? "border-border bg-secondary/30" : "border-warn/30 bg-warn/5"}`}>
+              {health.state === "healthy" ? <CheckCircle2 className="h-4 w-4 text-grow" /> : <AlertTriangle className="h-4 w-4 text-warn" />}
+              <div>
+                <p className="font-mono text-[11px] uppercase tracking-wider text-foreground">{health.state.replace(/_/g, " ")}</p>
+                {health.detail && <p className="text-[12px] text-muted-foreground">{health.detail}</p>}
+              </div>
             </div>
-          </div>
-        ) : (
-          <p className="text-[13px] text-muted-foreground">No health data.</p>
+          ) : (
+            <p className="text-[13px] text-muted-foreground">No health data.</p>
+          )}
+          {connected && (
+            <button onClick={handleTestConnection} disabled={testing} className="rounded-full border border-border px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-secondary disabled:opacity-60">
+              {testing && <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" />}
+              Test connection
+            </button>
+          )}
+        </div>
+        {testResult && (
+          <p className={`mt-2 text-[12px] ${testResult.state === "healthy" ? "text-grow" : "text-warn"}`}>
+            {testResult.state === "healthy" ? "Live check succeeded." : `Live check: ${testResult.state.replace(/_/g, " ")}${testResult.detail ? ` — ${testResult.detail}` : ""}`}
+          </p>
         )}
       </Section>
 
@@ -278,6 +317,97 @@ export function IntegrationDetail({ id }: { id: string }) {
         )}
       </Section>
     </div>
+  )
+}
+
+/* GA4-only, section 5 of the vertical slice: "show connected
+ * account/properties, allow default-property selection, evaluate
+ * persisting it." Real data only — list_accounts is the connector's
+ * own real GA4 Admin API action (POST /api/connections/[id]/actions/
+ * list_accounts, restricted server-side to read-only actions), and
+ * the real accountSummaries[].propertySummaries[] shape from that one
+ * call already carries every property under every account this
+ * credential can see — no second list_properties round trip needed.
+ * Saving persists connection.metadata.defaultPropertyId via PATCH
+ * (merged, not replacing other metadata) — additive, so a Worker/tool
+ * call that doesn't pass an explicit propertyId could read this as a
+ * fallback later without any backward-incompatible change today. */
+interface GaPropertySummary {
+  property: string
+  displayName: string
+}
+interface GaAccountSummary {
+  account: string
+  displayName: string
+  propertySummaries?: GaPropertySummary[]
+}
+
+function GoogleAnalyticsPropertyPicker({ connection, onSaved }: { connection: ConnectionSummary; onSaved: () => void }) {
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [accounts, setAccounts] = useState<GaAccountSummary[] | null>(null)
+  const [selected, setSelected] = useState<string>(typeof connection.metadata?.defaultPropertyId === "string" ? connection.metadata.defaultPropertyId : "")
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  async function loadAccounts() {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const res = await api<{ result: { ok: boolean; data?: { accountSummaries: GaAccountSummary[] }; error?: string } }>(`/api/connections/${encodeURIComponent(connection.id)}/actions/list_accounts`, { method: "POST", body: JSON.stringify({}) })
+      if (!res.result.ok) throw new Error(res.result.error ?? "Could not list Google Analytics accounts.")
+      setAccounts(res.result.data?.accountSummaries ?? [])
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Could not list Google Analytics accounts.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function save() {
+    setSaving(true)
+    setSaved(false)
+    try {
+      await api(`/api/connections/${encodeURIComponent(connection.id)}`, { method: "PATCH", body: JSON.stringify({ metadata: { defaultPropertyId: selected } }) })
+      setSaved(true)
+      onSaved()
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Could not save the default property.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const properties = (accounts ?? []).flatMap((a) => (a.propertySummaries ?? []).map((p) => ({ ...p, accountName: a.displayName })))
+
+  return (
+    <Section title="Account & property">
+      {accounts === null ? (
+        <button onClick={loadAccounts} disabled={loading} className="rounded-full border border-border px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-secondary disabled:opacity-60">
+          {loading && <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" />}
+          Load Google Analytics accounts & properties
+        </button>
+      ) : properties.length === 0 ? (
+        <p className="text-[13px] text-muted-foreground">This Google identity has no GA4 accounts or properties it can access.</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={selected} onChange={(e) => setSelected(e.target.value)} className="rounded-lg border border-border bg-secondary/40 px-3 py-1.5 text-[12.5px] text-foreground">
+            <option value="">No default property</option>
+            {properties.map((p) => (
+              <option key={p.property} value={p.property.replace(/^properties\//, "")}>
+                {p.accountName} — {p.displayName} ({p.property.replace(/^properties\//, "")})
+              </option>
+            ))}
+          </select>
+          <button onClick={save} disabled={saving} className="rounded-full bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground hover:opacity-90 disabled:opacity-60">
+            {saving && <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" />}
+            Save as default
+          </button>
+          {saved && <span className="text-[12px] text-grow">Saved.</span>}
+        </div>
+      )}
+      {loadError && <p className="mt-2 text-[12px] text-destructive">{loadError}</p>}
+    </Section>
   )
 }
 

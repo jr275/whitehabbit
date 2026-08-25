@@ -8,15 +8,22 @@ import "server-only"
 
 import { NextResponse } from "next/server"
 import { withApiHandler } from "@/lib/api-error"
+import { getOAuthProvider } from "@/lib/connectors/oauth-providers"
 import { listConnectors } from "@/lib/connectors/registry"
 import { requireSession } from "@/lib/session"
 
-// Real OAuth2 authorize routes — a same-shaped GET redirect endpoint
-// per connector, built as each one's real flow lands (Salesforce
-// first). A connector with no entry here has no real OAuth flow yet;
-// the client falls back to the honest "coming in a later phase" state.
-const OAUTH_AUTHORIZE_PATH: Record<string, string> = {
-  connector_salesforce: "/api/connectors/salesforce/authorize",
+// Real OAuth2 authorize URL per connector. Every connector registered in
+// lib/connectors/oauth-providers.ts (Salesforce, Slack, Google Analytics,
+// and any future provider) gets the generic route for free —
+// /api/connectors/[connectorId]/authorize. Salesforce's own hand-written
+// route (/api/connectors/salesforce/authorize) is kept as the URL here
+// too, since that's the one with a proven-live redirect_uri registered
+// with Salesforce already; every other OAuth2 connector uses the generic
+// path. A connector with no entry in that registry has no real OAuth flow
+// yet; the client falls back to the honest "coming in a later phase" state.
+function oauthAuthorizeUrlFor(connectorId: string): string | undefined {
+  if (connectorId === "connector_salesforce") return "/api/connectors/salesforce/authorize"
+  return getOAuthProvider(connectorId) ? `/api/connectors/${connectorId}/authorize` : undefined
 }
 
 export async function GET() {
@@ -33,7 +40,7 @@ export async function GET() {
       actions: c.actions ?? [],
       triggers: c.triggers ?? [],
       enabled: c.enabled,
-      oauthAuthorizeUrl: c.enabled ? OAUTH_AUTHORIZE_PATH[c.id] : undefined,
+      oauthAuthorizeUrl: c.enabled ? oauthAuthorizeUrlFor(c.id) : undefined,
     }))
     return NextResponse.json({ connectors })
   })
