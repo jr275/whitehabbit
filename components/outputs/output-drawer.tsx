@@ -299,9 +299,9 @@ function DetailView({ output, execution, task, metrics, events }: { output: Work
         </div>
       )}
 
-      <div>
-        <SectionLabel>Execution metadata</SectionLabel>
-        <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">
+      <details className="group rounded-lg border border-border bg-secondary/20">
+        <summary className="cursor-pointer list-none px-3 py-3 font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">Technical execution details</summary>
+        <dl className="flex flex-col divide-y divide-border border-t border-border">
           {isDev && <MetaRow k="Mode" v="Development simulation — no external LLM was called" />}
           <MetaRow k="Timestamp" v={new Date(output.createdAt).toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" })} />
           <MetaRow k="Duration" v={execution?.durationMs ? `${Math.round(execution.durationMs / 1000)}s` : "—"} />
@@ -310,7 +310,7 @@ function DetailView({ output, execution, task, metrics, events }: { output: Work
           <MetaRow k="Cost" v={isDev ? "$0.0000 (development)" : execution?.costUsd != null ? `$${execution.costUsd.toFixed(4)}` : "—"} />
           <MetaRow k="Tools used" v={toolNames || "—"} />
         </dl>
-      </div>
+      </details>
     </div>
   )
 }
