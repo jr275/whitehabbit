@@ -15,6 +15,7 @@
  * from a server route).
  * ================================================================== */
 
+import { deriveHttpRisk } from "./http-risk"
 import type { ConnectorAction, ConnectorSchema, ConnectorSchemaField } from "./types"
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const
@@ -81,8 +82,7 @@ function operationToAction(path: string, method: HttpMethod, op: Record<string, 
 
   if (!description) warnings.push(`${method.toUpperCase()} ${path}: no description in the spec — the generated action's description is empty.`)
 
-  const permission: ConnectorAction["permission"] = method === "get" ? "read" : method === "delete" ? "delete" : "write"
-  const riskLevel: ConnectorAction["riskLevel"] = permission === "read" ? "low" : permission === "delete" ? "high" : "medium"
+  const { permission, riskLevel } = deriveHttpRisk(method)
 
   return {
     id,

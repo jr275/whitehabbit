@@ -14,7 +14,18 @@ import "server-only"
  * hanging or faking a response. No MCP server is configured in this
  * deployment (see lib/connectors/mcp-connector.ts) — this client is
  * real, tested code with nothing real to point it at yet.
+ *
+ * endpointUrl is org-configurable for a dynamic (custom_connectors)
+ * MCP connector (lib/connectors/dynamic.ts) — every real request here
+ * goes through lib/security/safe-fetch.ts's safeFetch(), the same
+ * SSRF guard + no-follow-redirects + bounded-response-size protection
+ * lib/connectors/custom-rest.ts uses (connector platform audit, Fase
+ * D3). The static single-server MCP connector (endpointUrl from
+ * MCP_SERVER_URL, an operator/deployer env var, not org input) goes
+ * through the identical path — one real HTTP entry point, not two.
  * ================================================================== */
+
+import { readBoundedText, safeFetch } from "@/lib/security/safe-fetch"
 
 const PROTOCOL_VERSION = "2025-03-26"
 
@@ -44,16 +55,24 @@ export class McpClientError extends Error {}
  * omitted; a server that requires one will reject the call, reported
  * as a real error, never silently ignored). */
 async function rpcCall<T>(endpointUrl: string, headers: Record<string, string>, method: string, params: unknown): Promise<T> {
-  const res = await fetch(endpointUrl, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json, text/event-stream",
-      ...headers,
-    },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    signal: AbortSignal.timeout(30_000),
-  })
+  let res: Response
+  try {
+    res = await safeFetch(endpointUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        ...headers,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch (err) {
+    // Includes UnsafeUrlError from the SSRF guard — surfaced as a real
+    // McpClientError, same "honest failure, never a silent skip"
+    // contract every other error path in this client already follows.
+    throw err instanceof McpClientError ? err : new McpClientError(err instanceof Error ? err.message : `Could not reach the MCP server for ${method}.`)
+  }
 
   if (!res.ok) {
     throw new McpClientError(`MCP server returned ${res.status} for ${method}.`)
@@ -64,7 +83,13 @@ async function rpcCall<T>(endpointUrl: string, headers: Record<string, string>, 
     throw new McpClientError("This MCP server requires an SSE-streamed session — not supported by this client yet.")
   }
 
-  const json = (await res.json()) as JsonRpcResponse<T>
+  const bodyText = await readBoundedText(res)
+  let json: JsonRpcResponse<T>
+  try {
+    json = JSON.parse(bodyText) as JsonRpcResponse<T>
+  } catch {
+    throw new McpClientError(`MCP server returned a non-JSON response for ${method}.`)
+  }
   if (json.error) throw new McpClientError(`MCP server error (${json.error.code}): ${json.error.message}`)
   if (json.result === undefined) throw new McpClientError(`MCP server returned no result for ${method}.`)
   return json.result

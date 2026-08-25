@@ -114,4 +114,92 @@ describe.skipIf(!hasDb)("Category A — dynamic connectors (Custom REST Connecto
     expect(row.status).toBe("not_connected")
     expect(buildDynamicConnectorTools(row)).toEqual([]) // never builds tools for an unconnected custom connector
   })
+
+  // Connector platform audit, Fase D5 — the BLOCKER: the generic "call"
+  // action can issue ANY real HTTP method, so its declared permission/
+  // riskLevel must be the most conservative one requiresApprovalByDefault()
+  // (lib/workforce/model.ts) would ever need to gate on for a REST call
+  // — proven here through the REAL server-side gate (runToolAction), not
+  // just by reading the static fields.
+  it("the generic 'call' action's declared permission/riskLevel always requires approval through the real gate, regardless of which HTTP method a given call actually uses", async () => {
+    const { createOrganization, createCustomConnector, updateCustomConnectorDiscovery } = await import("@/lib/db/repo")
+    const { buildDynamicConnectorTools } = await import("@/lib/connectors/dynamic")
+    const { runToolAction } = await import("@/lib/agent/tool-runner")
+    const { ApprovalRequiredError } = await import("@/lib/agent/types")
+
+    const org = await createOrganization(`Dynamic Generic Call Risk ${randomUUID()}`)
+    const row = await createCustomConnector({ orgId: org.id, kind: "rest", name: "Risk API", config: { baseUrl, authType: "none" } })
+    const connected = await updateCustomConnectorDiscovery(row.id, org.id, { status: "connected" })
+    const callAction = buildDynamicConnectorTools(connected!)[0].actions.find((a) => a.id === "call")!
+
+    expect(callAction.permission).toBe("delete")
+    expect(callAction.riskLevel).toBe("high")
+
+    for (const method of ["GET", "POST", "DELETE"]) {
+      await expect(runToolAction("custom.actions", "Risk API", callAction, { method, path: "/ping" }, { workerId: "w", executionId: "e", emit: () => {} })).rejects.toBeInstanceOf(ApprovalRequiredError)
+    }
+  })
+
+  it("path traversal ('..') in the generic 'call' action's path is rejected before any request is sent", async () => {
+    const { createOrganization, createCustomConnector, updateCustomConnectorDiscovery } = await import("@/lib/db/repo")
+    const { buildDynamicConnectorTools } = await import("@/lib/connectors/dynamic")
+
+    const org = await createOrganization(`Dynamic Path Traversal ${randomUUID()}`)
+    const row = await createCustomConnector({ orgId: org.id, kind: "rest", name: "Traversal API", config: { baseUrl, authType: "none" } })
+    const connected = await updateCustomConnectorDiscovery(row.id, org.id, { status: "connected" })
+    const callAction = buildDynamicConnectorTools(connected!)[0].actions.find((a) => a.id === "call")!
+
+    const before = lastRequest
+    const result = await callAction.run({ method: "GET", path: "/../../etc/passwd" }, { workerId: "w", executionId: "e", emit: () => {} })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/\.\./)
+    expect(lastRequest).toBe(before) // no request was ever actually sent
+  })
+
+  it("path traversal via a discovered action's substituted path parameter is also rejected", async () => {
+    const { createOrganization, createCustomConnector, updateCustomConnectorDiscovery } = await import("@/lib/db/repo")
+    const { buildDynamicConnectorTools } = await import("@/lib/connectors/dynamic")
+
+    const org = await createOrganization(`Dynamic Path Param Traversal ${randomUUID()}`)
+    const row = await createCustomConnector({ orgId: org.id, kind: "rest", name: "Items API 2", config: { baseUrl, authType: "none" } })
+    const connected = await updateCustomConnectorDiscovery(row.id, org.id, {
+      status: "connected",
+      discoveredTools: [{ id: "get_item", label: "Get item", description: "", inputSchema: { id: { type: "string", description: "Item id", required: true } }, outputSchema: {}, permission: "read", riskLevel: "low", httpMethod: "GET", httpPath: "/items/{id}" }],
+    })
+    const action = buildDynamicConnectorTools(connected!)[0].actions.find((a) => a.id === "get_item")!
+    const result = await action.run({ id: ".." }, { workerId: "w", executionId: "e", emit: () => {} })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/\.\./)
+  })
+
+  it("a caller-supplied header can never override the real resolved credential header (Authorization stays authoritative)", async () => {
+    const { createOrganization, createCustomConnector, setCustomConnectorCredential, updateCustomConnectorDiscovery } = await import("@/lib/db/repo")
+    const { buildDynamicConnectorTools } = await import("@/lib/connectors/dynamic")
+
+    const org = await createOrganization(`Dynamic Header Collision ${randomUUID()}`)
+    const row = await createCustomConnector({ orgId: org.id, kind: "rest", name: "Collision API", config: { baseUrl, authType: "bearer_token" } })
+    await setCustomConnectorCredential(row.id, org.id, { type: "bearer_token", token: "the-real-token" })
+    const connected = await updateCustomConnectorDiscovery(row.id, org.id, { status: "connected" })
+    const callAction = buildDynamicConnectorTools(connected!)[0].actions.find((a) => a.id === "call")!
+
+    await callAction.run({ method: "GET", path: "/ping", headers: { authorization: "Bearer attacker-supplied-value" } }, { workerId: "w", executionId: "e", emit: () => {} })
+    expect(lastRequest?.headers["authorization"]).toBe("Bearer the-real-token")
+  })
+
+  it("SSRF: a custom connector configured against a private-network baseUrl is blocked before any request is attempted", async () => {
+    const { createOrganization, createCustomConnector, updateCustomConnectorDiscovery } = await import("@/lib/db/repo")
+    const { buildDynamicConnectorTools } = await import("@/lib/connectors/dynamic")
+
+    const org = await createOrganization(`Dynamic SSRF ${randomUUID()}`)
+    // A private-range address distinct from the loopback this whole
+    // suite legitimately uses (see lib/security/ssrf-guard.ts's narrow,
+    // Vitest-only loopback carve-out) — 10.x stays blocked unconditionally.
+    const row = await createCustomConnector({ orgId: org.id, kind: "rest", name: "SSRF API", config: { baseUrl: "http://10.255.255.1", authType: "none" } })
+    const connected = await updateCustomConnectorDiscovery(row.id, org.id, { status: "connected" })
+    const callAction = buildDynamicConnectorTools(connected!)[0].actions.find((a) => a.id === "call")!
+
+    const result = await callAction.run({ method: "GET", path: "/" }, { workerId: "w", executionId: "e", emit: () => {} })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/private|internal/i)
+  })
 })
