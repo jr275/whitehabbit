@@ -9,6 +9,7 @@ import { StudioShell } from "@/components/studio/studio-shell"
 import { WorkerCanvas } from "@/components/studio/worker-canvas"
 import { WorkerAvatar } from "@/components/workforce/worker-avatar"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
+import { agentHealth } from "@/lib/workforce/agent-identity"
 
 const EXAMPLES = [
   "Research high-intent enterprise accounts and brief my sales team",
@@ -43,6 +44,9 @@ export function WorkerStudio({ runtimeMode }: { runtimeMode?: "development" | "p
   }
 
   const running = workforceStore.isRunning(worker.id)
+  const health = agentHealth(worker)
+  const workerExecutions = executions.filter((execution) => execution.workerId === worker.id)
+  const workerOutputs = outputs.filter((output) => output.workerId === worker.id)
   return (
     <StudioShell runtimeMode={runtimeMode}>
       <div className="flex h-[calc(100dvh-3.5rem)] flex-col overflow-hidden">
@@ -55,6 +59,7 @@ export function WorkerStudio({ runtimeMode }: { runtimeMode?: "development" | "p
             <button onClick={() => setShowAssembler(true)} className="hidden items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary sm:flex"><Sparkles className="size-3.5 text-primary" />Assemble another</button>
           </div>
         </header>
+        <div className="hidden shrink-0 items-center gap-5 border-b border-border bg-background/70 px-6 py-2 lg:flex"><div className="flex items-center gap-2"><span className={`size-1.5 rounded-full ${running ? "animate-pulse bg-primary" : worker.status === "live" ? "bg-grow" : "bg-muted-foreground"}`} /><span className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">{running ? "Executing" : worker.status}</span></div><StudioStat label="Readiness" value={`${health.readiness}%`} /><StudioStat label="Skills" value={String(health.enabledSkills)} /><StudioStat label="Tools" value={`${health.connectedTools}/${health.requiredTools}`} /><StudioStat label="Runs" value={String(workerExecutions.length)} /><StudioStat label="Outputs" value={String(workerOutputs.length)} /><span className="ml-auto font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">Agent IDE · persisted draft</span></div>
         {notice && <div className="shrink-0 border-b border-border px-4 py-2"><Notice text={notice} /></div>}
         <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)_20rem] xl:grid-cols-[19rem_minmax(0,1fr)_22rem]">
           <aside className="hidden min-h-0 flex-col border-r border-border bg-card/60 lg:flex"><ZoneLabel>Configure</ZoneLabel><div className="min-h-0 flex-1"><BuildPanel worker={worker} activeStep={activeStep} onStepChange={setActiveStep} /></div></aside>
@@ -99,6 +104,7 @@ function MagicStart({ creating, notice, compact = false, onComplete }: { creatin
   )
 }
 
+function StudioStat({ label, value }: { label: string; value: string }) { return <div className="flex items-center gap-1.5"><span className="font-mono text-[8px] uppercase tracking-[0.14em] text-muted-foreground/70">{label}</span><span className="font-mono text-[9px] font-medium text-foreground">{value}</span></div> }
 function ZoneLabel({ children }: { children: React.ReactNode }) { return <div className="shrink-0 border-b border-border px-4 py-2.5"><span className="font-mono text-[9px] uppercase tracking-[0.28em] text-muted-foreground">{children}</span></div> }
 function Notice({ text }: { text: string }) { return <div className="mx-auto flex max-w-xl items-start gap-2 rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-left"><p className="flex-1 text-xs leading-relaxed text-foreground">{text}</p><button onClick={() => workforceStore.dismissNotice()} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="Dismiss notice"><X className="size-3.5" /></button></div> }
 function WorkerSwitcher({ workers, activeId, onAssemble }: { workers: ReturnType<typeof useWorkforce>["workers"]; activeId: string; onAssemble: () => void }) {
