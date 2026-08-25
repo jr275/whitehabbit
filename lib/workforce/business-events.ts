@@ -186,6 +186,41 @@ function fromCreativeConcepts(structured: CreativeConceptsPayload): DerivedBusin
   ]
 }
 
+interface ScoredLead {
+  id: string
+  name: string
+  company: string
+  score: number
+  reasoning: string
+  updated: boolean
+  notified: boolean
+}
+interface LeadPipelinePayload {
+  query: string
+  candidatesFound: number
+  leads: ScoredLead[]
+}
+
+/** Every lead in this payload was actually, really updated in
+ * Salesforce (runToolAction() already threw before a skill could
+ * report an unapproved update as if it happened) — a real, external-
+ * system-confirmed business event, not a prediction. */
+function fromLeadPipelineSync(structured: LeadPipelinePayload): DerivedBusinessEvent[] {
+  const updated = structured.leads.filter((l) => l.updated)
+  if (updated.length === 0) return []
+  return [
+    {
+      type: "salesforce_lead_updated",
+      entityType: "lead_batch",
+      numericValue: updated.length,
+      confidence: Math.round(updated.reduce((s, l) => s + l.score, 0) / updated.length),
+      source: "connector:salesforce",
+      payload: { leads: updated.map((l) => ({ id: l.id, name: l.name, company: l.company, score: l.score, reasoning: l.reasoning, notified: l.notified })) },
+      relatedMetricKeys: ["leads_updated"],
+    },
+  ]
+}
+
 /** Returns [] when there's genuinely no real business event to
  * record — a failed/blocked execution, or a skill whose output type
  * has no mapping yet. Never guesses. */
@@ -204,6 +239,8 @@ export function deriveBusinessEvents(output: WorkerOutput): DerivedBusinessEvent
       return fromIntelligenceReport(output.structured as IntelligenceReportPayload)
     case "creative_concepts":
       return fromCreativeConcepts(output.structured as CreativeConceptsPayload)
+    case "lead_pipeline_sync":
+      return fromLeadPipelineSync(output.structured as LeadPipelinePayload)
     default:
       return []
   }
@@ -225,6 +262,7 @@ export const DOMAIN_METRIC_TAXONOMY: Record<string, DomainMetricDef[]> = {
   sales: [
     { key: "leads_qualified", label: "Qualified leads", real: true },
     { key: "candidates_researched", label: "Candidates researched", real: true },
+    { key: "leads_updated", label: "Salesforce leads updated", real: true },
     { key: "pipeline_influenced", label: "Pipeline influenced", real: false },
     { key: "meetings_booked", label: "Meetings booked", real: false },
     { key: "opportunities_created", label: "Opportunities created", real: false },

@@ -6,6 +6,7 @@ import { culturalIntelligenceSkill } from "./cultural-intelligence"
 import { customerConversationSkill } from "./customer-conversation"
 import { engagementAnalysisSkill } from "./engagement-analysis"
 import { leadQualificationSkill } from "./lead-qualification"
+import { salesforceLeadPipelineSkill } from "./salesforce-lead-pipeline"
 import { seoOpportunitySkill } from "./seo-opportunity"
 import { trendResearchSkill } from "./trend-research"
 import type { SkillDefinition } from "@/lib/agent/types"
@@ -26,6 +27,7 @@ export const SKILL_REGISTRY: SkillDefinition[] = [
   customerConversationSkill,
   culturalIntelligenceSkill,
   creativeTerritoryGenerationSkill,
+  salesforceLeadPipelineSkill,
 ]
 
 export function getSkill(id: string): SkillDefinition | undefined {

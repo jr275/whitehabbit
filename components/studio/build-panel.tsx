@@ -13,14 +13,14 @@
  * ------------------------------------------------------------------ */
 
 import { Check, Loader2, Plus, Rocket, Trash2, X } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { BEHAVIOR_PRESETS, CHANNEL_CATALOG, KNOWLEDGE_TEMPLATES, SKILL_CATALOG, TONE_PRESETS, TOOL_CATALOG } from "@/lib/workforce/catalog"
 import type { Autonomy, ChannelId, SkillCategory, Worker } from "@/lib/workforce/model"
 import { OUTCOME_PRESETS, SKILL_CATEGORIES, SKILL_CATEGORY_LABEL, TOOL_BOUNDARY_META, toolExecutionBoundary } from "@/lib/workforce/model"
 import { computeReadiness } from "@/lib/workforce/selectors"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
-export type StepKey = "identity" | "mission" | "knowledge" | "skills" | "tools" | "behavior" | "channels" | "test" | "release"
+export type StepKey = "identity" | "mission" | "knowledge" | "skills" | "tools" | "integrations" | "behavior" | "channels" | "test" | "release"
 
 const STEPS: { key: StepKey; number: string; label: string }[] = [
   { key: "identity", number: "01", label: "Identity" },
@@ -28,10 +28,11 @@ const STEPS: { key: StepKey; number: string; label: string }[] = [
   { key: "knowledge", number: "03", label: "Knowledge" },
   { key: "skills", number: "04", label: "Skills" },
   { key: "tools", number: "05", label: "Tools" },
-  { key: "behavior", number: "06", label: "Behavior" },
-  { key: "channels", number: "07", label: "Channels" },
-  { key: "test", number: "08", label: "Test" },
-  { key: "release", number: "09", label: "Release" },
+  { key: "integrations", number: "06", label: "Integrations" },
+  { key: "behavior", number: "07", label: "Behavior" },
+  { key: "channels", number: "08", label: "Channels" },
+  { key: "test", number: "09", label: "Test" },
+  { key: "release", number: "10", label: "Release" },
 ]
 
 function stepSummary(worker: Worker, key: StepKey): string {
@@ -46,6 +47,8 @@ function stepSummary(worker: Worker, key: StepKey): string {
       return `${worker.skills.filter((s) => s.enabled).length} configured`
     case "tools":
       return `${worker.tools.filter((t) => t.connected).length} available`
+    case "integrations":
+      return `${worker.integrations.length} connected`
     case "behavior":
       return `${worker.behaviors.length} rule${worker.behaviors.length === 1 ? "" : "s"}`
     case "channels":
@@ -141,6 +144,8 @@ function StepEditor({ step, worker, onAdvance }: { step: StepKey; worker: Worker
       return <SkillsStep worker={worker} onAdvance={onAdvance} />
     case "tools":
       return <ToolsStep worker={worker} onAdvance={onAdvance} />
+    case "integrations":
+      return <IntegrationsStep worker={worker} onAdvance={onAdvance} />
     case "behavior":
       return <BehaviorStep worker={worker} onAdvance={onAdvance} />
     case "channels":
@@ -499,6 +504,133 @@ function ToolsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => voi
              * that isn't real. */}
             {tool.id === "tool_llm" && !tool.connected && (
               <p className="mt-1.5 pl-[1.625rem] text-[10.5px] italic text-muted-foreground">Required to run this worker — every skill needs a real AI model connected.</p>
+            )}
+          </div>
+        )
+      })}
+      <Continue onClick={onAdvance} />
+    </div>
+  )
+}
+
+/* ---- 06 Integrations — the real Agent Studio Integration Picker
+ * (section "PHASE 4"). Add a real, connected Connector; select which
+ * of its real actions this Worker may use, and each one's real
+ * permission decision — enforced server-side in lib/agent/tool-
+ * runner.ts's runToolAction(), not just this UI. Persists straight to
+ * worker.integrations via the same PATCH path every other step uses. ---- */
+interface StudioConnectorAction {
+  id: string
+  label: string
+  permission: string
+  riskLevel: string
+}
+interface StudioConnector {
+  id: string
+  name: string
+  actions: StudioConnectorAction[]
+}
+interface StudioConnection {
+  id: string
+  connectorId: string
+  status: string
+  displayName?: string
+}
+
+function IntegrationsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => void }) {
+  const [connectors, setConnectors] = useState<StudioConnector[] | null>(null)
+  const [connections, setConnections] = useState<StudioConnection[]>([])
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/connectors", { headers: { "content-type": "application/json" } }).then((r) => r.json()),
+      fetch("/api/connections", { headers: { "content-type": "application/json" } }).then((r) => r.json()),
+    ]).then(([c, conns]) => {
+      setConnectors(c.connectors ?? [])
+      setConnections(conns.connections ?? [])
+    })
+  }, [])
+
+  const connectedConnections = connections.filter((c) => c.status === "connected")
+
+  function toggleConnector(connector: StudioConnector, connectionId: string) {
+    const exists = worker.integrations.find((cfg) => cfg.connectorId === connector.id)
+    if (exists) {
+      workforceStore.setWorkerIntegrations(
+        worker.id,
+        worker.integrations.filter((cfg) => cfg.connectorId !== connector.id),
+      )
+    } else {
+      workforceStore.setWorkerIntegrations(worker.id, [
+        ...worker.integrations,
+        { connectorId: connector.id, connectionId, actions: connector.actions.map((a) => ({ actionId: a.id, enabled: false, permission: "requires_approval" as const })) },
+      ])
+    }
+  }
+
+  function toggleAction(connectorId: string, actionId: string) {
+    workforceStore.setWorkerIntegrations(
+      worker.id,
+      worker.integrations.map((cfg) => (cfg.connectorId !== connectorId ? cfg : { ...cfg, actions: cfg.actions.map((a) => (a.actionId === actionId ? { ...a, enabled: !a.enabled } : a)) })),
+    )
+  }
+
+  function setPermission(connectorId: string, actionId: string, permission: "allow" | "deny" | "requires_approval") {
+    workforceStore.setWorkerIntegrations(
+      worker.id,
+      worker.integrations.map((cfg) => (cfg.connectorId !== connectorId ? cfg : { ...cfg, actions: cfg.actions.map((a) => (a.actionId === actionId ? { ...a, permission } : a)) })),
+    )
+  }
+
+  if (!connectors) return <p className="text-[12.5px] text-muted-foreground">Loading…</p>
+
+  return (
+    <div className="flex flex-col gap-2">
+      {connectedConnections.length === 0 && (
+        <p className="text-[12.5px] text-muted-foreground">
+          No connected integrations yet.{" "}
+          <a href="/integrations" target="_blank" rel="noreferrer" className="text-primary underline">
+            Connect one in the Integration Hub
+          </a>
+          , then come back here.
+        </p>
+      )}
+      {connectedConnections.map((conn) => {
+        const connector = connectors.find((c) => c.id === conn.connectorId)
+        if (!connector || connector.actions.length === 0) return null
+        const cfg = worker.integrations.find((x) => x.connectorId === connector.id)
+        const added = !!cfg
+        return (
+          <div key={connector.id} className="rounded-lg border border-border bg-card px-2.5 py-2">
+            <button onClick={() => toggleConnector(connector, conn.id)} className="flex w-full items-center gap-2">
+              <Switch on={added} />
+              <span className={`flex-1 text-left text-[12.5px] font-medium ${added ? "text-foreground" : "text-muted-foreground"}`}>{connector.name}</span>
+              <span className="font-mono text-[9.5px] uppercase tracking-wider text-muted-foreground">{conn.displayName || conn.status}</span>
+            </button>
+            {added && cfg && (
+              <div className="mt-2 flex flex-col gap-1.5 pl-[1.625rem]">
+                {connector.actions.map((action) => {
+                  const actionCfg = cfg.actions.find((a) => a.actionId === action.id) ?? { actionId: action.id, enabled: false, permission: "requires_approval" as const }
+                  return (
+                    <div key={action.id} className="flex items-center gap-2">
+                      <button onClick={() => toggleAction(connector.id, action.id)} className="flex flex-1 items-center gap-1.5 text-left">
+                        <Switch on={actionCfg.enabled} />
+                        <span className={`truncate text-[11.5px] ${actionCfg.enabled ? "text-foreground" : "text-muted-foreground"}`}>{action.label}</span>
+                      </button>
+                      <select
+                        value={actionCfg.permission}
+                        onChange={(e) => setPermission(connector.id, action.id, e.target.value as "allow" | "deny" | "requires_approval")}
+                        disabled={!actionCfg.enabled}
+                        className="modal-input w-auto py-0.5 font-mono text-[10px] uppercase tracking-wider disabled:opacity-40"
+                      >
+                        <option value="allow">Allow</option>
+                        <option value="requires_approval">Requires approval</option>
+                        <option value="deny">Deny</option>
+                      </select>
+                    </div>
+                  )
+                })}
+              </div>
             )}
           </div>
         )

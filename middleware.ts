@@ -1,6 +1,6 @@
 /* ================================================================== *
- * MIDDLEWARE — page-level auth gate for /studio, /outputs and
- * /marketing.
+ * MIDDLEWARE — page-level auth gate for /studio, /outputs, /marketing,
+ * /approvals and /integrations.
  *
  * Builds its own lightweight NextAuth instance from the edge-safe
  * lib/auth.config.ts alone (no providers, no database import) — the
@@ -25,8 +25,7 @@ const { auth } = NextAuth(authConfig)
 
 export default auth((req) => {
   const isAuthed = !!req.auth
-  const protectedPath =
-    req.nextUrl.pathname.startsWith("/studio") || req.nextUrl.pathname.startsWith("/outputs") || req.nextUrl.pathname.startsWith("/marketing")
+  const protectedPath = ["/studio", "/outputs", "/marketing", "/approvals", "/integrations"].some((p) => req.nextUrl.pathname.startsWith(p))
   if (protectedPath && !isAuthed) {
     const loginUrl = new URL("/login", req.nextUrl.origin)
     loginUrl.searchParams.set("callbackUrl", req.nextUrl.pathname)
@@ -36,5 +35,5 @@ export default auth((req) => {
 })
 
 export const config = {
-  matcher: ["/studio/:path*", "/outputs/:path*", "/marketing/:path*"],
+  matcher: ["/studio/:path*", "/outputs/:path*", "/marketing/:path*", "/approvals/:path*", "/integrations/:path*"],
 }

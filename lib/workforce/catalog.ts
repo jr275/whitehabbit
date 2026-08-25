@@ -107,6 +107,22 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     requiredTools: ["tool_llm"],
     inputs: [{ key: "query", label: "Which opportunity or cultural moment should it develop creative territories for?", type: "text", required: true, placeholder: "A surge of interest in retro gaming nostalgia among 25-34 year olds" }],
   },
+  {
+    id: "skill_salesforce_lead_pipeline",
+    name: "Salesforce Lead Pipeline",
+    category: "sales",
+    description: "Searches real Salesforce leads, researches each one, scores them with a real LLM, and updates the real Salesforce record — the full Salesforce → Research → LLM → Salesforce → Slack golden flow.",
+    outputType: "lead_pipeline_sync",
+    taskTitle: "Sync and score Salesforce leads",
+    // connector_salesforce.actions is a dynamic, Connector-provided
+    // tool id — never in TOOL_CATALOG, so Studio's readiness bar won't
+    // pre-flight-warn about it the way it does for a native tool; the
+    // skill itself still honestly blocks at runtime (SkillBlockedError)
+    // if Salesforce isn't connected. See the Studio Integrations step
+    // for where a Worker is actually wired to a real Connection.
+    requiredTools: ["tool_web_search", "tool_llm"],
+    inputs: [{ key: "query", label: "Which Salesforce leads should it work on?", type: "text", required: true, placeholder: "Recently created leads in the software industry" }],
+  },
 ]
 
 export interface ToolTemplate {

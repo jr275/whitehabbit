@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto"
 import { query, queryOne, withTransaction } from "./client"
 import type { Connection } from "@/lib/connectors/types"
 import type {
+  Approval,
   BusinessEvent,
   MetricRecord,
   Worker,
@@ -134,6 +135,11 @@ function rowToWorker(r: WorkerRow): Worker {
   return {
     ...def,
     id: r.id,
+    // A Worker persisted before this field existed has no
+    // `integrations` in its stored JSONB — real old data, not a bug —
+    // default it here, the one real read boundary, rather than
+    // requiring every downstream reader to guard against undefined.
+    integrations: def.integrations ?? [],
     status: r.status as Worker["status"],
     tested: r.tested,
     releasedVersionId: r.released_version_id,
@@ -265,7 +271,10 @@ function rowToVersion(r: WorkerVersionRow): WorkerVersion {
     id: r.id,
     workerId: r.worker_id,
     versionNumber: r.version_number,
-    definition: r.definition,
+    // Same real-old-data defaulting as rowToWorker() above — a
+    // version built before this field existed has no `integrations`
+    // in its frozen JSONB.
+    definition: { ...r.definition, integrations: r.definition.integrations ?? [] },
     fingerprint: r.fingerprint,
     status: r.status as WorkerVersion["status"],
     createdAt: Number(r.created_at),
@@ -996,4 +1005,164 @@ export async function updateConnectionStatus(
  * historical record, which already survives the row's deletion. */
 export async function deleteConnection(id: string, orgId: string): Promise<void> {
   await query("DELETE FROM connections WHERE id = $1 AND org_id = $2", [id, orgId])
+}
+
+/* ================================================================== *
+ * OAUTH CREDENTIALS — one encrypted row per Connection. The plaintext
+ * secret is never returned by these functions' TYPES here (they move
+ * the encrypted string) — encryption/decryption itself is
+ * lib/crypto/secret-box.ts's job, called by lib/connectors/token-
+ * store.ts, never inline in a route handler.
+ * ================================================================== */
+
+export interface OAuthCredentialRow {
+  id: string
+  connectionId: string
+  accessTokenEncrypted: string
+  refreshTokenEncrypted: string | null
+  tokenType: string | null
+  scope: string | null
+  expiresAt: number | null
+}
+
+export async function upsertOAuthCredential(input: {
+  connectionId: string
+  accessTokenEncrypted: string
+  refreshTokenEncrypted?: string | null
+  tokenType?: string | null
+  scope?: string | null
+  expiresAt?: number | null
+}): Promise<void> {
+  const now = Date.now()
+  await query(
+    `INSERT INTO oauth_credentials (id, connection_id, access_token_encrypted, refresh_token_encrypted, token_type, scope, expires_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+     ON CONFLICT (connection_id) DO UPDATE SET
+       access_token_encrypted = EXCLUDED.access_token_encrypted,
+       refresh_token_encrypted = COALESCE(EXCLUDED.refresh_token_encrypted, oauth_credentials.refresh_token_encrypted),
+       token_type = EXCLUDED.token_type,
+       scope = EXCLUDED.scope,
+       expires_at = EXCLUDED.expires_at,
+       updated_at = $8`,
+    [`oauthcred_${randomUUID()}`, input.connectionId, input.accessTokenEncrypted, input.refreshTokenEncrypted ?? null, input.tokenType ?? null, input.scope ?? null, input.expiresAt ?? null, now],
+  )
+}
+
+export async function getOAuthCredential(connectionId: string): Promise<OAuthCredentialRow | null> {
+  const row = await queryOne<{
+    id: string
+    connection_id: string
+    access_token_encrypted: string
+    refresh_token_encrypted: string | null
+    token_type: string | null
+    scope: string | null
+    expires_at: string | null
+  }>("SELECT * FROM oauth_credentials WHERE connection_id = $1", [connectionId])
+  if (!row) return null
+  return {
+    id: row.id,
+    connectionId: row.connection_id,
+    accessTokenEncrypted: row.access_token_encrypted,
+    refreshTokenEncrypted: row.refresh_token_encrypted,
+    tokenType: row.token_type,
+    scope: row.scope,
+    expiresAt: row.expires_at ? Number(row.expires_at) : null,
+  }
+}
+
+export async function deleteOAuthCredential(connectionId: string): Promise<void> {
+  await query("DELETE FROM oauth_credentials WHERE connection_id = $1", [connectionId])
+}
+
+/* ================================================================== *
+ * APPROVALS — the real Human-in-the-Loop queue (section "PHASE 6").
+ * ================================================================== */
+
+interface ApprovalRow {
+  id: string
+  worker_id: string
+  execution_id: string | null
+  tool_id: string
+  tool_name: string
+  action_id: string
+  action_label: string
+  permission: string
+  reason: string
+  input: unknown
+  status: string
+  result: unknown
+  requested_at: string
+  decided_at: string | null
+  decided_by: string | null
+}
+
+function rowToApproval(r: ApprovalRow): Approval {
+  return {
+    id: r.id,
+    workerId: r.worker_id,
+    executionId: r.execution_id ?? undefined,
+    toolId: r.tool_id,
+    toolName: r.tool_name,
+    actionId: r.action_id,
+    actionLabel: r.action_label,
+    permission: r.permission as Approval["permission"],
+    reason: r.reason,
+    input: r.input,
+    status: r.status as Approval["status"],
+    result: r.result ?? undefined,
+    requestedAt: Number(r.requested_at),
+    decidedAt: r.decided_at ? Number(r.decided_at) : undefined,
+    decidedBy: r.decided_by ?? undefined,
+  }
+}
+
+export async function createApproval(input: {
+  orgId: string
+  workerId: string
+  executionId?: string
+  toolId: string
+  toolName: string
+  actionId: string
+  actionLabel: string
+  permission: string
+  reason: string
+  input: unknown
+}): Promise<Approval> {
+  const id = `appr_${randomUUID()}`
+  const now = Date.now()
+  await query(
+    `INSERT INTO approvals (id, org_id, worker_id, execution_id, tool_id, tool_name, action_id, action_label, permission, reason, input, status, requested_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12)`,
+    [id, input.orgId, input.workerId, input.executionId ?? null, input.toolId, input.toolName, input.actionId, input.actionLabel, input.permission, input.reason, JSON.stringify(input.input ?? {}), now],
+  )
+  return (await getApproval(id, input.orgId))!
+}
+
+export async function listApprovals(orgId: string, opts?: { status?: Approval["status"] }): Promise<Approval[]> {
+  const rows = opts?.status
+    ? await query<ApprovalRow>("SELECT * FROM approvals WHERE org_id = $1 AND status = $2 ORDER BY requested_at DESC LIMIT 200", [orgId, opts.status])
+    : await query<ApprovalRow>("SELECT * FROM approvals WHERE org_id = $1 ORDER BY requested_at DESC LIMIT 200", [orgId])
+  return rows.map(rowToApproval)
+}
+
+export async function getApproval(id: string, orgId: string): Promise<Approval | null> {
+  const row = await queryOne<ApprovalRow>("SELECT * FROM approvals WHERE id = $1 AND org_id = $2", [id, orgId])
+  return row ? rowToApproval(row) : null
+}
+
+export async function decideApproval(
+  id: string,
+  orgId: string,
+  update: { status: "approved" | "rejected"; decidedBy: string; result?: unknown },
+): Promise<Approval | null> {
+  const now = Date.now()
+  await query("UPDATE approvals SET status = $1, decided_at = $2, decided_by = $3, result = $4 WHERE id = $5 AND org_id = $6", [
+    update.status,
+    now,
+    update.decidedBy,
+    update.result != null ? JSON.stringify(update.result) : null,
+    id,
+    orgId,
+  ])
+  return getApproval(id, orgId)
 }

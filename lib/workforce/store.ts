@@ -353,6 +353,15 @@ class WorkforceStore {
     this.schedulePersist(workerId, "tools")
   }
 
+  /* ---- Integrations — the Studio Integration Picker's real,
+   * persisted per-action permission config. Server-enforced in
+   * lib/agent/tool-runner.ts's runToolAction(), never just a hidden
+   * button — see EDITABLE_FIELDS in app/api/workers/[id]/route.ts. */
+  setWorkerIntegrations(workerId: string, integrations: import("./model").WorkerIntegrationConfig[]) {
+    this.patchWorker(workerId, (w) => ({ ...w, integrations }))
+    this.schedulePersist(workerId)
+  }
+
   /* ---- 06 Behavior ---- */
   addBehavior(workerId: string, raw: string) {
     const trimmed = raw.trim()

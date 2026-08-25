@@ -11,6 +11,14 @@ import { withApiHandler } from "@/lib/api-error"
 import { listConnectors } from "@/lib/connectors/registry"
 import { requireSession } from "@/lib/session"
 
+// Real OAuth2 authorize routes — a same-shaped GET redirect endpoint
+// per connector, built as each one's real flow lands (Salesforce
+// first). A connector with no entry here has no real OAuth flow yet;
+// the client falls back to the honest "coming in a later phase" state.
+const OAUTH_AUTHORIZE_PATH: Record<string, string> = {
+  connector_salesforce: "/api/connectors/salesforce/authorize",
+}
+
 export async function GET() {
   return withApiHandler("connectors.list", async () => {
     await requireSession()
@@ -25,6 +33,7 @@ export async function GET() {
       actions: c.actions ?? [],
       triggers: c.triggers ?? [],
       enabled: c.enabled,
+      oauthAuthorizeUrl: c.enabled ? OAUTH_AUTHORIZE_PATH[c.id] : undefined,
     }))
     return NextResponse.json({ connectors })
   })

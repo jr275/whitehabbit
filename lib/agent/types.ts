@@ -15,7 +15,7 @@
  * a tool and does not depend on any client code.
  * ================================================================== */
 
-import type { SkillCategory } from "@/lib/workforce/model"
+import type { SkillCategory, WorkerIntegrationConfig } from "@/lib/workforce/model"
 
 /* ---- the real slice of a Worker's definition a skill actually needs
  * to reason with — mission/objectives/behaviors/knowledge, resolved
@@ -28,6 +28,11 @@ export interface WorkerContext {
   objectives: string[]
   behaviors: { condition: string; action: string }[]
   knowledge: { id: string; name: string; type: string; content?: string }[]
+  /** The real, persisted per-action permission decisions from Studio's
+   * Integrations step — runToolAction() (lib/agent/tool-runner.ts)
+   * reads this to decide allow/deny/requires_approval for a connector
+   * action, ahead of the blanket HIGH_RISK_PERMISSIONS rule. */
+  integrations: WorkerIntegrationConfig[]
 }
 
 /* ---- permission / risk vocabulary (section 16) ---- */
@@ -62,6 +67,11 @@ export interface ToolContext {
   executionId: string
   /** emit a real runtime event as this call happens */
   emit: (type: RuntimeEventType, payload: Record<string, unknown>) => void
+  /** This Worker's real, persisted per-action permission config — see
+   * WorkerContext.integrations. runToolAction() (lib/agent/tool-
+   * runner.ts) is the only real consumer; a tool's own run() never
+   * needs to look at this itself. */
+  integrations?: WorkerIntegrationConfig[]
 }
 
 export interface ToolAction {
@@ -226,8 +236,32 @@ export class ApprovalRequiredError extends Error {
     public toolName: string,
     public actionLabel: string,
     public permission: ToolPermission,
+    /** The real action id (e.g. "update_lead") and the real input that
+     * would have been sent — captured so a human's later Approve can
+     * actually run this exact real call, not a re-guessed one. Never
+     * a secret: this is the action's own input shape, the same thing
+     * an operator already sees before deciding. */
+    public actionId: string,
+    public input: unknown,
   ) {
     super(`"${actionLabel}" on ${toolName} requires human approval (${permission}) before it can run.`)
     this.name = "ApprovalRequiredError"
+  }
+}
+
+/** An action this Worker was explicitly denied — an operator's own
+ * Studio Integrations decision (WorkerIntegrationAction.permission ===
+ * "deny"), enforced server-side in runToolAction(), never just a
+ * hidden button. Maps to execution status "failed", reasonCode
+ * "execution_error" — a real, deliberate refusal, not a malfunction. */
+export class PermissionDeniedError extends Error {
+  readonly code: ExecutionReasonCode = "execution_error"
+  constructor(
+    public toolId: string,
+    public toolName: string,
+    public actionLabel: string,
+  ) {
+    super(`"${actionLabel}" on ${toolName} is denied for this worker — an operator explicitly turned it off in Studio's Integrations step.`)
+    this.name = "PermissionDeniedError"
   }
 }

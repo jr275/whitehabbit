@@ -151,6 +151,7 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         objectives: run.worker.objectives.filter((o) => !o.done).map((o) => o.text),
         behaviors: run.worker.behaviors.map((b) => ({ condition: b.condition, action: b.action })),
         knowledge: run.worker.knowledge.map((k) => ({ id: k.id, name: k.name, type: k.type, content: k.content })),
+        integrations: run.worker.integrations,
       }
       // The Integration Runtime merge point (lib/agent/tools/connector-
       // tools.ts) — a real, CONNECTED Connector's real ToolDefinitions,
@@ -274,6 +275,21 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         // action ran — runToolAction() throws before calling it.
         await repo.finalizeExecution(execution.id, { status: "pending_approval", blockedReason: err.message, completedAt, durationMs })
         await repo.updateTaskStatus(task.id, "pending_approval")
+        // The real Human-in-the-Loop queue row — captures exactly what
+        // was blocked (including the real input) so a later Approve
+        // can run that exact real call. See app/api/approvals/[id]/decide.
+        await repo.createApproval({
+          orgId: run.orgId,
+          workerId: run.worker.id,
+          executionId: execution.id,
+          toolId: err.toolId,
+          toolName: err.toolName,
+          actionId: err.actionId,
+          actionLabel: err.actionLabel,
+          permission: err.permission,
+          reason: err.message,
+          input: err.input,
+        })
         emit("approval_required", { reason: err.message, toolId: err.toolId, toolName: err.toolName, action: err.actionLabel, permission: err.permission })
       } else {
         const reasonCode: ExecutionReasonCode = err instanceof InvalidCredentialError || err instanceof ProviderError ? err.code : "execution_error"

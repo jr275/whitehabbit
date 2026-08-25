@@ -22,7 +22,7 @@ import "server-only"
 import { NextResponse } from "next/server"
 import { hydrateWorkerLiveState } from "@/lib/agent/hydrate"
 import { withApiHandler, NotFoundError, ValidationError } from "@/lib/api-error"
-import { deleteWorker, getWorker, recordAudit, upsertWorker } from "@/lib/db/repo"
+import { deleteWorker, getWorker, listConnections, recordAudit, upsertWorker } from "@/lib/db/repo"
 import { requireSession } from "@/lib/session"
 import type { Worker } from "@/lib/workforce/model"
 
@@ -38,7 +38,7 @@ export async function GET(_req: Request, { params }: Params) {
   })
 }
 
-const EDITABLE_FIELDS = ["identity", "mission", "objectives", "knowledge", "skills", "tools", "behaviors", "channels", "outcome", "autonomy"] as const
+const EDITABLE_FIELDS = ["identity", "mission", "objectives", "knowledge", "skills", "tools", "integrations", "behaviors", "channels", "outcome", "autonomy"] as const
 
 export async function PATCH(req: Request, { params }: Params) {
   return withApiHandler("workers.patch", async () => {
@@ -49,6 +49,18 @@ export async function PATCH(req: Request, { params }: Params) {
 
     const existing = await getWorker(id, organizationId)
     if (!existing) throw new NotFoundError()
+
+    // Real permission hierarchy check (section "PHASE 5" — Organization
+    // -> Integration -> Agent): a Worker can only ever be wired to a
+    // Connection this org actually owns — never trusted from the
+    // request body alone, the same discipline every other org-scoped
+    // read/write in this file already applies.
+    if (body.worker.integrations) {
+      const ownedConnectionIds = new Set((await listConnections(organizationId)).map((c) => c.id))
+      for (const cfg of body.worker.integrations) {
+        if (!ownedConnectionIds.has(cfg.connectionId)) throw new ValidationError(`This organization has no connection "${cfg.connectionId}".`)
+      }
+    }
 
     const merged: Worker = { ...existing }
     for (const field of EDITABLE_FIELDS) {

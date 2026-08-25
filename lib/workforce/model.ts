@@ -64,6 +64,38 @@ export const TOOL_BOUNDARY_META: Record<ToolExecutionBoundary, { label: string; 
   executable: { label: "Executable", tone: "good" },
 }
 
+/* ---- integration permissions — the real, per-Worker, per-Action
+ * decision an operator makes in Studio's Integrations step. Distinct
+ * from ToolExecutionBoundary (which only ever answers "would the
+ * blanket HIGH_RISK_PERMISSIONS rule require approval"): an explicit
+ * decision here always wins over that blanket rule — "allow" lets an
+ * operator knowingly authorize a normally-high-risk action to run
+ * without a human gate every time, "deny" blocks an action this
+ * worker's skills could otherwise reach, and "requires_approval" is
+ * the safe default an unconfigured action already gets. Enforced
+ * server-side in lib/agent/tool-runner.ts's runToolAction() — never
+ * just a hidden/shown button in the UI. */
+export type ActionPermissionDecision = "allow" | "deny" | "requires_approval"
+
+export interface WorkerIntegrationAction {
+  actionId: string
+  enabled: boolean
+  permission: ActionPermissionDecision
+}
+
+/** One Connector this Worker has been given access to, and exactly
+ * which of that Connector's real actions it may use and how. Lives on
+ * Worker/WorkerDefinitionSnapshot as ordinary JSONB — no migration —
+ * the same zero-schema-change extensibility every other Worker field
+ * already relies on. `connectionId` ties this to a real, org-scoped
+ * Connection row (lib/connectors/types.ts); a Worker is never wired to
+ * a Connector that doesn't have one. */
+export interface WorkerIntegrationConfig {
+  connectorId: string
+  connectionId: string
+  actions: WorkerIntegrationAction[]
+}
+
 export interface WorkforceTool {
   id: string
   name: string
@@ -162,6 +194,15 @@ export interface Worker {
   knowledge: KnowledgeSource[]
   skills: Skill[]
   tools: WorkforceTool[]
+  /** Real Connector access this Worker has been given, and exactly
+   * which real actions it may use and how — the Studio Integrations
+   * step's persisted state. Undefined/empty = no Connector access,
+   * same as an empty array; a skill reaching for a connector tool this
+   * Worker was never granted simply won't find it (lib/agent/tools/
+   * connector-tools.ts only ever merges a CONNECTED Connection's
+   * tools, unconditionally — this is the finer-grained, per-action
+   * layer on top of that). */
+  integrations: WorkerIntegrationConfig[]
   behaviors: BehaviorRule[]
   channels: WorkerChannel[]
   outcome: OutcomeDefinition
@@ -205,6 +246,7 @@ export interface WorkerDefinitionSnapshot {
   knowledge: KnowledgeSource[]
   skills: Skill[]
   tools: WorkforceTool[]
+  integrations: WorkerIntegrationConfig[]
   behaviors: BehaviorRule[]
   channels: WorkerChannel[]
   outcome: OutcomeDefinition
@@ -326,6 +368,39 @@ export interface WorkerEvent {
   sequence?: number
 }
 
+/* ---- Human-in-the-loop approval — a real, persisted decision queue.
+ * Created the instant runToolAction() (lib/agent/tool-runner.ts)
+ * throws ApprovalRequiredError, capturing the exact real action/input
+ * that was blocked. There is no durable workflow engine here to
+ * literally suspend and resume the interrupted execution generator —
+ * approving instead runs that exact captured action for real, right
+ * now (see POST /api/approvals/[id]/decide), which is the honest,
+ * buildable meaning of "the agent's intended real-world effect
+ * actually happens once a human says yes" for this architecture. ---- */
+export type ApprovalStatus = "pending" | "approved" | "rejected"
+
+export interface Approval {
+  id: string
+  workerId: string
+  executionId?: string
+  toolId: string
+  toolName: string
+  actionId: string
+  actionLabel: string
+  permission: ToolPermission
+  reason: string
+  /** The real input the blocked call would have used — never a
+   * secret, the same input an operator already configured/typed. */
+  input: unknown
+  status: ApprovalStatus
+  /** The real ToolActionResult once Approve actually runs the action —
+   * undefined until decided, or if rejected. */
+  result?: unknown
+  requestedAt: number
+  decidedAt?: number
+  decidedBy?: string
+}
+
 /* ---- Business Event -> Metric -> Outcome ----
  *
  * WorkerExecution -> WorkerOutput -> BusinessEvent -> MetricRecord is
@@ -398,6 +473,7 @@ export const OUTPUT_TYPE_META: Record<string, { label: string; plural: string; f
   conversation_response: { label: "Conversation response", plural: "Conversation responses", filter: "Communication" },
   intelligence_report: { label: "Intelligence report", plural: "Intelligence reports", filter: "Research" },
   creative_concepts: { label: "Creative concepts", plural: "Creative concept batches", filter: "Content" },
+  lead_pipeline_sync: { label: "Lead pipeline sync", plural: "Lead pipeline syncs", filter: "Sales" },
 }
 
 export const OUTPUT_STATUS_META: Record<OutputStatus, { label: string; tone: "good" | "info" | "warn" | "bad" | "muted" }> = {

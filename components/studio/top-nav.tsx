@@ -24,7 +24,8 @@ const LINKS = [
   { href: "/studio", label: "Studio" },
   { href: "/outputs", label: "Outputs" },
   { href: "/marketing", label: "Marketing" },
-  { href: "/connections", label: "Connections" },
+  { href: "/integrations", label: "Integrations" },
+  { href: "/approvals", label: "Approvals" },
 ]
 
 export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview" | "production" }) {
