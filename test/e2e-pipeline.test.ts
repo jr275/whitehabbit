@@ -1,4 +1,9 @@
 /* ================================================================== *
+ * CATEGORY C — FULL INTEGRATION TEST (real credentials when
+ * available; BLOCKED BY CREDENTIALS in this sandbox — no Salesforce
+ * Connected App exists here, so this test asserts the real, honest
+ * "blocked at Salesforce" outcome rather than a fabricated success).
+ *
  * SECTION 22 — ONE DETERMINISTIC END-TO-END INTEGRATION TEST.
  *
  * Uses the REAL runtime components — the real executeTask() driver,

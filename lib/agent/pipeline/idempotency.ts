@@ -23,34 +23,39 @@ export interface IdempotentCallResult<T> {
 }
 
 /**
- * Runs `call()` exactly once per real (executionId, provider, action,
- * resource) key. A second attempt with the same key — a retry, a
- * double-click on Approve, a resumed execution re-entering the same
- * stage — reuses the first real result instead of performing the
- * external write again. Needs no org id: the ledger derives it
- * server-side from executionId (see repo.claimActionExecution).
+ * Runs `call()` at most once-to-success per real (executionId,
+ * provider, action, resource) key (section 8: a FAILED attempt must
+ * remain retryable, never permanently cached as a failure — only a
+ * genuinely COMPLETED action is a real dedupe target). A second
+ * attempt with the same key — a retry, a double-click on Approve, a
+ * resumed execution re-entering the same stage, an explicit "retry
+ * failed step" — reuses the first real SUCCESSFUL result instead of
+ * performing the external write again; a prior FAILURE is reclaimed
+ * (attempt incremented) and genuinely retried. Needs no org id: the
+ * ledger derives it server-side from executionId (see
+ * repo.claimActionExecution).
  */
-export async function runIdempotent<T>(executionId: string, provider: string, action: string, resource: string, call: () => Promise<ToolActionResult<T>>): Promise<IdempotentCallResult<T>> {
+export async function runIdempotent<T>(executionId: string, provider: string, action: string, resource: string, call: () => Promise<ToolActionResult<T>>, opts?: { stepId?: string; integrationId?: string }): Promise<IdempotentCallResult<T>> {
   const key = idempotencyKey(executionId, provider, action, resource)
 
   const existing = await getActionExecutionByKey(key)
-  if (existing && existing.status !== "pending") {
+  if (existing?.status === "completed") {
     return { result: existing.result as ToolActionResult<T>, deduped: true }
   }
 
-  const claim = existing ?? (await claimActionExecution({ executionId, provider, action, resource, idempotencyKey: key }))
+  const claim = await claimActionExecution({ executionId, provider, action, resource, idempotencyKey: key, stepId: opts?.stepId, integrationId: opts?.integrationId })
   if (!claim) {
-    // Lost a genuine race to claim the key — re-read; the winner will
-    // complete it shortly. This is a real, if rare, concurrent-retry
-    // path, not a fabricated result.
+    // Lost a genuine race to claim/reclaim the key — re-read. If the
+    // winner already completed it successfully, reuse that real
+    // result. Otherwise (still pending elsewhere, or the winner's own
+    // failure hasn't been reclaimed yet) this call proceeds as its
+    // own real attempt rather than blocking indefinitely.
     const settled = await getActionExecutionByKey(key)
-    if (settled && settled.status !== "pending") return { result: settled.result as ToolActionResult<T>, deduped: true }
-    // Still pending (the winner hasn't finished) — this call proceeds
-    // as its own real attempt rather than blocking indefinitely; the
-    // provider's own idempotency (or a human noticing) covers the rest.
+    if (settled?.status === "completed") return { result: settled.result as ToolActionResult<T>, deduped: true }
   }
 
   const result = await call()
-  if (claim) await completeActionExecution(claim.id, result.ok ? "completed" : "failed", result)
+  const claimedId = claim?.id ?? (await getActionExecutionByKey(key))?.id
+  if (claimedId) await completeActionExecution(claimedId, result.ok ? "completed" : "failed", result, result.ok ? undefined : { code: result.errorCode, message: result.error })
   return { result, deduped: false }
 }

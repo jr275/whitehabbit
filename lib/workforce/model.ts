@@ -280,7 +280,32 @@ export interface WorkerExecution {
    * executions persisted before versioning existed. */
   workerVersionId?: string
   taskId: string
-  status: "queued" | "running" | "completed" | "failed" | "blocked" | "pending_approval" | "cancelled"
+  /** Full state machine (section 1 of the runtime-hardening brief):
+   *   queued              -> not yet started
+   *   running             -> the initial run is actively executing
+   *   waiting_for_approval-> real terminal-for-now state; alias of
+   *                          the prior phase's "pending_approval",
+   *                          kept as the same string for backward
+   *                          compatibility with every existing query/
+   *                          UI branch — "pending_approval" IS
+   *                          "waiting for approval", never a second
+   *                          concept
+   *   resuming            -> a real Approve decision is actively
+   *                          re-running this exact execution
+   *   retrying            -> a real "retry failed step" is actively
+   *                          re-running one stage of this execution
+   *   completed           -> every attempted stage succeeded
+   *   partially_completed -> at least one real external action
+   *                          completed AND at least one real stage
+   *                          failed/was blocked — never silently
+   *                          reported as either "everything worked"
+   *                          or "everything failed"
+   *   failed              -> the run failed with no real external
+   *                          action having completed
+   *   blocked             -> a required capability was never
+   *                          configured (missing_credential)
+   *   cancelled           -> a human rejected a pending approval */
+  status: "queued" | "running" | "pending_approval" | "resuming" | "retrying" | "completed" | "partially_completed" | "failed" | "blocked" | "cancelled"
   reasonCode?: ExecutionReasonCode
   blockedReason?: string
   startedAt: number
@@ -319,7 +344,7 @@ export interface WorkerExecution {
  *     real external action that already succeeded ---- */
 export type PipelineStageStatus = "queued" | "running" | "completed" | "failed" | "blocked" | "waiting_for_approval" | "rejected" | "skipped"
 
-export type PipelineStageKey = "objective_intake" | "research" | "qualification" | "llm_scoring" | "decision" | "salesforce_action" | "slack_notify"
+export type PipelineStageKey = "objective_intake" | "research" | "qualification" | "llm_scoring" | "decision" | "salesforce_action" | "slack_notify" | "record_action"
 
 export interface PipelineStageRecord {
   key: PipelineStageKey
@@ -566,9 +591,12 @@ export const EXECUTION_STATUS_META: Record<WorkerExecution["status"], { label: s
   queued: { label: "Queued", tone: "muted" },
   running: { label: "Running", tone: "info" },
   completed: { label: "Completed", tone: "good" },
+  partially_completed: { label: "Partially completed", tone: "warn" },
   failed: { label: "Failed", tone: "bad" },
   blocked: { label: "Blocked", tone: "warn" },
-  pending_approval: { label: "Pending approval", tone: "warn" },
+  pending_approval: { label: "Waiting for approval", tone: "warn" },
+  resuming: { label: "Resuming", tone: "info" },
+  retrying: { label: "Retrying", tone: "info" },
   cancelled: { label: "Cancelled", tone: "muted" },
 }
 

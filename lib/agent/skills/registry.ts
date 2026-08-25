@@ -6,6 +6,7 @@ import { culturalIntelligenceSkill } from "./cultural-intelligence"
 import { customerConversationSkill } from "./customer-conversation"
 import { engagementAnalysisSkill } from "./engagement-analysis"
 import { leadQualificationSkill } from "./lead-qualification"
+import { runtimeProofSkill } from "./runtime-proof"
 import { salesforceLeadPipelineSkill } from "./salesforce-lead-pipeline"
 import { seoOpportunitySkill } from "./seo-opportunity"
 import { trendResearchSkill } from "./trend-research"
@@ -17,7 +18,13 @@ import type { SkillDefinition } from "@/lib/agent/types"
  * onboarding/knowledge/heuristics; they never fork a skill's code to
  * get product-specific behavior. Adding a new capability means adding
  * a definition here — Studio, Outputs Hub and the runtime do not
- * change. */
+ * change.
+ *
+ * runtimeProofSkill is the one exception: it is NOT in the client-
+ * facing lib/workforce/catalog.ts SKILL_CATALOG, so it never appears
+ * in Studio or any product surface — it exists only so getSkill() can
+ * resolve it for the runtime-hardening test suite (crash recovery,
+ * concurrency, approval resume) and its own header explains why. */
 export const SKILL_REGISTRY: SkillDefinition[] = [
   trendResearchSkill,
   contentIntelligenceSkill,
@@ -28,6 +35,7 @@ export const SKILL_REGISTRY: SkillDefinition[] = [
   culturalIntelligenceSkill,
   creativeTerritoryGenerationSkill,
   salesforceLeadPipelineSkill,
+  runtimeProofSkill,
 ]
 
 export function getSkill(id: string): SkillDefinition | undefined {

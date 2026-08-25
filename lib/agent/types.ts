@@ -60,6 +60,12 @@ export interface ToolActionResult<T = unknown> {
   /** real, measurable facts about this call — never estimated */
   durationMs: number
   costUsd?: number
+  /** Section 8 — a real provider-supplied Retry-After hint (parsed
+   * from the HTTP header, in ms), set only on a genuine 429/503.
+   * lib/agent/retry.ts's withRetry() waits at least this long before
+   * the next attempt instead of guessing a backoff — never invented
+   * when the provider didn't actually send one. */
+  retryAfterMs?: number
 }
 
 export interface ToolContext {
@@ -128,6 +134,16 @@ export interface SkillExecutionResult {
    * through to WorkerExecution so a development run can never be
    * mistaken for a real one, even after LLM_DEV_MODE is turned back off. */
   executionMode?: "development"
+  /** Section 9 — partial failure: set true only by a skill that knows
+   * at least one of its real external actions genuinely completed AND
+   * at least one other genuinely failed/was blocked (e.g. Salesforce
+   * succeeded, Slack failed). lib/agent/runtime.ts finalizes such a
+   * run as "partially_completed", never silently "completed" (which
+   * would hide the real failure) and never "failed" (which would
+   * incorrectly imply nothing worked — the Salesforce write must not
+   * be re-attempted because the run "failed"). Undefined/false for
+   * every normal success. */
+  partial?: boolean
 }
 
 export interface SkillEvaluation {

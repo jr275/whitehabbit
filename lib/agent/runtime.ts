@@ -90,8 +90,26 @@ class SerialWriter {
  * at all; this is purely additive over the existing event log. */
 function makeEmitter(execution: WorkerExecution, task: WorkerTask, orgId: string, queue: EventQueue, writer: SerialWriter, seedState?: PipelineState) {
   let pipelineState = seedState
+  // Section 14 — event idempotency: a deterministic key per (type,
+  // stage, occurrence-within-this-invocation) so the exact same
+  // logical event can never be double-inserted if this exact code
+  // path re-emits it (a bug, a within-process retry). This dedupes
+  // reliably WITHIN one real invocation of executeTask/resumeTask/
+  // retryFailedStage; protection ACROSS two separate invocations for
+  // the same execution is the execution lease's job (section 12) —
+  // acquireExecutionLease() is what actually prevents two concurrent
+  // invocations from both reaching this emitter in the first place.
+  const occurrence = new Map<string, number>()
   const emit = (type: RuntimeEventType, payload: Record<string, unknown>) => {
     const now = Date.now()
+    const stage = (payload as { stage?: string }).stage
+    let idempotencyKey: string | undefined
+    if (stage) {
+      const bucket = `${type}:${stage}`
+      const n = (occurrence.get(bucket) ?? 0) + 1
+      occurrence.set(bucket, n)
+      idempotencyKey = `${execution.id}:${bucket}:${n}`
+    }
     const event: WorkerEvent = {
       id: `ev_${randomUUID()}`,
       workerId: execution.workerId,
@@ -101,7 +119,7 @@ function makeEmitter(execution: WorkerExecution, task: WorkerTask, orgId: string
       timestamp: now,
       payload,
     }
-    writer.enqueue(() => repo.insertExecutionEvent(event, orgId))
+    writer.enqueue(() => repo.insertExecutionEvent(event, orgId, idempotencyKey))
     if (isStageEvent(type as RuntimeEventType)) {
       const next = foldStageEvent(pipelineState, type as RuntimeEventType, payload, now)
       if (next) {
@@ -162,7 +180,7 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
 
   const queue = new EventQueue()
   const writer = new SerialWriter()
-  const { emit } = makeEmitter(execution, task, run.orgId, queue, writer)
+  const { emit, getPipelineState } = makeEmitter(execution, task, run.orgId, queue, writer)
 
   const driver = (async () => {
     emit("task_started", { skillId: skill.id, skillName: skill.name, input: run.input })
@@ -197,7 +215,7 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
 
       await finishSuccessfulRun({ orgId: run.orgId, workerId: run.worker.id, productId: run.worker.productId, execution, task, skill, result, input: run.input, emit })
     } catch (err) {
-      await handleRunFailure(run.orgId, run.worker.id, execution, task, emit, err, skill.id)
+      await handleRunFailure(run.orgId, run.worker.id, execution, task, emit, err, skill.id, getPipelineState)
     } finally {
       // every emitted event must be durably written before this
       // execution is considered finished — a reconnecting client reads
@@ -296,8 +314,13 @@ async function finishSuccessfulRun(args: {
 
   const completedAt = Date.now()
   const durationMs = completedAt - execution.startedAt
+  // Section 9 — partial failure never collapses to "everything
+  // failed" or silently to "everything worked": a skill that knows
+  // one real external action succeeded while another failed sets
+  // result.partial, and the execution is finalized distinctly.
+  const finalStatus = result.partial ? "partially_completed" : "completed"
   await repo.finalizeExecution(execution.id, {
-    status: "completed",
+    status: finalStatus,
     completedAt,
     durationMs,
     costUsd: sumCost(result),
@@ -307,7 +330,7 @@ async function finishSuccessfulRun(args: {
     executionMode: result.executionMode,
   })
   await repo.updateTaskStatus(task.id, "completed")
-  emit("task_completed", { outputId: output.id, durationMs })
+  emit("task_completed", { outputId: output.id, durationMs, partial: result.partial === true })
 
   // Domain Intelligence -> Memory: only for a Product-provisioned
   // Worker (see lib/workforce/seed.ts's buildWorkerFromProduct()),
@@ -327,7 +350,16 @@ async function finishSuccessfulRun(args: {
  * to decide between "credential required" vs "the provider failed"
  * vs "this run's own logic broke" — never inferred from string-
  * matching a message. */
-async function handleRunFailure(orgId: string, workerId: string, execution: WorkerExecution, task: WorkerTask, emit: (type: RuntimeEventType, payload: Record<string, unknown>) => void, err: unknown, skillId: string): Promise<void> {
+async function handleRunFailure(
+  orgId: string,
+  workerId: string,
+  execution: WorkerExecution,
+  task: WorkerTask,
+  emit: (type: RuntimeEventType, payload: Record<string, unknown>) => void,
+  err: unknown,
+  skillId: string,
+  getPipelineState?: () => PipelineState | undefined,
+): Promise<void> {
   const completedAt = Date.now()
   const durationMs = completedAt - execution.startedAt
   if (err instanceof SkillBlockedError) {
@@ -339,10 +371,18 @@ async function handleRunFailure(orgId: string, workerId: string, execution: Work
     // it just requires a human to say yes first. No tool action ran —
     // runToolAction() throws before calling it. `resumeState`/`stage`
     // are set only by a resumable pipeline skill (lib/agent/pipeline/)
-    // that caught this error and re-threw it with its own current
-    // state attached — undefined for every other skill, which keeps
-    // the prior phase's "Approve runs the one captured action in
-    // isolation" behavior exactly as it was.
+    // that caught this error and re-threw it — undefined for every
+    // other skill, which keeps the prior phase's "Approve runs the
+    // one captured action in isolation" behavior exactly as it was.
+    //
+    // IMPORTANT: emit "approval_required" BEFORE reading
+    // getPipelineState() — that emit is what folds this stage's real
+    // status to "waiting_for_approval" (lib/agent/pipeline/driver.ts).
+    // The runtime's own post-fold state (not the skill's pre-fold
+    // err.resumeState snapshot) is what gets persisted as the
+    // Approval's resumeState, so a later resume genuinely picks up
+    // from "waiting_for_approval", never from "running".
+    emit("approval_required", { reason: err.message, toolId: err.toolId, toolName: err.toolName, action: err.actionLabel, permission: err.permission, stage: err.stage })
     await repo.finalizeExecution(execution.id, { status: "pending_approval", blockedReason: err.message, completedAt, durationMs })
     await repo.updateTaskStatus(task.id, "pending_approval")
     await repo.createApproval({
@@ -357,9 +397,8 @@ async function handleRunFailure(orgId: string, workerId: string, execution: Work
       reason: err.message,
       input: err.input,
       skillId,
-      resumeState: err.resumeState,
+      resumeState: getPipelineState?.() ?? err.resumeState,
     })
-    emit("approval_required", { reason: err.message, toolId: err.toolId, toolName: err.toolName, action: err.actionLabel, permission: err.permission, stage: err.stage })
   } else {
     const reasonCode: ExecutionReasonCode = err instanceof InvalidCredentialError || err instanceof ProviderError ? err.code : "execution_error"
     const message = err instanceof Error ? err.message : "Task failed for an unknown reason."
@@ -382,55 +421,88 @@ async function handleRunFailure(orgId: string, workerId: string, execution: Work
  * called when approval.resumeState and a matching skill.resume() both
  * exist.
  */
-export async function resumeTask(approval: Approval, orgId: string): Promise<{ execution: WorkerExecution } | null> {
-  if (!approval.executionId || !approval.skillId || approval.resumeState == null) return null
+/** Section 12 — real concurrency control: how long a resume/retry
+ * lease is held before it's considered abandoned (a crashed holder)
+ * and safe for a fresh real attempt to reclaim. */
+const LEASE_TTL_MS = 120_000
+
+/** Acquires the real DB-backed lease for `executionId`, runs `fn` only
+ * if it won, and always releases afterward. `fn` never runs at all if
+ * the lease is currently held by someone else — the caller gets
+ * `{ ok: false, reason: "lease_busy" }` back instead, never a silent
+ * fallback that would defeat the whole point of the lease. */
+async function withExecutionLease<T>(executionId: string, fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; reason: "lease_busy" }> {
+  const owner = `lease_${randomUUID()}`
+  const lease = await repo.acquireExecutionLease(executionId, owner, LEASE_TTL_MS)
+  if (!lease) return { ok: false, reason: "lease_busy" }
+  try {
+    return { ok: true, value: await fn() }
+  } finally {
+    await repo.releaseExecutionLease(executionId, owner)
+  }
+}
+
+export type ResumeOutcome = { ok: true; execution: WorkerExecution } | { ok: false; reason: "not_resumable" | "lease_busy" }
+
+export async function resumeTask(approval: Approval, orgId: string): Promise<ResumeOutcome> {
+  if (!approval.executionId || !approval.skillId || approval.resumeState == null) return { ok: false, reason: "not_resumable" }
   const skill = getSkill(approval.skillId)
-  if (!skill?.resume) return null
+  if (!skill?.resume) return { ok: false, reason: "not_resumable" }
+  const executionId = approval.executionId
 
-  const execution = await repo.getExecution(approval.executionId, orgId)
-  if (!execution) return null
-  const worker = await repo.getWorker(approval.workerId, orgId)
-  if (!worker) return null
-  const task: WorkerTask = { id: execution.taskId, workerId: worker.id, skillId: skill.id, type: skill.category, title: skill.taskTitle, status: "running", createdAt: execution.startedAt }
+  const leased = await withExecutionLease(executionId, async () => {
+    const execution = await repo.getExecution(executionId, orgId)
+    if (!execution) return null
+    const worker = await repo.getWorker(approval.workerId, orgId)
+    if (!worker) return null
+    const task: WorkerTask = { id: execution.taskId, workerId: worker.id, skillId: skill.id, type: skill.category, title: skill.taskTitle, status: "running", createdAt: execution.startedAt }
 
-  await repo.updateExecutionStatus(execution.id, "running")
-  await repo.updateTaskStatus(task.id, "running")
+    // Real, persisted transitional state (section 1) — visible to
+    // anyone reading the execution while resume is in flight, not
+    // just held in this process's memory.
+    await repo.updateExecutionStatus(execution.id, "resuming")
+    await repo.updateTaskStatus(task.id, "running")
 
-  const queue = new EventQueue()
-  const writer = new SerialWriter()
-  const { emit } = makeEmitter(execution, task, orgId, queue, writer, approval.resumeState as PipelineState)
-  emit("approval_approved", { toolId: approval.toolId, toolName: approval.toolName, action: approval.actionLabel })
+    const queue = new EventQueue()
+    const writer = new SerialWriter()
+    const { emit, getPipelineState } = makeEmitter(execution, task, orgId, queue, writer, approval.resumeState as PipelineState)
+    emit("approval_approved", { toolId: approval.toolId, toolName: approval.toolName, action: approval.actionLabel })
 
-  const workerContext: WorkerContext = {
-    mission: worker.mission,
-    objectives: worker.objectives.filter((o) => !o.done).map((o) => o.text),
-    behaviors: worker.behaviors.map((b) => ({ condition: b.condition, action: b.action })),
-    knowledge: worker.knowledge.map((k) => ({ id: k.id, name: k.name, type: k.type, content: k.content })),
-    integrations: worker.integrations,
-  }
-  const tools = await toolsMapForOrg(orgId)
-
-  const driver = (async () => {
-    try {
-      const result = await skill.resume!({ workerId: worker.id, executionId: execution.id, taskId: task.id, input: {}, tools, worker: workerContext, emit }, approval.resumeState)
-      await finishSuccessfulRun({ orgId, workerId: worker.id, productId: worker.productId, execution, task, skill, result, input: {}, emit })
-    } catch (err) {
-      await handleRunFailure(orgId, worker.id, execution, task, emit, err, skill.id)
-    } finally {
-      await writer.drain()
-      queue.close()
+    const workerContext: WorkerContext = {
+      mission: worker.mission,
+      objectives: worker.objectives.filter((o) => !o.done).map((o) => o.text),
+      behaviors: worker.behaviors.map((b) => ({ condition: b.condition, action: b.action })),
+      knowledge: worker.knowledge.map((k) => ({ id: k.id, name: k.name, type: k.type, content: k.content })),
+      integrations: worker.integrations,
     }
-  })()
+    const tools = await toolsMapForOrg(orgId)
 
-  // Drain the stream (nothing external is listening on resume — this
-  // is a plain POST, not the streaming /run endpoint — but the same
-  // real persistence must complete before this call returns).
-  while ((await queue.next()) !== null) {
-    /* drained for its persistence side effects only */
-  }
-  await driver
+    const driver = (async () => {
+      try {
+        const result = await skill.resume!({ workerId: worker.id, executionId: execution.id, taskId: task.id, input: {}, tools, worker: workerContext, emit }, approval.resumeState)
+        await finishSuccessfulRun({ orgId, workerId: worker.id, productId: worker.productId, execution, task, skill, result, input: {}, emit })
+      } catch (err) {
+        await handleRunFailure(orgId, worker.id, execution, task, emit, err, skill.id, getPipelineState)
+      } finally {
+        await writer.drain()
+        queue.close()
+      }
+    })()
 
-  return { execution: (await repo.getExecution(execution.id, orgId))! }
+    // Drain the stream (nothing external is listening on resume — this
+    // is a plain POST, not the streaming /run endpoint — but the same
+    // real persistence must complete before this call returns).
+    while ((await queue.next()) !== null) {
+      /* drained for its persistence side effects only */
+    }
+    await driver
+
+    return (await repo.getExecution(execution.id, orgId))!
+  })
+
+  if (!leased.ok) return leased
+  if (!leased.value) return { ok: false, reason: "not_resumable" }
+  return { ok: true, execution: leased.value }
 }
 
 function titleFor(outputType: string, input: Record<string, string>): string {
@@ -471,54 +543,63 @@ function sumCost(result: SkillExecutionResult): number | undefined {
  * execution whose pipeline_state actually has that stage in "failed".
  */
 export async function retryFailedStage(executionId: string, orgId: string, stage: string): Promise<{ execution: WorkerExecution } | { error: string }> {
-  const execution = await repo.getExecution(executionId, orgId)
-  if (!execution) return { error: "Execution not found." }
-  if (!execution.pipelineState) return { error: "This execution has no retryable pipeline state." }
-  const target = execution.pipelineState.stages.find((s) => s.key === stage)
+  const execution0 = await repo.getExecution(executionId, orgId)
+  if (!execution0) return { error: "Execution not found." }
+  if (!execution0.pipelineState) return { error: "This execution has no retryable pipeline state." }
+  const target = execution0.pipelineState.stages.find((s) => s.key === stage)
   if (!target || target.status !== "failed") return { error: `Stage "${stage}" is not in a failed state.` }
 
-  const task = await repo.getTask(execution.taskId, orgId)
-  if (!task) return { error: "The originating task could not be found." }
-  const skill = getSkill(task.skillId)
+  const task0 = await repo.getTask(execution0.taskId, orgId)
+  if (!task0) return { error: "The originating task could not be found." }
+  const skill = getSkill(task0.skillId)
   if (!skill?.retryStage) return { error: "This skill does not support retrying a failed step." }
 
-  const worker = await repo.getWorker(execution.workerId, orgId)
+  const worker = await repo.getWorker(execution0.workerId, orgId)
   if (!worker) return { error: "Worker not found." }
 
-  await repo.updateExecutionStatus(execution.id, "running")
-  await repo.updateTaskStatus(task.id, "running")
+  const leased = await withExecutionLease(executionId, async () => {
+    const execution = (await repo.getExecution(executionId, orgId))!
+    const task = task0
 
-  const queue = new EventQueue()
-  const writer = new SerialWriter()
-  const { emit } = makeEmitter(execution, task, orgId, queue, writer, execution.pipelineState)
+    // Real, persisted transitional state (section 1).
+    await repo.updateExecutionStatus(execution.id, "retrying")
+    await repo.updateTaskStatus(task.id, "running")
 
-  const workerContext: WorkerContext = {
-    mission: worker.mission,
-    objectives: worker.objectives.filter((o) => !o.done).map((o) => o.text),
-    behaviors: worker.behaviors.map((b) => ({ condition: b.condition, action: b.action })),
-    knowledge: worker.knowledge.map((k) => ({ id: k.id, name: k.name, type: k.type, content: k.content })),
-    integrations: worker.integrations,
-  }
-  const tools = await toolsMapForOrg(orgId)
+    const queue = new EventQueue()
+    const writer = new SerialWriter()
+    const { emit, getPipelineState } = makeEmitter(execution, task, orgId, queue, writer, execution.pipelineState)
 
-  const driver = (async () => {
-    try {
-      const result = await skill.retryStage!({ workerId: worker.id, executionId: execution.id, taskId: task.id, input: {}, tools, worker: workerContext, emit }, execution.pipelineState, stage)
-      await finishSuccessfulRun({ orgId, workerId: worker.id, productId: worker.productId, execution, task, skill, result, input: {}, emit })
-    } catch (err) {
-      await handleRunFailure(orgId, worker.id, execution, task, emit, err, skill.id)
-    } finally {
-      await writer.drain()
-      queue.close()
+    const workerContext: WorkerContext = {
+      mission: worker.mission,
+      objectives: worker.objectives.filter((o) => !o.done).map((o) => o.text),
+      behaviors: worker.behaviors.map((b) => ({ condition: b.condition, action: b.action })),
+      knowledge: worker.knowledge.map((k) => ({ id: k.id, name: k.name, type: k.type, content: k.content })),
+      integrations: worker.integrations,
     }
-  })()
+    const tools = await toolsMapForOrg(orgId)
 
-  while ((await queue.next()) !== null) {
-    /* drained for its persistence side effects only */
-  }
-  await driver
+    const driver = (async () => {
+      try {
+        const result = await skill.retryStage!({ workerId: worker.id, executionId: execution.id, taskId: task.id, input: {}, tools, worker: workerContext, emit }, execution.pipelineState, stage)
+        await finishSuccessfulRun({ orgId, workerId: worker.id, productId: worker.productId, execution, task, skill, result, input: {}, emit })
+      } catch (err) {
+        await handleRunFailure(orgId, worker.id, execution, task, emit, err, skill.id, getPipelineState)
+      } finally {
+        await writer.drain()
+        queue.close()
+      }
+    })()
 
-  return { execution: (await repo.getExecution(execution.id, orgId))! }
+    while ((await queue.next()) !== null) {
+      /* drained for its persistence side effects only */
+    }
+    await driver
+
+    return (await repo.getExecution(execution.id, orgId))!
+  })
+
+  if (!leased.ok) return { error: "This execution is already being resumed or retried elsewhere — try again shortly." }
+  return { execution: leased.value }
 }
 
 /**

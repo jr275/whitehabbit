@@ -1,3 +1,4 @@
+// CATEGORY A — pure runtime test (no external credentials, no DB): server-side permission enforcement (ALLOW/DENY/REQUIRES_APPROVAL) against the real runToolAction(), with fakes only at the ToolAction boundary.
 import { describe, expect, it, vi } from "vitest"
 import { runToolAction } from "@/lib/agent/tool-runner"
 import { ApprovalRequiredError, PermissionDeniedError } from "@/lib/agent/types"

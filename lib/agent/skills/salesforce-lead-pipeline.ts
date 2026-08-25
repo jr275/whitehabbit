@@ -97,6 +97,8 @@ async function runResearchStage(ctx: SkillExecutionContext, toolCtx: ToolContext
   const { result: searchResult, attempts } = await withRetry(
     () => runToolAction<{ results: { title: string; url: string; provider: string; snippet?: string }[] }>(search.id, search.name, searchAction, { query, limit: 10 }, toolCtx),
     isTransientToolFailure,
+    DEFAULT_RETRY_POLICY,
+    (r) => r.retryAfterMs,
   )
   if (!searchResult.ok) {
     if (searchResult.blocked) {
@@ -318,15 +320,34 @@ async function runSalesforceStage(
   const actionDef = salesforce.actions.find((a) => a.id === actionId)!
 
   try {
-    const { result: actionResult, deduped } = await runIdempotent(ctx.executionId, "salesforce", actionId, idempResource, async () => {
-      if (opts.preApproved) {
-        // A human already approved this exact action — run it for
-        // real directly, bypassing the permission gate a second time
-        // (matches the prior phase's Approve behavior exactly).
-        return actionDef.run(existing ? { id: existing.Id, fields: { Rating: rating, Description: description } } : { LastName: topCandidate.company, Company: topCandidate.company, Rating: rating }, toolCtx)
-      }
-      return runToolAction(salesforce.id, salesforce.name, actionDef, existing ? { id: existing.Id, fields: { Rating: rating, Description: description } } : { LastName: topCandidate.company, Company: topCandidate.company, Rating: rating }, toolCtx)
-    })
+    // Retries wrap the idempotent call itself: a transient failure's
+    // ledger row is reclaimed (attempt incremented, per section 8) and
+    // genuinely retried; a completed row is never called again; an
+    // ApprovalRequiredError throw (not-yet-approved) propagates
+    // through untouched, on the first attempt, unretried.
+    const { result: idempOutcome, attempts } = await withRetry(
+      () =>
+        runIdempotent(
+          ctx.executionId,
+          "salesforce",
+          actionId,
+          idempResource,
+          async () => {
+            if (opts.preApproved) {
+              // A human already approved this exact action — run it for
+              // real directly, bypassing the permission gate a second time
+              // (matches the prior phase's Approve behavior exactly).
+              return actionDef.run(existing ? { id: existing.Id, fields: { Rating: rating, Description: description } } : { LastName: topCandidate.company, Company: topCandidate.company, Rating: rating }, toolCtx)
+            }
+            return runToolAction(salesforce.id, salesforce.name, actionDef, existing ? { id: existing.Id, fields: { Rating: rating, Description: description } } : { LastName: topCandidate.company, Company: topCandidate.company, Rating: rating }, toolCtx)
+          },
+          { stepId: "salesforce_action", integrationId: "connector_salesforce" },
+        ),
+      (outcome) => isTransientToolFailure(outcome.result),
+      DEFAULT_RETRY_POLICY,
+      (outcome) => outcome.result.retryAfterMs,
+    )
+    const { result: actionResult, deduped } = idempOutcome
     if (!actionResult.ok) {
       state = step(ctx, state, "stage_failed", { stage: "salesforce_action", label: "Salesforce action", detail: actionResult.error ?? "Salesforce write failed.", reasonCode: "provider_error" })
       throw new ProviderError(actionResult.error ?? "Salesforce write failed.")
@@ -340,6 +361,7 @@ async function runSalesforceStage(
       provider: "salesforce",
       action: actionId,
       idempotencyKey: `${ctx.executionId}:salesforce:${actionId}:${idempResource}`,
+      attempts,
       output: outcome,
     })
     return { state, outcome }
@@ -379,17 +401,31 @@ async function runSlackStage(
   const text = `High-priority lead identified\nCompany: ${topCandidate.company}\nScore: ${score?.leadScore ?? "—"}/100\nQualification: ${score?.qualification ?? "—"}\nRecommended next step: ${score?.recommendedAction ?? "—"}`
 
   try {
-    const { result: notifyResult, deduped } = await runIdempotent(ctx.executionId, "slack", "send_message", topCandidate.company, async () => {
-      if (opts.preApproved) return sendMessageAction.run({ channel: "#sales", text }, toolCtx)
-      return runToolAction<{ ok: boolean; ts: string; channel: string }>(slack.id, slack.name, sendMessageAction, { channel: "#sales", text }, toolCtx)
-    })
+    const { result: idempOutcome, attempts } = await withRetry(
+      () =>
+        runIdempotent(
+          ctx.executionId,
+          "slack",
+          "send_message",
+          topCandidate.company,
+          async () => {
+            if (opts.preApproved) return sendMessageAction.run({ channel: "#sales", text }, toolCtx)
+            return runToolAction<{ ok: boolean; ts: string; channel: string }>(slack.id, slack.name, sendMessageAction, { channel: "#sales", text }, toolCtx)
+          },
+          { stepId: "slack_notify", integrationId: "connector_slack" },
+        ),
+      (outcome) => isTransientToolFailure(outcome.result),
+      DEFAULT_RETRY_POLICY,
+      (outcome) => outcome.result.retryAfterMs,
+    )
+    const { result: notifyResult, deduped } = idempOutcome
     if (!notifyResult.ok) {
       state = step(ctx, state, "stage_failed", { stage: "slack_notify", label: "Slack notification", detail: notifyResult.error ?? "Slack notification failed.", reasonCode: "provider_error" })
       return { state, outcome: { channel: "#sales", ts: "", status: "failed", detail: notifyResult.error } }
     }
     const data = notifyResult.data as { ts?: string; channel?: string } | undefined
     const outcome: MarketingLeadOpsPayload["slackNotification"] = { channel: data?.channel ?? "#sales", ts: data?.ts ?? "", status: "completed" }
-    state = step(ctx, state, "stage_completed", { stage: "slack_notify", label: "Slack notification", detail: `Notified ${outcome.channel}${deduped ? " (idempotent — already sent)" : ""}.`, provider: "slack", action: "send_message", idempotencyKey: `${ctx.executionId}:slack:send_message:${topCandidate.company}`, output: outcome })
+    state = step(ctx, state, "stage_completed", { stage: "slack_notify", label: "Slack notification", detail: `Notified ${outcome.channel}${deduped ? " (idempotent — already sent)" : ""}.`, provider: "slack", action: "send_message", idempotencyKey: `${ctx.executionId}:slack:send_message:${topCandidate.company}`, attempts, output: outcome })
     return { state, outcome }
   } catch (err) {
     if (err instanceof ApprovalRequiredError) {
@@ -428,6 +464,15 @@ function buildResult(
   if (salesforceOutcome) lines.push(`Salesforce: ${salesforceOutcome.status}${salesforceOutcome.detail ? ` — ${salesforceOutcome.detail}` : ""}.`)
   if (slackOutcome) lines.push(`Slack: ${slackOutcome.status}${slackOutcome.detail ? ` — ${slackOutcome.detail}` : ""}.`)
 
+  // Section 9 — partial failure: at least one real external action
+  // completed AND at least one other real, ATTEMPTED action failed
+  // (never counting "skipped"/"blocked" — those were never attempted,
+  // so their absence doesn't make an otherwise-successful run
+  // "partial"). The canonical case: Salesforce completed, Slack failed.
+  const anyCompleted = salesforceOutcome?.status === "completed" || slackOutcome?.status === "completed"
+  const anyFailed = salesforceOutcome?.status === "failed" || slackOutcome?.status === "failed"
+  const partial = anyCompleted && anyFailed
+
   return {
     structured: payload,
     summary: lines.join("\n"),
@@ -437,6 +482,7 @@ function buildResult(
     outputTokens: llmMeta.outputTokens,
     provider: llmMeta.provider,
     executionMode: llmMeta.executionMode,
+    partial,
   }
 }
 

@@ -240,7 +240,10 @@ export function ExecutionTimeline({ stages, live = false }: { stages: ReturnType
                   {s.label}
                   {STAGE_STATUS_LABEL[s.status] && <span className="ml-1.5 font-mono text-[9px] uppercase tracking-wider opacity-80">{STAGE_STATUS_LABEL[s.status]}</span>}
                 </span>
-                {s.durationMs != null && <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground">{s.durationMs}ms</span>}
+                <span className="flex shrink-0 items-center gap-1.5">
+                  {s.attempts != null && s.attempts > 1 && <span className="font-mono text-[9.5px] tabular-nums text-warn">{s.attempts} attempts</span>}
+                  {s.durationMs != null && <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">{s.durationMs}ms</span>}
+                </span>
               </div>
               {s.detail && <p className={`mt-0.5 text-[11px] leading-relaxed ${s.status === "failed" || s.status === "rejected" ? "text-destructive" : s.status === "blocked" || s.status === "waiting_for_approval" ? "text-warn" : "text-muted-foreground"}`}>{s.detail}</p>}
               {isCurrent && s.status === "pending" && !s.detail && <p className="mt-0.5 text-[11px] text-primary">In progress</p>}
@@ -288,7 +291,19 @@ function DetailView({
         </div>
         <div className="mt-2 grid grid-cols-2 gap-3">
           <Field label="Status">
-            <span className={`font-mono text-[12px] ${output.status === "failed" ? "text-destructive" : "text-grow"}`}>{output.status === "failed" ? "Failed" : "Completed"}</span>
+            {/* Section 9 — a partially-completed execution (e.g.
+             * Salesforce succeeded, Slack failed) still has a real,
+             * "completed" WorkerOutput — the execution's own status
+             * (not the output's) is what actually distinguishes it
+             * from a fully clean run; never silently shown as plain
+             * "Completed" when it wasn't. */}
+            {execution && execution.status !== "completed" ? (
+              <span className={`font-mono text-[12px] ${EXECUTION_STATUS_META[execution.status].tone === "bad" ? "text-destructive" : EXECUTION_STATUS_META[execution.status].tone === "warn" ? "text-warn" : "text-foreground"}`}>
+                {EXECUTION_STATUS_META[execution.status].label}
+              </span>
+            ) : (
+              <span className={`font-mono text-[12px] ${output.status === "failed" ? "text-destructive" : "text-grow"}`}>{output.status === "failed" ? "Failed" : "Completed"}</span>
+            )}
           </Field>
           <Field label="Quality">
             <span className="font-mono text-[13px] tabular-nums text-foreground">{output.qualityScore ?? "—"}%</span>

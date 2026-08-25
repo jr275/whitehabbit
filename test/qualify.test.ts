@@ -1,3 +1,4 @@
+// CATEGORY A — pure runtime test (no external credentials, no DB): the deterministic qualification layer.
 import { describe, expect, it } from "vitest"
 import { qualifyAll, qualifyCandidate } from "@/lib/agent/pipeline/qualify"
 import type { PipelineObjective, ResearchCandidate } from "@/lib/agent/pipeline/types"

@@ -32,6 +32,30 @@ async function resolveAccess(connection: Connection): Promise<{ accessToken: str
   return { accessToken: token.accessToken, instanceUrl }
 }
 
+/** Carries the real HTTP status + a real, provider-supplied
+ * Retry-After (ms, parsed from the header — never invented) so the
+ * caller can classify transient (429/5xx — retryable) vs. permanent
+ * (401/403/4xx — never retried) failures correctly, per section 8. */
+export class SalesforceApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+    public retryAfterMs?: number,
+  ) {
+    super(message)
+    this.name = "SalesforceApiError"
+  }
+}
+
+function parseRetryAfterMs(res: Response): number | undefined {
+  const header = res.headers.get("retry-after")
+  if (!header) return undefined
+  const seconds = Number(header)
+  if (!Number.isNaN(seconds)) return seconds * 1000
+  const date = Date.parse(header)
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now())
+}
+
 async function sfFetch<T>(connection: Connection, path: string, init?: RequestInit): Promise<T> {
   const access = await resolveAccess(connection)
   if (!access) throw new Error("Salesforce is not connected, or its credential could not be refreshed — reconnect required.")
@@ -42,7 +66,7 @@ async function sfFetch<T>(connection: Connection, path: string, init?: RequestIn
   })
   if (!res.ok) {
     const body = await res.text().catch(() => "")
-    throw new Error(`Salesforce API returned ${res.status}: ${body.slice(0, 300)}`)
+    throw new SalesforceApiError(res.status, `Salesforce API returned ${res.status}: ${body.slice(0, 300)}`, parseRetryAfterMs(res))
   }
   if (res.status === 204) return {} as T
   return (await res.json()) as T
@@ -193,6 +217,14 @@ async function run(connection: Connection, actionId: string, input: Record<strin
         return { ok: false, errorCode: "execution_error", error: `Unknown Salesforce action "${actionId}".`, durationMs: Date.now() - started }
     }
   } catch (err) {
+    // Section 8 — never retried: 401/403 (invalid/expired credential).
+    // Retried: 429/5xx (transient), honoring a real Retry-After when
+    // the provider actually sent one — never a guessed permanent
+    // failure and never a silently-retried permission problem.
+    if (err instanceof SalesforceApiError) {
+      const neverRetry = err.status === 401 || err.status === 403
+      return { ok: false, errorCode: neverRetry ? "invalid_credential" : "provider_error", error: err.message, retryAfterMs: neverRetry ? undefined : err.retryAfterMs, durationMs: Date.now() - started }
+    }
     return { ok: false, errorCode: "provider_error", error: err instanceof Error ? err.message : "Salesforce request failed", durationMs: Date.now() - started }
   }
 }

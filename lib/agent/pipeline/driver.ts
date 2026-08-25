@@ -49,10 +49,20 @@ export function foldStageEvent(state: PipelineState | undefined, type: WorkerEve
   const p = payload as StageEventPayload
   if (!p.stage) return state // not a stage-scoped event (or a plain approval_required with no stage context)
 
-  const base = state ?? (p.objective ? initPipelineState(p.objective) : undefined)
+  const base = state ?? (p.objective ? { objective: p.objective, stages: [] } : undefined)
   if (!base) return state // no objective seen yet — nothing to initialize against
 
-  const stages = base.stages.map((s) => {
+  // Any real stage key this event names gets a record — a skill's own
+  // stage shape is never assumed here (no hardcoded list): the first
+  // event naming a given stage creates it (as "queued", immediately
+  // updated below by this same event's transition); a skill whose
+  // stages happen to match the shared STAGE_ORDER (initPipelineState,
+  // still used by lib/agent/skills/salesforce-lead-pipeline.ts's own
+  // upfront "show all 7 planned nodes" call) just updates in place.
+  const known = base.stages.some((s) => s.key === p.stage)
+  const withStage = known ? base.stages : [...base.stages, { key: p.stage, label: p.label ?? p.stage, status: "queued" as const }]
+
+  const stages = withStage.map((s) => {
     if (s.key !== p.stage) return s
     switch (type) {
       case "stage_started":

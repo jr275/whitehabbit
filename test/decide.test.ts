@@ -1,3 +1,4 @@
+// CATEGORY A — pure runtime test (no external credentials, no DB): the deterministic decision engine.
 import { describe, expect, it } from "vitest"
 import { decide } from "@/lib/agent/pipeline/decide"
 import type { LlmScoreResult, PipelineObjective } from "@/lib/agent/pipeline/types"

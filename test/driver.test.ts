@@ -1,3 +1,4 @@
+// CATEGORY A — pure runtime test (no external credentials, no DB): pipeline-state fold/skip logic.
 import { describe, expect, it } from "vitest"
 import { foldStageEvent, initPipelineState, isStageEvent, skipDownstreamStages } from "@/lib/agent/pipeline/driver"
 import type { PipelineObjective } from "@/lib/workforce/model"

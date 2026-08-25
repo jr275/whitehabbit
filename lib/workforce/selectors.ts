@@ -246,6 +246,11 @@ export interface ExecutionStageStep {
   detail?: string
   timestamp?: number
   durationMs?: number
+  /** Real attempt count, when this stage retried a transient failure
+   * (section 8/23 — "ATTEMPTS" is a projection of real runtime state,
+   * never invented for display). Undefined when the stage never
+   * needed a retry — never shown as "1" by default. */
+  attempts?: number
 }
 
 /** The real execution graph (section 10) for a resumable pipeline
@@ -270,6 +275,7 @@ export function buildPipelineStages(execution: WorkerExecution): ExecutionStageS
     detail: s.detail,
     timestamp: s.completedAt ?? s.startedAt,
     durationMs: s.latencyMs,
+    attempts: s.attempts,
   }))
 }
 

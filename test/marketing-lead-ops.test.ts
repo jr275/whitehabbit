@@ -1,3 +1,4 @@
+// CATEGORY A — pure runtime test (no external credentials, no DB): structured-input parsing and LLM output schema validation.
 import { describe, expect, it } from "vitest"
 import { parseObjective, validateScores } from "@/lib/agent/skills/salesforce-lead-pipeline"
 

@@ -3,11 +3,20 @@ import "server-only"
 /* POST /api/approvals/[id]/decide — the real Human-in-the-Loop
  * decision (section "PHASE 6 — APPROVAL GATE").
  *
- * REJECT: marks the request rejected. Nothing runs — the action never
- * happens, safely. For a resumable pipeline skill (approval.
- * resumeState set), the SAME execution is also finalized — its stage
- * marked "rejected", everything genuinely still queued downstream
- * marked "skipped" — never left looking merely unstarted forever.
+ * IDEMPOTENT BY CONSTRUCTION (section 4): claimApproval() is a real
+ * atomic compare-and-swap (`UPDATE ... WHERE status = 'pending'`) —
+ * it runs FIRST, before any real work happens. Two concurrent
+ * requests (a double-click on Approve) can never both win it:
+ * Postgres serializes the two UPDATEs to the same row, exactly one
+ * matches (status was still 'pending') and flips it, the other
+ * matches zero rows and gets null back — that request returns
+ * "already decided" immediately, having done no real work at all.
+ * Only the winner goes on to actually run/resume anything.
+ *
+ * REJECT: nothing runs — the action never happens, safely. For a
+ * resumable pipeline skill (approval.resumeState set), the SAME
+ * execution is also finalized — its stage marked "rejected",
+ * everything genuinely still queued downstream marked "skipped".
  *
  * APPROVE: there is no durable workflow engine in this architecture to
  * literally suspend and resume the exact interrupted skill.execute()
@@ -26,7 +35,7 @@ import "server-only"
 
 import { NextResponse } from "next/server"
 import { withApiHandler, NotFoundError, ValidationError } from "@/lib/api-error"
-import { decideApproval, getApproval, recordAudit } from "@/lib/db/repo"
+import { claimApproval, getApproval, recordAudit, setApprovalResult } from "@/lib/db/repo"
 import { toolsMapForOrg } from "@/lib/agent/tools/connector-tools"
 import { finalizeRejectedExecution, resumeTask } from "@/lib/agent/runtime"
 import { requireSession } from "@/lib/session"
@@ -38,44 +47,61 @@ export async function POST(req: Request, { params }: Params) {
     const { organizationId, userId } = await requireSession()
     const { id } = await params
 
-    const approval = await getApproval(id, organizationId)
-    if (!approval) throw new NotFoundError()
-    if (approval.status !== "pending") throw new ValidationError(`This approval was already ${approval.status}.`)
+    const before = await getApproval(id, organizationId)
+    if (!before) throw new NotFoundError()
 
     const body = (await req.json().catch(() => null)) as { decision?: "approve" | "reject" } | null
     if (body?.decision !== "approve" && body?.decision !== "reject") throw new ValidationError('"decision" must be "approve" or "reject".')
 
-    if (body.decision === "reject") {
-      const updated = await decideApproval(id, organizationId, { status: "rejected", decidedBy: userId })
-      if (approval.resumeState != null) await finalizeRejectedExecution(approval, organizationId)
-      await recordAudit({ orgId: organizationId, userId, action: "approval_rejected", resourceType: "approval", resourceId: id, metadata: { toolId: approval.toolId, actionId: approval.actionId } })
-      return NextResponse.json({ approval: updated })
+    // The real, atomic transition — wins or loses the race right here.
+    const claimed = await claimApproval(id, organizationId, body.decision === "approve" ? "approved" : "rejected", userId)
+    if (!claimed) {
+      // Lost the race (a concurrent decide already won), or this was
+      // already decided earlier — either way, idempotent: report the
+      // real current state, do NOT perform the action a second time.
+      const current = await getApproval(id, organizationId)
+      return NextResponse.json({ approval: current, alreadyDecided: true })
     }
 
-    // Approve — a resumable skill continues the SAME execution past
-    // the approved action; otherwise (or if resume can't apply — e.g.
-    // the tool/action was reconfigured since this request was made)
-    // the prior phase's exact "run the one captured action" behavior.
-    const resumed = await resumeTask(approval, organizationId)
+    if (body.decision === "reject") {
+      if (before.resumeState != null) await finalizeRejectedExecution(before, organizationId)
+      await recordAudit({ orgId: organizationId, userId, action: "approval_rejected", resourceType: "approval", resourceId: id, metadata: { toolId: before.toolId, actionId: before.actionId } })
+      return NextResponse.json({ approval: claimed })
+    }
+
+    // Approve — already atomically claimed above; now do the real
+    // work. A resumable skill continues the SAME execution past the
+    // approved action; otherwise (or if resume can't apply — e.g. the
+    // tool/action was reconfigured since this request was made) the
+    // prior phase's exact "run the one captured action" behavior.
+    // "lease_busy" is a real, distinct outcome — the same execution
+    // is already being resumed/retried elsewhere (section 12) — and
+    // must NEVER fall through to the direct-action path below, or the
+    // whole point of the lease would be defeated.
+    const resumed = await resumeTask(before, organizationId)
     let result: unknown
-    if (resumed) {
+    if (resumed.ok) {
       result = { ok: true, resumed: true, executionId: resumed.execution.id, status: resumed.execution.status }
+    } else if (resumed.reason === "lease_busy") {
+      const updated = await setApprovalResult(id, organizationId, { ok: false, error: "This execution is already being resumed elsewhere — the approval was recorded but the action was not re-attempted." })
+      await recordAudit({ orgId: organizationId, userId, action: "approval_approved", resourceType: "approval", resourceId: id, metadata: { toolId: before.toolId, actionId: before.actionId, leaseBusy: true } })
+      return NextResponse.json({ approval: updated }, { status: 409 })
     } else {
       const tools = await toolsMapForOrg(organizationId)
-      const tool = tools.get(approval.toolId)
-      const action = tool?.actions.find((a) => a.id === approval.actionId)
+      const tool = tools.get(before.toolId)
+      const action = tool?.actions.find((a) => a.id === before.actionId)
 
       if (!tool || !action) {
-        result = { ok: false, error: `"${approval.actionLabel}" on ${approval.toolName} is no longer available (disconnected or reconfigured since this request was made).` }
+        result = { ok: false, error: `"${before.actionLabel}" on ${before.toolName} is no longer available (disconnected or reconfigured since this request was made).` }
       } else if (!tool.isConnected()) {
-        result = { ok: false, error: `${approval.toolName} is no longer connected.` }
+        result = { ok: false, error: `${before.toolName} is no longer connected.` }
       } else {
-        result = await action.run(approval.input, { workerId: approval.workerId, executionId: approval.executionId ?? "", emit: () => {} })
+        result = await action.run(before.input, { workerId: before.workerId, executionId: before.executionId ?? "", emit: () => {} })
       }
     }
 
-    const updated = await decideApproval(id, organizationId, { status: "approved", decidedBy: userId, result })
-    await recordAudit({ orgId: organizationId, userId, action: "approval_approved", resourceType: "approval", resourceId: id, metadata: { toolId: approval.toolId, actionId: approval.actionId } })
+    const updated = await setApprovalResult(id, organizationId, result)
+    await recordAudit({ orgId: organizationId, userId, action: "approval_approved", resourceType: "approval", resourceId: id, metadata: { toolId: before.toolId, actionId: before.actionId } })
     return NextResponse.json({ approval: updated })
   })
 }

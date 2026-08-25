@@ -74,8 +74,15 @@ function sleep(ms: number): Promise<void> {
  * classify and return a result `shouldRetry` can inspect, exactly
  * like every ToolActionResult already does; an unexpected thrown
  * error still propagates immediately, unretried.
+ *
+ * `getRetryAfterMs` (section 8: "Respect provider Retry-After when
+ * available") — when the result carries a real provider-supplied
+ * hint (ToolActionResult.retryAfterMs), the actual delay is the
+ * LARGER of that hint and the computed exponential backoff — the
+ * provider's own stated cooldown is a floor, never shortened by this
+ * policy's own guess.
  */
-export async function withRetry<T>(fn: (attempt: number) => Promise<T>, shouldRetry: (result: T) => boolean, policy: RetryPolicy = DEFAULT_RETRY_POLICY): Promise<RetryOutcome<T>> {
+export async function withRetry<T>(fn: (attempt: number) => Promise<T>, shouldRetry: (result: T) => boolean, policy: RetryPolicy = DEFAULT_RETRY_POLICY, getRetryAfterMs?: (result: T) => number | undefined): Promise<RetryOutcome<T>> {
   const log: RetryAttemptLog[] = []
   let attempt = 0
   for (;;) {
@@ -83,8 +90,9 @@ export async function withRetry<T>(fn: (attempt: number) => Promise<T>, shouldRe
     if (!shouldRetry(result) || attempt >= policy.maxRetries) {
       return { result, attempts: attempt + 1, log }
     }
-    const delayMs = delayForAttempt(attempt, policy)
-    log.push({ attempt: attempt + 1, delayMs, reason: "transient failure — retrying" })
+    const retryAfterMs = getRetryAfterMs?.(result)
+    const delayMs = Math.max(delayForAttempt(attempt, policy), retryAfterMs ?? 0)
+    log.push({ attempt: attempt + 1, delayMs, reason: retryAfterMs ? `transient failure — retrying (honoring provider Retry-After: ${retryAfterMs}ms)` : "transient failure — retrying" })
     await sleep(delayMs)
     attempt += 1
   }

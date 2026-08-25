@@ -499,17 +499,63 @@ export async function updatePipelineState(id: string, orgId: string, state: unkn
   await query("UPDATE executions SET pipeline_state = $1 WHERE id = $2 AND org_id = $3", [JSON.stringify(state), id, orgId])
 }
 
+/* ---- execution leases: real concurrency control (section 12) ------
+ * A real lock, not an in-memory flag — two processes/warm serverless
+ * instances trying to resume/retry the same execution race on this
+ * table, not on anything held in memory. A lease is time-bounded
+ * (lease_until, not a boolean) so a holder that crashed mid-resume
+ * never wedges the execution forever — it just expires and the next
+ * real attempt (a human re-clicking Approve, a retry) can acquire it. */
+export interface ExecutionLease {
+  executionId: string
+  leaseOwner: string
+  leaseUntil: number
+  acquiredAt: number
+}
+
+/** Atomically acquires the lease for `executionId` — succeeds if no
+ * lease row exists yet, OR the existing one has expired (lease_until
+ * in the past). Returns null if another owner currently holds a
+ * live lease — the caller must NOT proceed to resume/retry. */
+export async function acquireExecutionLease(executionId: string, owner: string, ttlMs: number): Promise<ExecutionLease | null> {
+  const now = Date.now()
+  const until = now + ttlMs
+  const row = await queryOne<{ execution_id: string; lease_owner: string; lease_until: string; acquired_at: string }>(
+    `INSERT INTO execution_leases (execution_id, lease_owner, lease_until, acquired_at)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (execution_id) DO UPDATE
+       SET lease_owner = EXCLUDED.lease_owner, lease_until = EXCLUDED.lease_until, acquired_at = EXCLUDED.acquired_at
+       WHERE execution_leases.lease_until < $4
+     RETURNING execution_id, lease_owner, lease_until, acquired_at`,
+    [executionId, owner, until, now],
+  )
+  if (!row) return null // a live lease is already held by someone else
+  return { executionId: row.execution_id, leaseOwner: row.lease_owner, leaseUntil: Number(row.lease_until), acquiredAt: Number(row.acquired_at) }
+}
+
+/** Releases the lease — a no-op (never releases someone else's lease)
+ * if `owner` no longer matches, e.g. it already expired and was
+ * re-acquired by another real attempt. */
+export async function releaseExecutionLease(executionId: string, owner: string): Promise<void> {
+  await query("DELETE FROM execution_leases WHERE execution_id = $1 AND lease_owner = $2", [executionId, owner])
+}
+
 /* ---- action executions: the real idempotency ledger (section 16) ---- */
 export interface ActionExecutionRow {
   id: string
   orgId: string
   executionId: string
+  stepId?: string
+  integrationId?: string
   provider: string
   action: string
   resource?: string
   idempotencyKey: string
   status: "pending" | "completed" | "failed"
+  attempt: number
   result?: unknown
+  errorCode?: string
+  errorMessage?: string
   createdAt: number
   completedAt?: number
 }
@@ -518,12 +564,17 @@ function rowToActionExecution(r: {
   id: string
   org_id: string
   execution_id: string
+  step_id: string | null
+  integration_id: string | null
   provider: string
   action: string
   resource: string | null
   idempotency_key: string
   status: string
+  attempt: number
   result: unknown
+  error_code: string | null
+  error_message: string | null
   created_at: string
   completed_at: string | null
 }): ActionExecutionRow {
@@ -531,12 +582,17 @@ function rowToActionExecution(r: {
     id: r.id,
     orgId: r.org_id,
     executionId: r.execution_id,
+    stepId: r.step_id ?? undefined,
+    integrationId: r.integration_id ?? undefined,
     provider: r.provider,
     action: r.action,
     resource: r.resource ?? undefined,
     idempotencyKey: r.idempotency_key,
     status: r.status as ActionExecutionRow["status"],
+    attempt: r.attempt ?? 1,
     result: r.result ?? undefined,
+    errorCode: r.error_code ?? undefined,
+    errorMessage: r.error_message ?? undefined,
     createdAt: Number(r.created_at),
     completedAt: r.completed_at ? Number(r.completed_at) : undefined,
   }
@@ -554,6 +610,19 @@ export async function getActionExecutionByKey(idempotencyKey: string): Promise<A
   return row ? rowToActionExecution(row) : null
 }
 
+/** All real action-execution records for one execution, in order —
+ * the authoritative record for external side effects (section 6),
+ * including every attempt, never just the latest. */
+/** Org-scoped (section 18) — org_id is populated server-side at claim
+ * time (see claimActionExecution's subquery), so this can filter on
+ * it directly; a caller from another org gets an empty list, never
+ * another org's real action-execution records, even if it somehow
+ * knew a real executionId that isn't its own. */
+export async function listActionExecutions(executionId: string, orgId: string): Promise<ActionExecutionRow[]> {
+  const rows = await query<Parameters<typeof rowToActionExecution>[0]>("SELECT * FROM action_executions WHERE execution_id = $1 AND org_id = $2 ORDER BY created_at ASC", [executionId, orgId])
+  return rows.map(rowToActionExecution)
+}
+
 /** Claims an idempotency key by inserting a 'pending' row BEFORE the
  * real external call is attempted — the unique index on
  * idempotency_key means a concurrent duplicate attempt fails here,
@@ -562,41 +631,72 @@ export async function getActionExecutionByKey(idempotencyKey: string): Promise<A
  * caller-supplied value) so the skill layer never needs its own
  * org-id access. Returns null if the key is already claimed (by this
  * call or an earlier one) — the caller must then re-check
- * getActionExecutionByKey(). */
-export async function claimActionExecution(input: { executionId: string; provider: string; action: string; resource?: string; idempotencyKey: string }): Promise<ActionExecutionRow | null> {
+ * getActionExecutionByKey(). `attempt` is the caller's own real
+ * attempt counter (section 6/8) — persisted verbatim, never re-derived. */
+/** A real UPSERT, not a plain INSERT (section 8: a FAILED prior
+ * attempt must be retryable, never permanently cached as a
+ * failure — only a COMPLETED one is a true dedupe target):
+ *   - no existing row for this key           -> inserts fresh (attempt 1)
+ *   - existing row status = 'failed'         -> reclaims it: attempt+1, status back to 'pending'
+ *   - existing row status = 'completed'      -> untouched, returns null (the caller dedupes via getActionExecutionByKey)
+ *   - existing row status = 'pending'        -> untouched, returns null (someone else's attempt is in flight)
+ * The conditional `WHERE ... status = 'failed'` on the UPDATE is what
+ * makes this a real, atomic compare-and-swap — Postgres returns no
+ * row from an ON CONFLICT DO UPDATE whose WHERE clause didn't match. */
+export async function claimActionExecution(input: { executionId: string; stepId?: string; integrationId?: string; provider: string; action: string; resource?: string; idempotencyKey: string }): Promise<ActionExecutionRow | null> {
   const id = `axn_${randomUUID()}`
   const now = Date.now()
-  try {
-    await query(
-      `INSERT INTO action_executions (id, org_id, execution_id, provider, action, resource, idempotency_key, status, created_at)
-       VALUES ($1, (SELECT org_id FROM executions WHERE id = $2), $2, $3, $4, $5, $6, 'pending', $7)`,
-      [id, input.executionId, input.provider, input.action, input.resource ?? null, input.idempotencyKey, now],
-    )
-  } catch (err) {
-    // unique_violation on idempotency_key — someone already claimed this key
-    if (err instanceof Error && /duplicate key|unique constraint/i.test(err.message)) return null
-    throw err
-  }
-  return { id, orgId: "", executionId: input.executionId, provider: input.provider, action: input.action, resource: input.resource, idempotencyKey: input.idempotencyKey, status: "pending", createdAt: now }
+  const row = await queryOne<Parameters<typeof rowToActionExecution>[0]>(
+    `INSERT INTO action_executions (id, org_id, execution_id, step_id, integration_id, provider, action, resource, idempotency_key, status, attempt, created_at)
+     VALUES ($1, (SELECT org_id FROM executions WHERE id = $2), $2, $3, $4, $5, $6, $7, $8, 'pending', 1, $9)
+     ON CONFLICT (idempotency_key) DO UPDATE
+       SET status = 'pending', attempt = action_executions.attempt + 1, completed_at = NULL, error_code = NULL, error_message = NULL
+       WHERE action_executions.status = 'failed'
+     RETURNING *`,
+    [id, input.executionId, input.stepId ?? null, input.integrationId ?? null, input.provider, input.action, input.resource ?? null, input.idempotencyKey, now],
+  )
+  return row ? rowToActionExecution(row) : null
 }
 
-export async function completeActionExecution(id: string, status: "completed" | "failed", result?: unknown): Promise<void> {
-  await query("UPDATE action_executions SET status = $1, result = $2, completed_at = $3 WHERE id = $4", [status, result != null ? JSON.stringify(result) : null, Date.now(), id])
+export async function completeActionExecution(id: string, status: "completed" | "failed", result?: unknown, error?: { code?: string; message?: string }): Promise<void> {
+  await query("UPDATE action_executions SET status = $1, result = $2, error_code = $3, error_message = $4, completed_at = $5 WHERE id = $6", [
+    status,
+    result != null ? JSON.stringify(result) : null,
+    error?.code ?? null,
+    error?.message ?? null,
+    Date.now(),
+    id,
+  ])
 }
 
 /* ---- execution events: durable, sequenced -------------------------
  * `sequence` is computed inside the INSERT itself (MAX+1 subquery),
  * not tracked in process memory — correct even if a reconnect or a
  * retry lands on a different warm serverless instance than the one
- * that emitted earlier events for the same execution. */
-export async function insertExecutionEvent(event: WorkerEvent, orgId: string): Promise<WorkerEvent> {
+ * that emitted earlier events for the same execution.
+ *
+ * `idempotencyKey` (section 14) is optional — most events (task_*,
+ * output_created, ...) only ever fire once per real execution by
+ * construction and don't need one. A resumable pipeline's stage_*
+ * events pass a deterministic key (execution + type + stage +
+ * attempt — see lib/agent/runtime.ts's makeEmitter) so the exact same
+ * logical event can never be inserted twice: ON CONFLICT DO NOTHING
+ * against the partial unique index, then the pre-existing row's real
+ * sequence is returned instead — the caller never sees an error, and
+ * never sees a duplicate row. */
+export async function insertExecutionEvent(event: WorkerEvent, orgId: string, idempotencyKey?: string): Promise<WorkerEvent> {
   const row = await queryOne<{ sequence: number }>(
-    `INSERT INTO execution_events (id, org_id, execution_id, worker_id, task_id, sequence, type, payload, "timestamp")
-     VALUES ($1, $2, $3, $4, $5, COALESCE((SELECT MAX(sequence) FROM execution_events WHERE execution_id = $3), 0) + 1, $6, $7, $8)
+    `INSERT INTO execution_events (id, org_id, execution_id, worker_id, task_id, sequence, type, payload, "timestamp", idempotency_key)
+     VALUES ($1, $2, $3, $4, $5, COALESCE((SELECT MAX(sequence) FROM execution_events WHERE execution_id = $3), 0) + 1, $6, $7, $8, $9)
+     ON CONFLICT (execution_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
      RETURNING sequence`,
-    [event.id, orgId, event.executionId, event.workerId, event.taskId, event.type, JSON.stringify(event.payload), event.timestamp],
+    [event.id, orgId, event.executionId, event.workerId, event.taskId, event.type, JSON.stringify(event.payload), event.timestamp, idempotencyKey ?? null],
   )
-  return { ...event, sequence: row?.sequence }
+  if (row) return { ...event, sequence: row.sequence }
+  if (!idempotencyKey) return event // no key given and no row returned would be a real bug, not the idempotent-dedupe path
+  // Conflict — the exact same logical event was already recorded; return the real, existing row's sequence.
+  const existing = await queryOne<{ sequence: number }>("SELECT sequence FROM execution_events WHERE execution_id = $1 AND idempotency_key = $2", [event.executionId, idempotencyKey])
+  return { ...event, sequence: existing?.sequence }
 }
 
 export async function getExecutionEvents(executionId: string, orgId: string): Promise<WorkerEvent[]> {
@@ -995,6 +1095,36 @@ export async function recordAudit(entry: { orgId?: string | null; userId?: strin
 }
 
 /* ================================================================== *
+ * TEST CONNECTOR RECORDS — the one real write the Internal Test
+ * Connector's "record" action performs (see lib/connectors/test-
+ * connector.ts). Real, org-scoped, org-isolated — used only to prove
+ * the real approval/resume/idempotency/lease mechanisms end to end
+ * without a real third-party account; never a real business result.
+ * ================================================================== */
+export interface TestConnectorRecord {
+  id: string
+  orgId: string
+  executionId?: string
+  note: string
+  createdAt: number
+}
+
+export async function insertTestConnectorRecord(input: { orgId: string; executionId?: string; note: string }): Promise<TestConnectorRecord> {
+  const id = `tcr_${randomUUID()}`
+  const now = Date.now()
+  await query("INSERT INTO test_connector_records (id, org_id, execution_id, note, created_at) VALUES ($1, $2, $3, $4, $5)", [id, input.orgId, input.executionId ?? null, input.note, now])
+  return { id, orgId: input.orgId, executionId: input.executionId, note: input.note, createdAt: now }
+}
+
+/** Org-scoped listing — used by tests to prove org isolation and to
+ * prove a real write happened exactly once (never twice) across a
+ * retry/resume/concurrency scenario. */
+export async function listTestConnectorRecords(orgId: string): Promise<TestConnectorRecord[]> {
+  const rows = await query<{ id: string; org_id: string; execution_id: string | null; note: string; created_at: string }>("SELECT * FROM test_connector_records WHERE org_id = $1 ORDER BY created_at ASC", [orgId])
+  return rows.map((r) => ({ id: r.id, orgId: r.org_id, executionId: r.execution_id ?? undefined, note: r.note, createdAt: Number(r.created_at) }))
+}
+
+/* ================================================================== *
  * CONNECTIONS — org-scoped, real persisted Connector Foundation
  * state. Every function here takes orgId and filters on it, same
  * discipline as the Worker functions above: org A can never read,
@@ -1286,19 +1416,27 @@ export async function getApproval(id: string, orgId: string): Promise<Approval |
   return row ? rowToApproval(row) : null
 }
 
-export async function decideApproval(
-  id: string,
-  orgId: string,
-  update: { status: "approved" | "rejected"; decidedBy: string; result?: unknown },
-): Promise<Approval | null> {
+/** True idempotent decision (section 4: "If the user clicks APPROVE
+ * twice: only one approval transition may happen"). A real atomic
+ * compare-and-swap — `WHERE status = 'pending'` is part of the SAME
+ * UPDATE that sets the new status, so two concurrent decide calls can
+ * never both win: exactly one UPDATE actually matches a row (Postgres
+ * serializes concurrent UPDATEs to the same row), the other affects
+ * zero rows and gets null back here — a real "already decided," not
+ * a race. Sets status/decided_at/decided_by immediately; `result` (for
+ * Approve, only known after the real action/resume actually runs) is
+ * attached afterward via setApprovalResult(), by the same caller that
+ * won this claim — never by the loser. */
+export async function claimApproval(id: string, orgId: string, status: "approved" | "rejected", decidedBy: string): Promise<Approval | null> {
   const now = Date.now()
-  await query("UPDATE approvals SET status = $1, decided_at = $2, decided_by = $3, result = $4 WHERE id = $5 AND org_id = $6", [
-    update.status,
-    now,
-    update.decidedBy,
-    update.result != null ? JSON.stringify(update.result) : null,
-    id,
-    orgId,
-  ])
+  const row = await queryOne<{ id: string }>("UPDATE approvals SET status = $1, decided_at = $2, decided_by = $3 WHERE id = $4 AND org_id = $5 AND status = 'pending' RETURNING id", [status, now, decidedBy, id, orgId])
+  if (!row) return null // lost the race, or was never pending — no transition happened
+  return getApproval(id, orgId)
+}
+
+/** Attaches the real result of an already-claimed decision — called
+ * only by whichever request actually won claimApproval() above. */
+export async function setApprovalResult(id: string, orgId: string, result: unknown): Promise<Approval | null> {
+  await query("UPDATE approvals SET result = $1 WHERE id = $2 AND org_id = $3", [result != null ? JSON.stringify(result) : null, id, orgId])
   return getApproval(id, orgId)
 }

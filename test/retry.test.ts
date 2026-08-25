@@ -1,3 +1,4 @@
+// CATEGORY A — pure runtime test (no external credentials, no DB): retry policy classification and backoff/Retry-After mechanics.
 import { describe, expect, it } from "vitest"
 import { DEFAULT_RETRY_POLICY, isTransientToolFailure, withRetry } from "@/lib/agent/retry"
 
