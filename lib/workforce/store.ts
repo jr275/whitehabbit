@@ -250,6 +250,25 @@ class WorkforceStore {
     }
   }
 
+  async assembleWorker(objective: string): Promise<string | null> {
+    if (this.state.creatingWorker || !objective.trim()) return null
+    this.set({ creatingWorker: true, notice: null })
+    try {
+      const { worker } = await api<{ worker: Worker }>("/api/agents/blueprint", {
+        method: "POST",
+        body: JSON.stringify({ objective: objective.trim() }),
+      })
+      this.set({ workers: [worker, ...this.state.workers.filter((item) => item.id !== worker.id)], activeWorkerId: worker.id })
+      return worker.id
+    } catch (err) {
+      console.log("[v0] assemble worker failed", err)
+      this.set({ notice: err instanceof Error ? err.message : "Could not assemble this worker — refine the objective and try again." })
+      return null
+    } finally {
+      this.set({ creatingWorker: false })
+    }
+  }
+
   selectWorker(id: string) {
     if (this.state.workers.some((w) => w.id === id)) this.set({ activeWorkerId: id })
   }
