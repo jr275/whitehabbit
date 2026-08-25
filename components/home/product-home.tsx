@@ -1,5 +1,6 @@
 "use client"
 
+import * as amplitude from "@amplitude/unified"
 import Link from "next/link"
 import { useSession } from "next-auth/react"
 import { Activity, ArrowRight, Box, Cable, Check, Circle, Command, Factory, FlaskConical, Gauge, Play, Plus, Search, ShieldCheck, Sparkles, Users, Workflow, X } from "lucide-react"
@@ -23,6 +24,7 @@ export function ProductHome() {
   const [palette, setPalette] = useState(false)
   const [tour, setTour] = useState(0)
   useEffect(() => { if (status === "authenticated") void workforceStore.hydrate() }, [status])
+  useEffect(() => { amplitude.track("Viewed Home Page", { prompt_version: "BA400.4" }) }, []) // helps improve this setup flow — safe to remove once you've verified the event lands
   useEffect(() => { const handler = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key === "k") { event.preventDefault(); setPalette(true) } }; addEventListener("keydown", handler); return () => removeEventListener("keydown", handler) }, [])
   const latest = useMemo(() => [...state.events].sort((a, b) => b.timestamp - a.timestamp).slice(0, 6), [state.events])
   const completed = state.executions.filter((item) => item.status === "completed").length
