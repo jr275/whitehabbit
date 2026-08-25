@@ -1,209 +1,26 @@
 "use client"
 
-/* ------------------------------------------------------------------ *
- * WORKER DETAIL — how one worker thinks and what it has done. The
- * header is its identity and mandate; below, its Skills-as-IP (each an
- * execution recipe + learned heuristics), a live run panel that drives
- * the demo execution provider, and its own outcomes + activity. This
- * is the surface where "an AI worker that owns proprietary skill"
- * becomes legible.
- * ------------------------------------------------------------------ */
-
-import { ArrowLeft } from "lucide-react"
+import { useEffect, useMemo } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
-import { useMemo, useState } from "react"
-import { ActivityFeed } from "@/components/workforce/activity-feed"
+import { ArrowLeft, Bot, Play, ShieldAlert } from "lucide-react"
 import { WorkforceNav } from "@/components/workforce/nav"
-import { OutcomeLedger } from "@/components/workforce/outcome-ledger"
-import { SkillCard } from "@/components/workforce/skill-card"
-import { WORKER_STATE_META } from "@/lib/workforce-demo/model"
-import { demoStore, useDemoWorkforce } from "@/lib/workforce-demo/store"
-import { workerCompetence } from "@/lib/workforce-demo/selectors"
+import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
 export default function WorkerDetailPage() {
   const params = useParams<{ id: string }>()
-  const { workers, skills, outcomes, activity, running } = useDemoWorkforce()
+  const state = useWorkforce()
+  useEffect(() => { void workforceStore.hydrate() }, [])
+  const worker = state.workers.find((item) => item.id === params.id)
+  const runs = useMemo(() => state.executions.filter((item) => item.workerId === params.id).slice(0, 12), [state.executions, params.id])
+  const taskById = useMemo(() => new Map(state.tasks.map((task) => [task.id, task])), [state.tasks])
 
-  const worker = useMemo(
-    () => workers.find((w) => w.id === params.id),
-    [workers, params.id],
-  )
-  const ownedSkills = useMemo(
-    () => (worker ? skills.filter((s) => worker.skillIds.includes(s.id)) : []),
-    [worker, skills],
-  )
-  const manager = useMemo(
-    () => workers.find((w) => w.id === worker?.managerId),
-    [workers, worker],
-  )
-  const workerOutcomes = useMemo(
-    () => outcomes.filter((o) => o.workerId === params.id),
-    [outcomes, params.id],
-  )
-  const workerActivity = useMemo(
-    () => activity.filter((a) => a.workerId === params.id),
-    [activity, params.id],
-  )
+  if (!state.hydrated) return <Shell><p className="text-sm text-muted-foreground">Loading persisted Worker state…</p></Shell>
+  if (!worker) return <Shell><p className="text-sm text-muted-foreground">Worker not found in this organization.</p></Shell>
 
-  const [runTask, setRunTask] = useState("")
-
-  if (!worker) {
-    return (
-      <div className="min-h-dvh bg-background bg-substrate text-foreground">
-        <WorkforceNav />
-        <main className="mx-auto max-w-[900px] px-5 py-16 text-center sm:px-8">
-          <p className="text-muted-foreground">Worker not found.</p>
-          <Link href="/workforce" className="mt-3 inline-block text-primary underline">
-            Back to workforce
-          </Link>
-        </main>
-      </div>
-    )
-  }
-
-  const isRunning = running.includes(worker.id)
-  const competence = workerCompetence(worker, skills)
-  const stateMeta = WORKER_STATE_META[worker.state]
-  const defaultTask = `Move ${worker.primaryKpi} this week.`
-
-  function runSkill(skillId: string) {
-    demoStore.runSkill(worker!.id, skillId, runTask.trim() || defaultTask)
-  }
-
-  return (
-    <div className="min-h-dvh bg-background bg-substrate text-foreground">
-      <WorkforceNav />
-      <main className="mx-auto max-w-[1100px] px-5 py-6 sm:px-8">
-        <Link
-          href="/observatory"
-          className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Observatory
-        </Link>
-
-        {/* identity header */}
-        <header className="mt-4 flex flex-wrap items-start gap-5">
-          <div
-            className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl font-mono text-xl font-semibold"
-            style={{ background: `${worker.accent}22`, color: worker.accent }}
-          >
-            {worker.initials}
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-semibold tracking-tight">{worker.name}</h1>
-              <span
-                className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.12em]"
-                style={{
-                  color:
-                    stateMeta.tone === "warn"
-                      ? "var(--color-warn)"
-                      : stateMeta.tone === "good"
-                        ? "var(--color-grow)"
-                        : stateMeta.tone === "info"
-                          ? "var(--color-primary)"
-                          : "var(--color-muted-foreground)",
-                }}
-              >
-                <span
-                  className="h-1.5 w-1.5 rounded-full"
-                  style={{ background: "currentColor" }}
-                />
-                {isRunning ? "Working" : stateMeta.label}
-              </span>
-            </div>
-            <p className="mt-0.5 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-              {worker.title}
-              {manager ? (
-                <>
-                  {" · reports to "}
-                  <Link href={`/workforce/${manager.id}`} className="hover:text-foreground">
-                    {manager.name}
-                  </Link>
-                </>
-              ) : (
-                " · Division lead"
-              )}
-            </p>
-            <p className="mt-2 max-w-2xl text-pretty text-[13px] leading-relaxed text-muted-foreground">
-              {worker.mandate}
-            </p>
-          </div>
-
-          <div className="flex gap-5">
-            <Stat label="Competence" value={`${competence}%`} />
-            <Stat label="Skills" value={String(ownedSkills.length)} />
-            <Stat label="Autonomy" value={worker.autonomy} mono />
-          </div>
-        </header>
-
-        {/* run panel */}
-        <section className="mt-6 rounded-xl border border-border/60 bg-card/40 p-4">
-          <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-            Put {worker.name.split(" ")[0]} to work
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              value={runTask}
-              onChange={(e) => setRunTask(e.target.value)}
-              placeholder={defaultTask}
-              className="flex-1 rounded-lg border border-border/60 bg-background/60 px-3 py-2.5 text-[13px] text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
-            />
-            <button
-              type="button"
-              onClick={() => runSkill(ownedSkills[0]?.id)}
-              disabled={isRunning || !ownedSkills.length}
-              className="rounded-lg border border-primary/40 bg-primary/10 px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.14em] text-primary transition-colors hover:bg-primary/16 disabled:opacity-60"
-            >
-              {isRunning ? "Working…" : "Run top skill"}
-            </button>
-          </div>
-        </section>
-
-        {/* skills-as-IP */}
-        <section className="mt-6">
-          <h2 className="mb-3 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            Skills — owned as IP
-          </h2>
-          <div className="grid gap-3">
-            {ownedSkills.map((s) => (
-              <SkillCard
-                key={s.id}
-                skill={s}
-                inheritedFromWorker={workers.find((w) => w.id === s.inheritedFrom)}
-                running={isRunning}
-                onRun={() => runSkill(s.id)}
-              />
-            ))}
-          </div>
-        </section>
-
-        {/* outcomes + activity */}
-        <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <section className="overflow-hidden rounded-xl border border-border/60 bg-card/40">
-            <OutcomeLedger outcomes={workerOutcomes} workers={workers} />
-          </section>
-          <aside className="flex min-h-[300px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card/40">
-            <ActivityFeed activity={workerActivity} workers={workers} />
-          </aside>
-        </div>
-      </main>
-    </div>
-  )
+  const running = workforceStore.isRunning(worker.id)
+  return <div className="min-h-dvh bg-background bg-substrate text-foreground"><WorkforceNav /><main className="mx-auto max-w-[1100px] px-5 py-8 sm:px-8"><Link href="/workforce" className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground hover:text-foreground"><ArrowLeft className="size-3.5" />Workforce</Link><header className="mt-6 flex flex-col gap-5 border-b border-border pb-8 sm:flex-row sm:items-start"><span className="flex size-16 items-center justify-center rounded-xl border border-border bg-card"><Bot className="size-7 text-primary" /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-3"><h1 className="text-3xl font-semibold tracking-tight">{worker.identity.name}</h1><span className="rounded-full border border-border bg-card px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">{worker.status}</span></div><p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{worker.identity.role} · {worker.autonomy} autonomy</p><p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted-foreground">{worker.mission || "Mission not configured."}</p></div><button type="button" disabled={running || worker.status !== "live"} onClick={() => void workforceStore.runWorker(worker.id)} className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50"><Play className="size-4" />{running ? "Running" : "Run released version"}</button></header><section className="mt-8 grid gap-4 sm:grid-cols-3"><Stat label="Enabled skills" value={String(worker.skills.filter((item) => item.enabled).length)} /><Stat label="Knowledge sources" value={String(worker.knowledge.length)} /><Stat label="Persisted runs" value={String(runs.length)} /></section><section className="mt-8"><h2 className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Execution history</h2><div className="mt-3 overflow-hidden rounded-xl border border-border bg-card">{runs.length ? runs.map((run) => <article key={run.id} className="border-b border-border p-4 last:border-0"><div className="flex items-center justify-between gap-4"><p className="font-medium text-foreground">{taskById.get(run.taskId)?.title ?? "Worker execution"}</p><span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">{run.status.replaceAll("_", " ")}</span></div><p className="mt-2 text-xs text-muted-foreground">Started {new Date(run.startedAt).toLocaleString()}{run.blockedReason ? ` · ${run.blockedReason}` : ""}</p></article>) : <div className="flex flex-col items-center px-5 py-12 text-center"><ShieldAlert className="size-5 text-primary" /><p className="mt-3 text-sm font-medium">No persisted executions</p><p className="mt-1 text-xs text-muted-foreground">Build, test, and release this Worker in Studio before running it here.</p></div>}</div></section></main></div>
 }
 
-function Stat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="text-right">
-      <div className={`text-lg font-semibold tabular-nums text-foreground ${mono ? "font-mono text-sm uppercase" : ""}`}>
-        {value}
-      </div>
-      <div className="font-mono text-[8px] uppercase tracking-[0.14em] text-muted-foreground">
-        {label}
-      </div>
-    </div>
-  )
-}
+function Shell({ children }: { children: React.ReactNode }) { return <div className="min-h-dvh bg-background bg-substrate"><WorkforceNav /><main className="mx-auto max-w-[900px] px-5 py-16 text-center sm:px-8">{children}<Link href="/workforce" className="mt-4 inline-block text-sm text-primary hover:underline">Back to workforce</Link></main></div> }
+function Stat({ label, value }: { label: string; value: string }) { return <div className="rounded-xl border border-border bg-card p-4"><p className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">{label}</p><p className="mt-2 text-2xl font-semibold">{value}</p></div> }
