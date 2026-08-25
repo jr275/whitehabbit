@@ -12,6 +12,7 @@ import "server-only"
 
 import { randomUUID } from "node:crypto"
 import { query, queryOne, withTransaction } from "./client"
+import type { Connection } from "@/lib/connectors/types"
 import type {
   BusinessEvent,
   MetricRecord,
@@ -689,4 +690,132 @@ export async function recordAudit(entry: { orgId?: string | null; userId?: strin
     "INSERT INTO audit_log (id, org_id, user_id, action, resource_type, resource_id, metadata, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     [`audit_${randomUUID()}`, entry.orgId ?? null, entry.userId ?? null, entry.action, entry.resourceType, entry.resourceId ?? null, JSON.stringify(entry.metadata ?? {}), Date.now()],
   )
+}
+
+/* ================================================================== *
+ * CONNECTIONS — org-scoped, real persisted Connector Foundation
+ * state. Every function here takes orgId and filters on it, same
+ * discipline as the Worker functions above: org A can never read,
+ * update, or delete org B's Connection by id (a mismatch reads as
+ * "not found", never as a 403 that would confirm another tenant's
+ * resource exists — see getWorker()'s doc comment for the same
+ * reasoning applied here).
+ * ================================================================== */
+
+interface ConnectionRow {
+  id: string
+  org_id: string
+  connector_id: string
+  status: string
+  auth_type: string
+  external_account_id: string | null
+  display_name: string | null
+  metadata: Record<string, unknown>
+  credential_ref: string | null
+  error_reason: string | null
+  created_at: string
+  updated_at: string
+}
+
+function rowToConnection(r: ConnectionRow): Connection {
+  return {
+    id: r.id,
+    organizationId: r.org_id,
+    connectorId: r.connector_id,
+    status: r.status as Connection["status"],
+    authType: r.auth_type as Connection["authType"],
+    externalAccountId: r.external_account_id ?? undefined,
+    displayName: r.display_name ?? undefined,
+    metadata: r.metadata ?? {},
+    credentialRef: r.credential_ref ?? undefined,
+    errorReason: r.error_reason ?? undefined,
+    createdAt: Number(r.created_at),
+    updatedAt: Number(r.updated_at),
+  }
+}
+
+export async function listConnections(orgId: string): Promise<Connection[]> {
+  const rows = await query<ConnectionRow>("SELECT * FROM connections WHERE org_id = $1 ORDER BY created_at ASC", [orgId])
+  return rows.map(rowToConnection)
+}
+
+/** Org-scoped by construction: returns null (never another org's row)
+ * if the connection doesn't belong to orgId. */
+export async function getConnection(id: string, orgId: string): Promise<Connection | null> {
+  const row = await queryOne<ConnectionRow>("SELECT * FROM connections WHERE id = $1 AND org_id = $2", [id, orgId])
+  return row ? rowToConnection(row) : null
+}
+
+export async function createConnection(input: {
+  orgId: string
+  userId?: string
+  connectorId: string
+  authType: Connection["authType"]
+  status?: Connection["status"]
+  externalAccountId?: string
+  displayName?: string
+  metadata?: Record<string, unknown>
+}): Promise<Connection> {
+  const now = Date.now()
+  const id = `conn_${randomUUID()}`
+  await query(
+    `INSERT INTO connections (id, org_id, connector_id, status, auth_type, external_account_id, display_name, metadata, created_at, updated_at, created_by, updated_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)`,
+    [
+      id,
+      input.orgId,
+      input.connectorId,
+      input.status ?? "not_connected",
+      input.authType,
+      input.externalAccountId ?? null,
+      input.displayName ?? null,
+      JSON.stringify(input.metadata ?? {}),
+      now,
+      now,
+      input.userId ?? null,
+    ],
+  )
+  return (await getConnection(id, input.orgId))!
+}
+
+/** Org-scoped by construction — the WHERE clause is what makes this
+ * safe: a caller can never update another org's Connection by
+ * guessing/forging an id, even though `id` alone would be enough to
+ * locate the row in the table. */
+export async function updateConnectionStatus(
+  id: string,
+  orgId: string,
+  update: { status: Connection["status"]; errorReason?: string | null; externalAccountId?: string; displayName?: string; metadata?: Record<string, unknown>; userId?: string },
+): Promise<Connection | null> {
+  const existing = await getConnection(id, orgId)
+  if (!existing) return null
+  const now = Date.now()
+  await query(
+    `UPDATE connections
+     SET status = $1, error_reason = $2, external_account_id = COALESCE($3, external_account_id), display_name = COALESCE($4, display_name),
+         metadata = COALESCE($5, metadata), updated_at = $6, updated_by = $7
+     WHERE id = $8 AND org_id = $9`,
+    [
+      update.status,
+      update.errorReason ?? null,
+      update.externalAccountId ?? null,
+      update.displayName ?? null,
+      update.metadata ? JSON.stringify(update.metadata) : null,
+      now,
+      update.userId ?? null,
+      id,
+      orgId,
+    ],
+  )
+  return getConnection(id, orgId)
+}
+
+/** A real delete, org-scoped — used for both "disconnect" (a
+ * deliberate user action) and cleanup. Distinguishing DISCONNECTED
+ * from a hard delete is a Phase-2-and-later product decision (soft
+ * delete + retained audit trail vs. hard delete); Phase 1 keeps this
+ * simple and relies on the existing audit_log (recordAudit) for the
+ * historical record, which already survives the row's deletion. */
+export async function deleteConnection(id: string, orgId: string): Promise<void> {
+  await query("DELETE FROM connections WHERE id = $1 AND org_id = $2", [id, orgId])
 }

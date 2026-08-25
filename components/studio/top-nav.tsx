@@ -22,6 +22,7 @@ const LINKS = [
   { href: "/products", label: "Products" },
   { href: "/studio", label: "Studio" },
   { href: "/outputs", label: "Outputs" },
+  { href: "/connections", label: "Connections" },
 ]
 
 export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview" | "production" }) {
