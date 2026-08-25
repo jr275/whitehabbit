@@ -1,5 +1,5 @@
-import { AgentFactory } from "@/components/factory/agent-factory"
+import { ProductHome } from "@/components/home/product-home"
 
-export default function Page() {
-  return <AgentFactory />
+export default function HomePage() {
+  return <ProductHome />
 }
