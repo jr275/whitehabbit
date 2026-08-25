@@ -150,6 +150,7 @@ class WorkforceStore {
           businessEvents: data.businessEvents,
           activeWorkerId: data.workers[0]?.id ?? null,
         })
+        await this.reconcileActiveExecutions()
       } catch (err) {
         console.log("[v0] hydrate failed", err)
         this.set({ hydrated: true, notice: err instanceof Error ? err.message : "Failed to load workers." })
@@ -182,6 +183,26 @@ class WorkforceStore {
     } catch (err) {
       console.log("[v0] refetch failed", err)
     }
+  }
+
+  /** Reconciles executions that may have outlived a browser stream. The
+   * execution endpoint is the durable source of truth; the NDJSON response is
+   * only an acceleration path for the tab that started the run. */
+  async reconcileActiveExecutions() {
+    const active = this.state.executions.filter((execution) => execution.status === "running" || execution.status === "queued")
+    if (!active.length) return
+    const settled = await Promise.allSettled(
+      active.map((execution) => api<{ execution: WorkerExecution; events: WorkerEvent[] }>(`/api/executions/${execution.id}`)),
+    )
+    let executions = this.state.executions
+    let events = this.state.events
+    for (const result of settled) {
+      if (result.status !== "fulfilled") continue
+      executions = executions.map((item) => item.id === result.value.execution.id ? result.value.execution : item)
+      const incomingIds = new Set(result.value.events.map((event) => event.id))
+      events = [...result.value.events, ...events.filter((event) => !incomingIds.has(event.id))]
+    }
+    this.set({ executions, events: events.slice(0, 2000) })
   }
 
   private patchWorker(workerId: string, fn: (w: Worker) => Worker) {
@@ -389,10 +410,12 @@ class WorkforceStore {
     this.schedulePersist(workerId, "behavior")
   }
 
-  /* ---- 07 Channels ---- */
-  toggleChannel(workerId: string, channelId: ChannelId) {
-    this.patchWorker(workerId, (w) => ({ ...w, channels: w.channels.map((c) => (c.id === channelId ? { ...c, connected: !c.connected } : c)) }))
-    this.schedulePersist(workerId, "channels")
+  /* ---- 07 Channels ----
+   * A channel connection is an external credential/webhook fact owned by
+   * backend integration infrastructure. Studio must never manufacture it by
+   * toggling a persisted boolean. */
+  toggleChannel(_workerId: string, _channelId: ChannelId) {
+    this.set({ notice: "Channel connection management is unavailable until a backend connector is configured." })
   }
 
   setAutonomy(workerId: string, level: Autonomy) {
@@ -517,6 +540,7 @@ class WorkforceStore {
 
     this.set({ runningWorkerIds: this.state.runningWorkerIds.filter((id) => id !== workerId) })
     await this.refetchState()
+    await this.reconcileActiveExecutions()
     return outcome
   }
 
