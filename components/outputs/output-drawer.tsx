@@ -9,10 +9,11 @@
  * shows the real reason instead of pretending one exists.
  * ------------------------------------------------------------------ */
 
-import { ArrowLeft, Check, X } from "lucide-react"
+import { ArrowLeft, ArrowUpRight, Check, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { DevModeTag } from "@/components/outputs/output-table"
 import { SKILL_CATALOG, TOOL_CATALOG } from "@/lib/workforce/catalog"
+import { deriveBusinessOutcome } from "@/lib/workforce/business-outcome"
 import type { Worker, WorkerEvent, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
 import { EXECUTION_STATUS_META, OUTPUT_TYPE_META } from "@/lib/workforce/model"
 import { buildExecutionStages, isToday, timeOfDay } from "@/lib/workforce/selectors"
@@ -193,6 +194,7 @@ function DetailView({ output, execution, task, events }: { output: WorkerOutput;
   const toolNames = template?.requiredTools.map((id) => TOOL_CATALOG.find((t) => t.id === id)?.name ?? id).join(", ")
   const isDev = execution?.executionMode === "development"
   const stages = execution ? buildExecutionStages(execution, events, output) : []
+  const outcome = deriveBusinessOutcome(output, execution)
 
   return (
     <div className="flex flex-col gap-5 px-5 py-5">
@@ -221,6 +223,63 @@ function DetailView({ output, execution, task, events }: { output: WorkerOutput;
           <StatCell label="Time" value={execution?.durationMs ? `${Math.round(execution.durationMs / 1000)}s` : "—"} />
         </div>
       </div>
+
+      {outcome && (
+        <div>
+          <div className="mb-1.5 flex items-center gap-2">
+            <ResultLabel>Business impact</ResultLabel>
+            {isDev && <span className="rounded-full border border-warn/30 bg-warn/10 px-2 py-0.5 font-mono text-[8.5px] uppercase tracking-wider text-warn">Demo data</span>}
+          </div>
+          <div className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
+            <p className="text-[13px] font-medium leading-snug text-foreground">{outcome.headline}</p>
+
+            {outcome.evidence.length > 0 && (
+              <ul className="mt-2.5 flex flex-col gap-1">
+                {outcome.evidence.map((e, i) => (
+                  <li key={i} className="flex gap-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
+                    <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground/50" />
+                    {e}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {outcome.impact.map((m) => (
+                <div key={m.label} className={`rounded-md border px-2.5 py-2 ${m.real ? "border-border bg-secondary/30" : "border-dashed border-border/70"}`}>
+                  <p className="font-mono text-[8.5px] uppercase tracking-wider text-muted-foreground">{m.label}</p>
+                  {m.real ? (
+                    <p className="mt-0.5 font-mono text-[15px] font-semibold tabular-nums text-foreground">{m.value}</p>
+                  ) : (
+                    <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground/70">{m.connectHint}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {outcome.actionsPerformed.length > 0 && (
+              <div className="mt-3">
+                <p className="font-mono text-[9.5px] uppercase tracking-wider text-muted-foreground">Actions performed</p>
+                <ul className="mt-1 flex flex-col gap-1">
+                  {outcome.actionsPerformed.map((a, i) => (
+                    <li key={i} className="flex items-center gap-1.5 text-[11.5px] text-foreground">
+                      <Check className="h-3 w-3 shrink-0 text-grow" />
+                      {a}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="mt-3 flex items-start gap-1.5 rounded-md bg-primary/5 px-2.5 py-2">
+              <ArrowUpRight className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
+              <p className="text-[11px] leading-relaxed text-foreground">{outcome.nextRecommendedAction}</p>
+            </div>
+
+            {outcome.confidence != null && <p className="mt-2 font-mono text-[9.5px] text-muted-foreground">Confidence — real, structural score: {outcome.confidence}%</p>}
+          </div>
+        </div>
+      )}
 
       <div>
         <ResultLabel>Result</ResultLabel>

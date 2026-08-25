@@ -1,25 +1,26 @@
 /* ================================================================== *
  * PRODUCT CATALOG — the commercial layer ABOVE the Workforce OS.
  *
- *   PRODUCT -> WORKER -> SKILLS -> TOOLS
+ *   SUPER AGENT (Product) -> WORKER -> SKILLS -> TOOLS
  *
- * A Product is a customer-facing business system (Content
- * Intelligence, Programmatic SEO, Discover) — NOT a Skill, and NOT
- * itself a Worker. It is a template for provisioning one: which real
- * Skills (lib/workforce/catalog.ts — the capability layer, unchanged)
- * the resulting Worker uses, and what onboarding questions build that
- * Worker's Domain Profile — the real, customer-specific business/
- * audience/data/process/rules text that makes two customers of the
- * same Product behave differently (see lib/products/domain-profile.ts
- * and lib/workforce/seed.ts's buildWorkerFromProduct()).
+ * A Product is what the product experience calls a "Super Agent": a
+ * business-domain specialist (Sales, Marketing, Customer Success...),
+ * NOT a Skill, and NOT itself a Worker. It is a template for
+ * provisioning one real Worker: which real Skills (lib/workforce/
+ * catalog.ts — the capability layer, unchanged) the resulting Worker
+ * uses, and what onboarding questions build that Worker's Domain
+ * Profile — the real, customer-specific business/audience/data/
+ * process/rules text that makes two customers of the same Super Agent
+ * behave differently (see lib/products/domain-profile.ts and
+ * lib/workforce/seed.ts's buildWorkerFromProduct()).
  *
- * Products are free to share an underlying Skill when their real
- * capability genuinely is the same one — the capability layer stays
- * shared, the product layer differentiates via onboarding + Domain
- * Profile + mission framing, never via forked skill code. They are
- * equally free to need a genuinely distinct Skill (Discover's real
- * work — responding to a customer request — is not the same
- * capability as researching a topic, so it has its own).
+ * status: "available" | "coming_soon" — the same honest pattern
+ * established for disabled Connectors (lib/connectors/registry.ts):
+ * a coming_soon Super Agent is listed so the full vision is visible,
+ * but has no primarySkillId/onboarding and can never be provisioned —
+ * there is no real Skill behind it yet, and this catalog never
+ * pretends otherwise. Only the domains with a genuinely working Skill
+ * are "available".
  * ================================================================== */
 
 export type ProductProfileBucket = "business" | "audience" | "data" | "process" | "rules"
@@ -41,6 +42,20 @@ export interface ProductOnboardingField {
   placeholder: string
 }
 
+/** One business outcome a Super Agent's dashboard tracks. `real: true`
+ * means it's actually computable today from real execution/skill data
+ * (lib/workforce/business-outcome.ts) — `real: false` means it needs
+ * a real data connection (CRM, analytics, ads) that doesn't exist yet
+ * and the UI must say so, never estimate it silently. */
+export interface BusinessOutcomeDef {
+  label: string
+  real: boolean
+  /** Shown in place of a value when real: false. */
+  connectHint?: string
+}
+
+export type ProductIcon = "PenLine" | "Layers" | "Compass" | "TrendingUp" | "Wallet" | "Settings" | "Users" | "ShoppingCart" | "Rocket"
+
 export interface ProductTemplate {
   id: string
   slug: string
@@ -53,10 +68,21 @@ export interface ProductTemplate {
    * primary skill (and thus a skill-category color) while still
    * looking completely distinct as products. */
   accent: string
-  icon: "PenLine" | "Layers" | "Compass"
+  icon: ProductIcon
+  status: "available" | "coming_soon"
+  /** "Who it is" — one sentence, the specialist's own voice. */
+  whoItIs: string
+  /** "What it does autonomously" — the real, ordered action sequence
+   * shown on the landing experience (section 11). Only ever lists
+   * actions a real Skill of this Super Agent actually performs today
+   * — never a step that isn't backed by working code. */
+  autonomousActions: string[]
+  businessOutcomes: BusinessOutcomeDef[]
   deliverableLabel: string
   workerRoleLabel: string
-  primarySkillId: string
+  /** undefined for a coming_soon Super Agent — there is nothing to
+   * provision yet. */
+  primarySkillId?: string
   secondarySkillIds: string[]
   onboarding: ProductOnboardingField[]
   /** Honest capability disclosure — section "REALITY VS DEMO". Shown
@@ -67,6 +93,41 @@ export interface ProductTemplate {
 
 export const PRODUCT_CATALOG: ProductTemplate[] = [
   {
+    id: "product_sales",
+    slug: "sales",
+    name: "Sales Agent",
+    tagline: "Your autonomous sales research team.",
+    description: "AI sales workforce specialized in discovering, researching and qualifying real candidate companies against your ideal customer profile.",
+    accent: "#2563eb",
+    icon: "TrendingUp",
+    status: "available",
+    whoItIs: "A sales research specialist that finds and qualifies real accounts, grounded in real sources — never a guessed list.",
+    autonomousActions: ["Discover candidate accounts", "Research each account", "Score against your ICP", "Explain the evidence"],
+    businessOutcomes: [
+      { label: "Qualified leads", real: true },
+      { label: "Candidates researched", real: true },
+      { label: "Qualification quality", real: true },
+      { label: "Pipeline generated", real: false, connectHint: "Connect your CRM to measure pipeline generated" },
+      { label: "Meetings booked", real: false, connectHint: "Connect your calendar/CRM to measure meetings booked" },
+    ],
+    deliverableLabel: "Qualified candidate accounts, each with real supporting evidence",
+    workerRoleLabel: "Sales Agent Worker",
+    primarySkillId: "skill_lead_qualification",
+    secondarySkillIds: ["skill_trend_research"],
+    onboarding: [
+      { key: "business", bucket: "business", label: "What does your business sell?", type: "textarea", required: true, placeholder: "We sell project-management software to mid-market agencies." },
+      { key: "audience", bucket: "audience", label: "What does your ideal customer look like?", type: "textarea", required: true, placeholder: "50-500 person agencies, US/EU, currently using spreadsheets or a legacy PM tool." },
+      { key: "data", bucket: "data", label: "What signals matter most when qualifying an account?", type: "textarea", required: false, placeholder: "Recent hiring growth, a new office, or a tech-stack match." },
+      { key: "process", bucket: "process", label: "How do you currently research and qualify leads?", type: "textarea", required: false, placeholder: "An SDR manually searches LinkedIn and the company site." },
+      { key: "rules", bucket: "rules", label: "Anything that should disqualify an account, or need human review?", type: "textarea", required: false, placeholder: "Never qualify a company under 10 employees. Flag anything in a regulated industry." },
+    ],
+    realCapabilities: [
+      "Real web-search-grounded account discovery and qualification (Lead Research & Qualification skill), framed by your real ICP",
+      "Every candidate scored with real, cited evidence — never a fabricated match",
+    ],
+    notYetConnected: ["CRM (pipeline value, meetings, deal size)", "Outbound email/calling", "Calendar (meeting booking)"],
+  },
+  {
     id: "product_content_intelligence",
     slug: "content-intelligence",
     name: "Content Intelligence",
@@ -75,6 +136,16 @@ export const PRODUCT_CATALOG: ProductTemplate[] = [
       "AI content intelligence workforce specialized in discovering trends, identifying content opportunities and producing high-performing content.",
     accent: "#a855f7",
     icon: "PenLine",
+    status: "available",
+    whoItIs: "Part of your Marketing specialist — finds real content and topic opportunities grounded in your actual business and audience.",
+    autonomousActions: ["Research current signals", "Identify content opportunities", "Rank by relevance", "Cite every source"],
+    businessOutcomes: [
+      { label: "Opportunities identified", real: true },
+      { label: "Sources analyzed", real: true },
+      { label: "Content quality", real: true },
+      { label: "Reach", real: false, connectHint: "Connect analytics to measure reach" },
+      { label: "Leads generated", real: false, connectHint: "Connect your CRM/forms to measure leads generated" },
+    ],
     deliverableLabel: "Content opportunity briefs, grounded in real sources",
     workerRoleLabel: "Content Intelligence Worker",
     primarySkillId: "skill_trend_research",
@@ -101,6 +172,16 @@ export const PRODUCT_CATALOG: ProductTemplate[] = [
       "AI SEO workforce specialized in discovering entities, search opportunities and scalable programmatic page opportunities.",
     accent: "#f59e0b",
     icon: "Layers",
+    status: "available",
+    whoItIs: "Part of your Marketing specialist — turns real topic signals into structured, source-cited page plans for your actual site.",
+    autonomousActions: ["Discover topic opportunities", "Plan a page per opportunity", "Define search intent", "Cite every source"],
+    businessOutcomes: [
+      { label: "Page opportunities planned", real: true },
+      { label: "Sources analyzed", real: true },
+      { label: "Plan quality", real: true },
+      { label: "Organic traffic", real: false, connectHint: "Connect Search Console to measure organic traffic" },
+      { label: "Conversion", real: false, connectHint: "Connect analytics to measure conversion" },
+    ],
     deliverableLabel: "Page-opportunity plans with title, intent and outline",
     workerRoleLabel: "Programmatic SEO Worker",
     primarySkillId: "skill_seo_opportunity",
@@ -121,14 +202,24 @@ export const PRODUCT_CATALOG: ProductTemplate[] = [
   {
     id: "product_discover",
     slug: "discover",
-    name: "Discover",
+    name: "Customer Success Agent",
     tagline: "Understands your customer, in your real context.",
     description:
       "AI customer operations workforce specialized in understanding conversations, using context and taking actions.",
     accent: "#14b8a6",
     icon: "Compass",
+    status: "available",
+    whoItIs: "A customer success specialist that responds to real customer requests, grounded in your real business rules — and knows when to hand off to a human.",
+    autonomousActions: ["Read the customer's request", "Ground it in your real rules", "Respond or escalate", "Record the real decision"],
+    businessOutcomes: [
+      { label: "Requests handled", real: true },
+      { label: "Response quality", real: true },
+      { label: "Escalated to human", real: true },
+      { label: "CSAT", real: false, connectHint: "Connect a survey/helpdesk tool to measure CSAT" },
+      { label: "Resolution time", real: false, connectHint: "Connect your helpdesk to measure resolution time" },
+    ],
     deliverableLabel: "A real, grounded response to a customer request, plus a real handling decision",
-    workerRoleLabel: "Discover Worker",
+    workerRoleLabel: "Customer Success Worker",
     primarySkillId: "skill_customer_conversation",
     secondarySkillIds: [],
     onboarding: [
@@ -143,6 +234,101 @@ export const PRODUCT_CATALOG: ProductTemplate[] = [
       "A real, honest handling decision per request — answered / escalated / flagged for review — never a fabricated external action",
     ],
     notYetConnected: ["Live chat/email/voice channel connection", "CRM sync", "Actually executing an action (booking change, refund) in an external system"],
+  },
+  {
+    id: "product_marketing_growth",
+    slug: "marketing-growth",
+    name: "Revenue / Growth Agent",
+    tagline: "Coming soon — architecture only.",
+    description: "Cross-functional growth workforce spanning acquisition, retention and revenue optimization. Not yet implemented.",
+    accent: "#ec4899",
+    icon: "Rocket",
+    status: "coming_soon",
+    whoItIs: "",
+    autonomousActions: [],
+    businessOutcomes: [],
+    deliverableLabel: "",
+    workerRoleLabel: "",
+    secondarySkillIds: [],
+    onboarding: [],
+    realCapabilities: [],
+    notYetConnected: [],
+  },
+  {
+    id: "product_finance",
+    slug: "finance",
+    name: "Finance Agent",
+    tagline: "Coming soon — architecture only.",
+    description: "Finance operations workforce for reporting, reconciliation and spend analysis. Not yet implemented.",
+    accent: "#0891b2",
+    icon: "Wallet",
+    status: "coming_soon",
+    whoItIs: "",
+    autonomousActions: [],
+    businessOutcomes: [],
+    deliverableLabel: "",
+    workerRoleLabel: "",
+    secondarySkillIds: [],
+    onboarding: [],
+    realCapabilities: [],
+    notYetConnected: [],
+  },
+  {
+    id: "product_operations",
+    slug: "operations",
+    name: "Operations Agent",
+    tagline: "Coming soon — architecture only.",
+    description: "Operations workforce for process automation and workflow optimization. Not yet implemented.",
+    accent: "#65a30d",
+    icon: "Settings",
+    status: "coming_soon",
+    whoItIs: "",
+    autonomousActions: [],
+    businessOutcomes: [],
+    deliverableLabel: "",
+    workerRoleLabel: "",
+    secondarySkillIds: [],
+    onboarding: [],
+    realCapabilities: [],
+    notYetConnected: [],
+  },
+  {
+    id: "product_hr",
+    slug: "hr",
+    name: "HR Agent",
+    tagline: "Coming soon — architecture only.",
+    description: "People operations workforce for recruiting research and employee support. Not yet implemented.",
+    accent: "#d97706",
+    icon: "Users",
+    status: "coming_soon",
+    whoItIs: "",
+    autonomousActions: [],
+    businessOutcomes: [],
+    deliverableLabel: "",
+    workerRoleLabel: "",
+    secondarySkillIds: [],
+    onboarding: [],
+    realCapabilities: [],
+    notYetConnected: [],
+  },
+  {
+    id: "product_ecommerce",
+    slug: "ecommerce",
+    name: "E-commerce Agent",
+    tagline: "Coming soon — architecture only.",
+    description: "E-commerce workforce for catalog, pricing and merchandising intelligence. Not yet implemented.",
+    accent: "#be123c",
+    icon: "ShoppingCart",
+    status: "coming_soon",
+    whoItIs: "",
+    autonomousActions: [],
+    businessOutcomes: [],
+    deliverableLabel: "",
+    workerRoleLabel: "",
+    secondarySkillIds: [],
+    onboarding: [],
+    realCapabilities: [],
+    notYetConnected: [],
   },
 ]
 

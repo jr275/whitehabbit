@@ -20,21 +20,32 @@ export interface ReadinessStep {
 export function computeReadiness(worker: Worker): { steps: ReadinessStep[]; percent: number; blockers: string[] } {
   const enabledSkills = worker.skills.filter((s) => s.enabled)
   const connectedTools = worker.tools.filter((t) => t.connected).length
+  const blockers = credentialBlockers(worker)
 
+  // "Ready to work", not just "configured": Business Objective and
+  // Success Metrics reuse the exact same real fields Studio's Mission/
+  // Outcome steps already write (worker.mission, worker.outcome) —
+  // this is a framing change, not a new data model. Data Connections
+  // is the one genuinely new check: are this worker's real
+  // credentialBlockers() actually clear right now.
   const steps: ReadinessStep[] = [
     { key: "identity", label: "Identity", done: !!worker.identity.name.trim() && !!worker.identity.role.trim(), detail: worker.identity.name ? `${worker.identity.name} · ${worker.identity.role || "—"}` : "Not set" },
-    { key: "mission", label: "Mission", done: !!worker.mission.trim(), detail: worker.mission.trim() ? `${worker.objectives.length} objective${worker.objectives.length === 1 ? "" : "s"}` : "Not set" },
+    { key: "mission", label: "Business Objective", done: !!worker.mission.trim(), detail: worker.mission.trim() ? worker.mission.trim() : "Not set" },
     { key: "skills", label: "Skills", done: enabledSkills.length > 0, detail: `${enabledSkills.length} configured` },
     { key: "tools", label: "Tools", done: connectedTools > 0, detail: `${connectedTools}/${worker.tools.length} connected` },
     { key: "knowledge", label: "Knowledge", done: worker.knowledge.length > 0, detail: `${worker.knowledge.length} source${worker.knowledge.length === 1 ? "" : "s"}` },
     { key: "permissions", label: "Permissions", done: worker.behaviors.length > 0, detail: `${worker.behaviors.length} rule${worker.behaviors.length === 1 ? "" : "s"}` },
-    { key: "outcome", label: "Outcome", done: !!worker.outcome.primaryKPI, detail: worker.outcome.primaryKPI || "Not set" },
+    { key: "outcome", label: "Success Metrics", done: !!worker.outcome.primaryKPI, detail: worker.outcome.primaryKPI || "Not set" },
+    {
+      key: "data_connections",
+      label: "Data Connections",
+      done: blockers.length === 0 && enabledSkills.length > 0,
+      detail: blockers.length > 0 ? blockers[0].detail : enabledSkills.length > 0 ? "All required tools connected" : "Enable a skill first",
+    },
   ]
 
-  const blockers = credentialBlockers(worker).map((b) => `${b.skillName} needs ${b.toolName} — ${b.detail}`)
-
   const percent = Math.round((steps.filter((s) => s.done).length / steps.length) * 100)
-  return { steps, percent, blockers: Array.from(new Set(blockers)) }
+  return { steps, percent, blockers: Array.from(new Set(blockers.map((b) => `${b.skillName} needs ${b.toolName} — ${b.detail}`))) }
 }
 
 /* ---- credential state — the worker's explicit READY / NOT_CONFIGURED
@@ -251,16 +262,16 @@ export function buildExecutionStages(execution: WorkerExecution, events: WorkerE
     const p = toolCompleted.payload as { resultCount?: number; durationMs?: number }
     steps.push({
       key: "search",
-      label: "Search",
+      label: "Researching",
       status: "done",
       detail: p.resultCount != null ? `${p.resultCount} real result${p.resultCount === 1 ? "" : "s"}` : undefined,
       timestamp: toolCompleted.timestamp,
       durationMs: typeof p.durationMs === "number" ? p.durationMs : undefined,
     })
   } else if (toolBlocked) {
-    steps.push({ key: "search", label: "Search", status: "failed", detail: String((toolBlocked.payload as { reason?: string }).reason ?? "Tool blocked"), timestamp: toolBlocked.timestamp })
+    steps.push({ key: "search", label: "Researching", status: "failed", detail: String((toolBlocked.payload as { reason?: string }).reason ?? "Tool blocked"), timestamp: toolBlocked.timestamp })
   } else {
-    steps.push({ key: "search", label: "Search", status: "pending", timestamp: toolCalled?.timestamp })
+    steps.push({ key: "search", label: "Researching", status: "pending", timestamp: toolCalled?.timestamp })
   }
 
   const reasoningCompleted = byType("reasoning_completed")[0]
@@ -269,20 +280,20 @@ export function buildExecutionStages(execution: WorkerExecution, events: WorkerE
     const p = reasoningCompleted.payload as { durationMs?: number; inputTokens?: number; outputTokens?: number; executionMode?: string }
     steps.push({
       key: "reasoning",
-      label: "Reasoning",
+      label: "Analyzing",
       status: "done",
       detail: p.executionMode === "development" ? "Development fixture — no external LLM called" : p.inputTokens != null ? `${p.inputTokens} in / ${p.outputTokens ?? 0} out tokens` : undefined,
       timestamp: reasoningCompleted.timestamp,
       durationMs: typeof p.durationMs === "number" ? p.durationMs : undefined,
     })
   } else {
-    steps.push({ key: "reasoning", label: "Reasoning", status: "pending", timestamp: reasoningStarted?.timestamp })
+    steps.push({ key: "reasoning", label: "Analyzing", status: "pending", timestamp: reasoningStarted?.timestamp })
   }
 
   const outputCreated = byType("output_created")[0]
   steps.push({
     key: "output",
-    label: "Output",
+    label: "Compiling result",
     status: outputCreated ? "done" : "pending",
     detail: outputCreated ? String((outputCreated.payload as { title?: string }).title ?? "") : undefined,
     timestamp: outputCreated?.timestamp,

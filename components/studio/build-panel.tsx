@@ -492,6 +492,14 @@ function ToolsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => voi
               </p>
               <BoundaryTag boundary={toolExecutionBoundary(tool)} />
             </div>
+            {/* the one tool every worker actually needs — never a
+             * confusing technical barrier, just the real fact and why
+             * it matters. Never a fake "connect" flow: the real fix is
+             * a real environment variable, so this links to nothing
+             * that isn't real. */}
+            {tool.id === "tool_llm" && !tool.connected && (
+              <p className="mt-1.5 pl-[1.625rem] text-[10.5px] italic text-muted-foreground">Required to run this worker — every skill needs a real AI model connected.</p>
+            )}
           </div>
         )
       })}

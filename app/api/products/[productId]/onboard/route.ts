@@ -38,6 +38,10 @@ export async function POST(req: Request, { params }: Params) {
     const { productId } = await params
     const product = getProduct(productId)
     if (!product) throw new NotFoundError()
+    const primarySkillId = product.primarySkillId
+    if (product.status === "coming_soon" || !primarySkillId) {
+      throw new ValidationError(`${product.name} is not yet available — architecture only in this phase.`)
+    }
 
     const body = (await req.json().catch(() => null)) as { answers?: OnboardingAnswers } | null
     const answers = body?.answers ?? {}
@@ -57,7 +61,7 @@ export async function POST(req: Request, { params }: Params) {
     const mission = deriveMissionSeed(product, answers)
 
     const existing = await getWorkerByProduct(organizationId, product.id)
-    const worker = buildWorkerFromProduct(existing?.id ?? `worker_${randomUUID()}`, product, domainProfileContent, heuristics, mission)
+    const worker = buildWorkerFromProduct(existing?.id ?? `worker_${randomUUID()}`, { ...product, primarySkillId }, domainProfileContent, heuristics, mission)
     if (existing) {
       // Re-onboarding: keep the Worker's existing identity/status/
       // release history, replace only what onboarding actually owns —
