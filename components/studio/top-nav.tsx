@@ -26,6 +26,7 @@ const LINKS = [
   { href: "/marketing", label: "Marketing" },
   { href: "/integrations", label: "Integrations" },
   { href: "/approvals", label: "Approvals" },
+  { href: "/observatory", label: "Observatory" },
 ]
 
 export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview" | "production" }) {

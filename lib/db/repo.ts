@@ -1440,3 +1440,414 @@ export async function setApprovalResult(id: string, orgId: string, result: unkno
   await query("UPDATE approvals SET result = $1 WHERE id = $2 AND org_id = $3", [result != null ? JSON.stringify(result) : null, id, orgId])
   return getApproval(id, orgId)
 }
+
+/* ================================================================== *
+ * OBSERVATORY — real, org-scoped, aggregate/bounded reads over the
+ * SAME runtime tables every other real surface (Studio/Outputs/
+ * Approvals) already writes — no second analytics data model, no
+ * demo store. Every query here takes orgId as its first filter and
+ * every other WHERE clause is built from it; nothing here ever
+ * returns another org's row (see test/observatory.test.ts).
+ *
+ * Aggregates (getExecutionSummary, listWorkerHealth) are computed in
+ * SQL, not by pulling rows into Node — correct and cheap regardless
+ * of how many executions an org has accumulated, unlike the 500-row-
+ * capped lists getBootstrapState() already uses elsewhere for UI that
+ * only ever needs "recent", not "exact total". listExecutionsDetailed
+ * is itself paginated (LIMIT/OFFSET) with server-side filtering, so
+ * the browser never has to load more than one page to filter it.
+ * ================================================================== */
+
+export interface ExecutionFilters {
+  workerId?: string
+  status?: WorkerExecution["status"]
+  sinceMs?: number
+  untilMs?: number
+}
+
+/** Builds a real `WHERE` clause + positional params for the executions
+ * table from the same filter shape every Observatory query accepts —
+ * one place this scoping logic lives, so org_id is never accidentally
+ * left out of a future query added here. */
+function executionWhere(orgId: string, filters: ExecutionFilters, alias: string): { clause: string; params: unknown[] } {
+  const clauses = [`${alias}.org_id = $1`]
+  const params: unknown[] = [orgId]
+  if (filters.workerId) {
+    params.push(filters.workerId)
+    clauses.push(`${alias}.worker_id = $${params.length}`)
+  }
+  if (filters.status) {
+    params.push(filters.status)
+    clauses.push(`${alias}.status = $${params.length}`)
+  }
+  if (filters.sinceMs != null) {
+    params.push(filters.sinceMs)
+    clauses.push(`${alias}.started_at >= $${params.length}`)
+  }
+  if (filters.untilMs != null) {
+    params.push(filters.untilMs)
+    clauses.push(`${alias}.started_at <= $${params.length}`)
+  }
+  return { clause: clauses.join(" AND "), params }
+}
+
+export interface ExecutionSummary {
+  total: number
+  completed: number
+  partiallyCompleted: number
+  failed: number
+  /** running | resuming | retrying — actively in-flight right now. */
+  running: number
+  pendingApproval: number
+  blocked: number
+  cancelled: number
+  queued: number
+  /** completed / (every execution that has actually concluded:
+   * completed + partiallyCompleted + failed + blocked + cancelled).
+   * null (never 0-as-a-guess) when nothing has concluded yet — an
+   * org with only in-flight/queued executions has no success rate
+   * to report, and this never fabricates one. */
+  successRate: number | null
+  /** avg(duration_ms) over executions that actually finalized with a
+   * real recorded duration — never estimated for in-flight runs. */
+  avgDurationMs: number | null
+  totalOutputs: number
+  totalApprovals: number
+  approvalsApproved: number
+  approvalsRejected: number
+  approvalsPending: number
+  /** approved / (approved + rejected) — null when nothing has been
+   * decided yet (a pending-only queue has no rate to report). */
+  approvalRate: number | null
+}
+
+/** The Observatory's headline numbers — three cheap aggregate
+ * queries (never a full row scan pulled into Node), each scoped to
+ * orgId and, optionally, the same worker/status/date-range filters
+ * the recent-executions list uses. */
+export async function getExecutionSummary(orgId: string, filters: ExecutionFilters = {}): Promise<ExecutionSummary> {
+  const { clause, params } = executionWhere(orgId, filters, "e")
+  const execRow = await queryOne<{
+    total: string
+    completed: string
+    partially_completed: string
+    failed: string
+    running: string
+    pending_approval: string
+    blocked: string
+    cancelled: string
+    queued: string
+    avg_duration_ms: string | null
+  }>(
+    `SELECT
+       count(*) AS total,
+       count(*) FILTER (WHERE e.status = 'completed') AS completed,
+       count(*) FILTER (WHERE e.status = 'partially_completed') AS partially_completed,
+       count(*) FILTER (WHERE e.status = 'failed') AS failed,
+       count(*) FILTER (WHERE e.status IN ('running','resuming','retrying')) AS running,
+       count(*) FILTER (WHERE e.status = 'pending_approval') AS pending_approval,
+       count(*) FILTER (WHERE e.status = 'blocked') AS blocked,
+       count(*) FILTER (WHERE e.status = 'cancelled') AS cancelled,
+       count(*) FILTER (WHERE e.status = 'queued') AS queued,
+       avg(e.duration_ms) FILTER (WHERE e.duration_ms IS NOT NULL) AS avg_duration_ms
+     FROM executions e WHERE ${clause}`,
+    params,
+  )
+
+  // Outputs/approvals honor the same org + optional worker/date-range
+  // scoping, applied to their own real timestamp columns.
+  const outputClauses = ["org_id = $1"]
+  const outputParams: unknown[] = [orgId]
+  if (filters.workerId) {
+    outputParams.push(filters.workerId)
+    outputClauses.push(`worker_id = $${outputParams.length}`)
+  }
+  if (filters.sinceMs != null) {
+    outputParams.push(filters.sinceMs)
+    outputClauses.push(`created_at >= $${outputParams.length}`)
+  }
+  if (filters.untilMs != null) {
+    outputParams.push(filters.untilMs)
+    outputClauses.push(`created_at <= $${outputParams.length}`)
+  }
+  const outputRow = await queryOne<{ count: string }>(`SELECT count(*) FROM outputs WHERE ${outputClauses.join(" AND ")}`, outputParams)
+
+  const approvalClauses = ["org_id = $1"]
+  const approvalParams: unknown[] = [orgId]
+  if (filters.workerId) {
+    approvalParams.push(filters.workerId)
+    approvalClauses.push(`worker_id = $${approvalParams.length}`)
+  }
+  if (filters.sinceMs != null) {
+    approvalParams.push(filters.sinceMs)
+    approvalClauses.push(`requested_at >= $${approvalParams.length}`)
+  }
+  if (filters.untilMs != null) {
+    approvalParams.push(filters.untilMs)
+    approvalClauses.push(`requested_at <= $${approvalParams.length}`)
+  }
+  const approvalRow = await queryOne<{ approved: string; rejected: string; pending: string; total: string }>(
+    `SELECT
+       count(*) FILTER (WHERE status = 'approved') AS approved,
+       count(*) FILTER (WHERE status = 'rejected') AS rejected,
+       count(*) FILTER (WHERE status = 'pending') AS pending,
+       count(*) AS total
+     FROM approvals WHERE ${approvalClauses.join(" AND ")}`,
+    approvalParams,
+  )
+
+  const completed = Number(execRow?.completed ?? 0)
+  const partiallyCompleted = Number(execRow?.partially_completed ?? 0)
+  const failed = Number(execRow?.failed ?? 0)
+  const blocked = Number(execRow?.blocked ?? 0)
+  const cancelled = Number(execRow?.cancelled ?? 0)
+  const terminal = completed + partiallyCompleted + failed + blocked + cancelled
+  const approved = Number(approvalRow?.approved ?? 0)
+  const rejected = Number(approvalRow?.rejected ?? 0)
+  const decided = approved + rejected
+
+  return {
+    total: Number(execRow?.total ?? 0),
+    completed,
+    partiallyCompleted,
+    failed,
+    running: Number(execRow?.running ?? 0),
+    pendingApproval: Number(execRow?.pending_approval ?? 0),
+    blocked,
+    cancelled,
+    queued: Number(execRow?.queued ?? 0),
+    successRate: terminal > 0 ? completed / terminal : null,
+    avgDurationMs: execRow?.avg_duration_ms != null ? Number(execRow.avg_duration_ms) : null,
+    totalOutputs: Number(outputRow?.count ?? 0),
+    totalApprovals: Number(approvalRow?.total ?? 0),
+    approvalsApproved: approved,
+    approvalsRejected: rejected,
+    approvalsPending: Number(approvalRow?.pending ?? 0),
+    approvalRate: decided > 0 ? approved / decided : null,
+  }
+}
+
+export interface ExecutionListFilters extends ExecutionFilters {
+  approvalState?: "pending" | "approved" | "rejected" | "none"
+}
+
+export interface ExecutionListItem {
+  id: string
+  workerId: string
+  workerName: string
+  status: WorkerExecution["status"]
+  startedAt: number
+  completedAt: number | null
+  durationMs: number | null
+  outputCount: number
+  /** The most recent approval's status for this execution, or null if
+   * this execution never triggered one. */
+  approvalStatus: "pending" | "approved" | "rejected" | null
+  /** The highest real attempt number recorded in action_executions
+   * for this execution, or null if it never attempted a real external
+   * action (nothing to report — never defaulted to 1). */
+  maxAttempt: number | null
+}
+
+/** The real, paginated, server-filtered "recent executions" list —
+ * every row already carries its worker name, output count, latest
+ * approval state and max retry attempt via correlated subqueries, so
+ * the UI never needs a second round-trip per row. */
+export async function listExecutionsDetailed(orgId: string, filters: ExecutionListFilters = {}, limit = 25, offset = 0): Promise<{ items: ExecutionListItem[]; total: number }> {
+  const { clause, params } = executionWhere(orgId, filters, "e")
+  const clauses = [clause]
+  if (filters.approvalState === "none") {
+    clauses.push(`NOT EXISTS (SELECT 1 FROM approvals a WHERE a.execution_id = e.id)`)
+  } else if (filters.approvalState) {
+    params.push(filters.approvalState)
+    clauses.push(`EXISTS (SELECT 1 FROM approvals a WHERE a.execution_id = e.id AND a.status = $${params.length})`)
+  }
+  const where = clauses.join(" AND ")
+
+  const totalRow = await queryOne<{ count: string }>(`SELECT count(*) FROM executions e WHERE ${where}`, params)
+
+  const boundedLimit = Math.min(Math.max(limit, 1), 100)
+  const limitIdx = params.length + 1
+  const offsetIdx = params.length + 2
+  const rows = await query<{
+    id: string
+    worker_id: string
+    worker_name: string
+    status: string
+    started_at: string
+    completed_at: string | null
+    duration_ms: number | null
+    output_count: string
+    approval_status: string | null
+    max_attempt: number | null
+  }>(
+    `SELECT
+       e.id, e.worker_id, w.name AS worker_name, e.status, e.started_at, e.completed_at, e.duration_ms,
+       (SELECT count(*) FROM outputs o WHERE o.execution_id = e.id) AS output_count,
+       (SELECT a.status FROM approvals a WHERE a.execution_id = e.id ORDER BY a.requested_at DESC LIMIT 1) AS approval_status,
+       (SELECT max(ax.attempt) FROM action_executions ax WHERE ax.execution_id = e.id) AS max_attempt
+     FROM executions e JOIN workers w ON w.id = e.worker_id
+     WHERE ${where}
+     ORDER BY e.started_at DESC
+     LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+    [...params, boundedLimit, offset],
+  )
+
+  return {
+    items: rows.map((r) => ({
+      id: r.id,
+      workerId: r.worker_id,
+      workerName: r.worker_name,
+      status: r.status as WorkerExecution["status"],
+      startedAt: Number(r.started_at),
+      completedAt: r.completed_at ? Number(r.completed_at) : null,
+      durationMs: r.duration_ms ?? null,
+      outputCount: Number(r.output_count),
+      approvalStatus: (r.approval_status as ExecutionListItem["approvalStatus"]) ?? null,
+      maxAttempt: r.max_attempt ?? null,
+    })),
+    total: Number(totalRow?.count ?? 0),
+  }
+}
+
+/** The subset of WorkerEventType that makes a useful operational
+ * activity feed — deliberately excludes noisier/lower-level types
+ * (reasoning_started/completed, permission_checked, tool_completed/
+ * tool_blocked/tool_failed, metric_recorded, business_event_recorded,
+ * the stage_* fine-grain types already shown in the per-execution
+ * ExecutionTimeline). Every one of these IS a real WorkerEvent type
+ * (see lib/workforce/model.ts) — nothing invented for this feed. */
+const OBSERVATORY_ACTIVITY_TYPES = ["task_started", "stage_started", "tool_called", "approval_required", "approval_approved", "approval_rejected", "output_created", "task_completed", "task_failed", "task_blocked"] as const
+
+export interface ActivityItem {
+  id: string
+  executionId: string
+  workerId: string
+  workerName: string
+  type: WorkerEvent["type"]
+  timestamp: number
+  payload: Record<string, unknown>
+}
+
+/** A bounded (LIMIT-capped), org-scoped, optionally worker-scoped
+ * read of the real execution_events table — the exact same durable
+ * record ExecutionTimeline reads per-execution, just filtered to
+ * "meaningful" types and spanning the whole org instead of one
+ * execution. Never dumps the full event log into the browser. */
+export async function listRecentActivity(orgId: string, opts: { workerId?: string; limit?: number } = {}): Promise<ActivityItem[]> {
+  const clauses = ["ev.org_id = $1", "ev.type = ANY($2::text[])"]
+  const params: unknown[] = [orgId, OBSERVATORY_ACTIVITY_TYPES]
+  if (opts.workerId) {
+    params.push(opts.workerId)
+    clauses.push(`ev.worker_id = $${params.length}`)
+  }
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200)
+  params.push(limit)
+  const rows = await query<{ id: string; execution_id: string; worker_id: string; worker_name: string; type: string; payload: Record<string, unknown>; timestamp: string }>(
+    `SELECT ev.id, ev.execution_id, ev.worker_id, w.name AS worker_name, ev.type, ev.payload, ev."timestamp"
+     FROM execution_events ev JOIN workers w ON w.id = ev.worker_id
+     WHERE ${clauses.join(" AND ")}
+     ORDER BY ev."timestamp" DESC
+     LIMIT $${params.length}`,
+    params,
+  )
+  return rows.map((r) => ({
+    id: r.id,
+    executionId: r.execution_id,
+    workerId: r.worker_id,
+    workerName: r.worker_name,
+    type: r.type as WorkerEvent["type"],
+    timestamp: Number(r.timestamp),
+    payload: r.payload,
+  }))
+}
+
+export interface WorkerHealth {
+  workerId: string
+  workerName: string
+  executions: number
+  completed: number
+  failed: number
+  /** Same terminal-outcome definition as ExecutionSummary.successRate
+   * (completed / (completed+partiallyCompleted+failed+blocked+
+   * cancelled)) — null when this worker has no concluded execution
+   * yet, never fabricated as 0%. */
+  successRate: number | null
+  lastExecutionAt: number | null
+  lastExecutionStatus: WorkerExecution["status"] | null
+  outputs: number
+  avgDurationMs: number | null
+}
+
+/** Per-worker rollup — one real, GROUP BY aggregate query, org-scoped,
+ * covering every real Worker in the org (LEFT JOIN so a worker with
+ * zero executions still appears, with real zeros/nulls, never
+ * omitted or fabricated). */
+export async function listWorkerHealth(orgId: string): Promise<WorkerHealth[]> {
+  const rows = await query<{
+    worker_id: string
+    worker_name: string
+    executions: string
+    completed: string
+    partially_completed: string
+    failed: string
+    blocked: string
+    cancelled: string
+    last_execution_at: string | null
+    outputs: string
+    avg_duration_ms: string | null
+  }>(
+    `SELECT
+       w.id AS worker_id,
+       w.name AS worker_name,
+       count(e.id) AS executions,
+       count(e.id) FILTER (WHERE e.status = 'completed') AS completed,
+       count(e.id) FILTER (WHERE e.status = 'partially_completed') AS partially_completed,
+       count(e.id) FILTER (WHERE e.status = 'failed') AS failed,
+       count(e.id) FILTER (WHERE e.status = 'blocked') AS blocked,
+       count(e.id) FILTER (WHERE e.status = 'cancelled') AS cancelled,
+       max(e.started_at) AS last_execution_at,
+       (SELECT count(*) FROM outputs o WHERE o.worker_id = w.id) AS outputs,
+       avg(e.duration_ms) FILTER (WHERE e.duration_ms IS NOT NULL) AS avg_duration_ms
+     FROM workers w
+     LEFT JOIN executions e ON e.worker_id = w.id AND e.org_id = w.org_id
+     WHERE w.org_id = $1
+     GROUP BY w.id, w.name
+     ORDER BY count(e.id) DESC, w.name ASC`,
+    [orgId],
+  )
+
+  // last_execution_status needs the actual most-recent row per
+  // worker, which a plain aggregate can't give directly — one small,
+  // bounded, indexed (idx_executions_org_started) follow-up query
+  // rather than a per-row correlated subquery inside the GROUP BY.
+  const lastRows = await query<{ worker_id: string; status: string }>(
+    `SELECT DISTINCT ON (worker_id) worker_id, status
+     FROM executions
+     WHERE org_id = $1
+     ORDER BY worker_id, started_at DESC`,
+    [orgId],
+  )
+  const lastStatusByWorker = new Map(lastRows.map((r) => [r.worker_id, r.status]))
+
+  return rows.map((r) => {
+    const completed = Number(r.completed)
+    const partiallyCompleted = Number(r.partially_completed)
+    const failed = Number(r.failed)
+    const blocked = Number(r.blocked)
+    const cancelled = Number(r.cancelled)
+    const terminal = completed + partiallyCompleted + failed + blocked + cancelled
+    return {
+      workerId: r.worker_id,
+      workerName: r.worker_name,
+      executions: Number(r.executions),
+      completed,
+      failed,
+      successRate: terminal > 0 ? completed / terminal : null,
+      lastExecutionAt: r.last_execution_at ? Number(r.last_execution_at) : null,
+      lastExecutionStatus: (lastStatusByWorker.get(r.worker_id) as WorkerExecution["status"]) ?? null,
+      outputs: Number(r.outputs),
+      avgDurationMs: r.avg_duration_ms != null ? Number(r.avg_duration_ms) : null,
+    }
+  })
+}

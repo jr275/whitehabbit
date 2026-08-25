@@ -8,6 +8,7 @@
  * ================================================================== */
 
 import { useEffect, useMemo, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { ActiveWork } from "@/components/outputs/active-work"
 import { BusinessImpactHeader } from "@/components/outputs/business-impact-header"
 import { EvolveSection } from "@/components/outputs/evolve-section"
@@ -26,10 +27,24 @@ import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 export function OutputsHub() {
   const { hydrated, workers, tasks, executions, outputs, metrics, businessEvents, events } = useWorkforce()
   const [drawer, setDrawer] = useState<DrawerFilter | null>(null)
+  const router = useRouter()
+  const searchParams = useSearchParams()
 
   useEffect(() => {
     workforceStore.hydrate()
   }, [])
+
+  // Real deep link from Observatory (or anywhere else): /outputs?execution=<id>
+  // opens the SAME OutputDrawer used everywhere else on this page — never a
+  // second execution-detail UI. Clears the query param once opened so a
+  // refresh/back-navigation doesn't keep forcing the drawer back open.
+  useEffect(() => {
+    const executionId = searchParams.get("execution")
+    if (!executionId || !hydrated) return
+    setDrawer({ kind: "execution", executionId })
+    router.replace("/outputs")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, searchParams])
 
   // Super Agent context (section 8) — every Worker provisioned from a
   // Product with a real metric domain. Not shown at all when the org
