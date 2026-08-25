@@ -12,8 +12,10 @@
 import { ArrowLeft, Check, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { DevModeTag } from "@/components/outputs/output-table"
+import { ProvenanceBadge } from "@/components/outputs/provenance-badge"
+import { formatBusinessValue, metricsForOutput, provenanceForExecution } from "@/lib/workforce/business-results"
 import { SKILL_CATALOG, TOOL_CATALOG } from "@/lib/workforce/catalog"
-import type { Worker, WorkerEvent, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
+import type { MetricRecord, Worker, WorkerEvent, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
 import { EXECUTION_STATUS_META, OUTPUT_TYPE_META } from "@/lib/workforce/model"
 import { buildExecutionStages, isToday, timeOfDay } from "@/lib/workforce/selectors"
 
@@ -32,6 +34,7 @@ export function OutputDrawer({
   tasks,
   executions,
   outputs,
+  metrics,
   events,
   onClose,
 }: {
@@ -40,6 +43,7 @@ export function OutputDrawer({
   tasks: WorkerTask[]
   executions: WorkerExecution[]
   outputs: WorkerOutput[]
+  metrics: MetricRecord[]
   events: WorkerEvent[]
   onClose: () => void
 }) {
@@ -101,7 +105,7 @@ export function OutputDrawer({
               {list.length === 0 && <p className="px-5 py-8 text-center text-[13px] text-muted-foreground">No outputs to show.</p>}
             </ul>
           ) : (
-            <DetailView output={activeOutput} execution={activeExecution} task={activeTask} events={events} />
+            <DetailView output={activeOutput} execution={activeExecution} task={activeTask} metrics={metrics} events={events} />
           )}
         </div>
       </div>
@@ -188,17 +192,19 @@ export function ExecutionTimeline({ stages, live = false }: { stages: ReturnType
   )
 }
 
-function DetailView({ output, execution, task, events }: { output: WorkerOutput; execution?: WorkerExecution; task?: WorkerTask; events: WorkerEvent[] }) {
+function DetailView({ output, execution, task, metrics, events }: { output: WorkerOutput; execution?: WorkerExecution; task?: WorkerTask; metrics: MetricRecord[]; events: WorkerEvent[] }) {
   const template = task ? SKILL_CATALOG.find((s) => s.id === task.skillId) : undefined
   const toolNames = template?.requiredTools.map((id) => TOOL_CATALOG.find((t) => t.id === id)?.name ?? id).join(", ")
   const isDev = execution?.executionMode === "development"
   const stages = execution ? buildExecutionStages(execution, events, output) : []
+  const recordedMetrics = metricsForOutput(output, metrics)
 
   return (
     <div className="flex flex-col gap-5 px-5 py-5">
       <div>
         <div className="flex items-center gap-2">
           <h3 className="text-pretty text-[16px] font-semibold leading-snug text-foreground">{output.title}</h3>
+          <ProvenanceBadge provenance={provenanceForExecution(execution)} />
           {isDev && <DevModeTag />}
         </div>
         <div className="mt-2 grid grid-cols-2 gap-3">
@@ -225,6 +231,22 @@ function DetailView({ output, execution, task, events }: { output: WorkerOutput;
       <div>
         <ResultLabel>Result</ResultLabel>
         <p className="whitespace-pre-line rounded-lg border border-border bg-card px-3.5 py-3 text-[13px] leading-relaxed text-foreground shadow-sm">{output.content}</p>
+      </div>
+
+      <div>
+        <SectionLabel>Business metrics recorded</SectionLabel>
+        {recordedMetrics.length > 0 ? <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">{recordedMetrics.map((metric) => <MetaRow key={metric.id} k={metric.key.replaceAll("_", " ")} v={formatBusinessValue(metric.value, metric.unit ?? "")} />)}</dl> : <p className="rounded-lg border border-dashed border-border px-3 py-3 text-[11.5px] text-muted-foreground">No business-impact metric was recorded for this output. Operational activity is not being presented as business impact.</p>}
+      </div>
+
+      <div>
+        <SectionLabel>Decision trace</SectionLabel>
+        <ol className="flex flex-col gap-2 rounded-lg border border-border bg-secondary/20 p-3 text-[11.5px] text-foreground">
+          <li><span className="text-muted-foreground">Input / Task · </span>{task?.title ?? "No task title recorded"}</li>
+          <li><span className="text-muted-foreground">Skill · </span>{template?.name ?? task?.skillId ?? "Not recorded"}</li>
+          <li><span className="text-muted-foreground">Evidence · </span>{output.sources?.length ? `${output.sources.length} source${output.sources.length === 1 ? "" : "s"}` : "No external sources recorded"}</li>
+          <li><span className="text-muted-foreground">Recorded output · </span>{output.title}</li>
+          <li><span className="text-muted-foreground">Business result · </span>{recordedMetrics.length ? `${recordedMetrics.length} metric${recordedMetrics.length === 1 ? "" : "s"} recorded` : "Not connected"}</li>
+        </ol>
       </div>
 
       {output.evaluation && (

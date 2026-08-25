@@ -70,16 +70,10 @@ export function WorkerStudio({ runtimeMode }: { runtimeMode?: "development" | "p
 
 function MagicStart({ creating, notice, compact = false, onComplete }: { creating: boolean; notice: string | null; compact?: boolean; onComplete: () => void }) {
   const [objective, setObjective] = useState("")
-  const [stage, setStage] = useState(0)
-  const stages = ["Understanding objective", "Selecting capabilities", "Designing workflow", "Preparing output"]
   const assemble = async () => {
     if (!objective.trim() || creating) return
-    setStage(1)
-    const timer = window.setInterval(() => setStage((value) => Math.min(value + 1, stages.length)), 700)
     const id = await workforceStore.assembleWorker(objective)
-    window.clearInterval(timer)
     if (id) onComplete()
-    else setStage(0)
   }
   return (
     <main className={`mx-auto flex min-h-[calc(100dvh-3.5rem)] w-full max-w-5xl items-center px-5 py-16 ${compact ? "min-h-[calc(100dvh-2rem)]" : ""}`}>
@@ -97,8 +91,8 @@ function MagicStart({ creating, notice, compact = false, onComplete }: { creatin
           {notice && <div className="mt-5"><Notice text={notice} /></div>}
         </section>
         <aside className="rounded-2xl border border-border bg-card p-5">
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Assembly protocol</p>
-          <ol className="mt-5 flex flex-col gap-4">{stages.map((label, index) => { const complete = stage > index; const active = creating && stage === index + 1; return <li key={label} className="flex items-center gap-3"><span className={`flex size-7 items-center justify-center rounded-full border font-mono text-[10px] ${complete ? "border-primary bg-primary text-primary-foreground" : active ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>{complete ? "✓" : index + 1}</span><span className={complete || active ? "text-sm text-foreground" : "text-sm text-muted-foreground"}>{label}</span></li> })}</ol>
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Assembly request</p>
+          <div className="mt-5 flex items-start gap-3">{creating ? <Loader2 className="mt-0.5 size-5 animate-spin text-primary" /> : <span className="mt-1 size-2 rounded-full bg-muted-foreground" />}<div><p className="text-sm font-medium text-foreground">{creating ? "Assembling your worker" : "Ready when you are"}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{creating ? "Your objective was sent to the server. This view will update when the request completes." : "No backend progress is implied until you submit an objective."}</p></div></div>
         </aside>
       </div>
     </main>
