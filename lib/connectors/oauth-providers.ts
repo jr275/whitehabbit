@@ -18,6 +18,8 @@ import "server-only"
  * ================================================================== */
 
 import type { OAuth2Config, OAuth2TokenResponse } from "./oauth"
+import { googleAnalyticsOAuthConfig } from "./providers/google-analytics"
+import { isGoogleOAuthConfigured, googleOAuthNotConfiguredReason } from "./providers/google-oauth"
 import { salesforceOAuthConfig, isSalesforceOAuthConfigured, salesforceOAuthNotConfiguredReason } from "./providers/salesforce-oauth"
 import { slackOAuthConfig, isSlackOAuthConfigured, slackOAuthNotConfiguredReason } from "./providers/slack-oauth"
 
@@ -52,6 +54,16 @@ const OAUTH_PROVIDER_REGISTRY: OAuthProviderDefinition[] = [
     buildConfig: slackOAuthConfig,
     extraFields: ["team_id", "team_name", "bot_user_id"],
     buildMetadata: (tokens) => ({ teamId: tokens.extra?.team_id ?? "", teamName: tokens.extra?.team_name ?? "", botUserId: tokens.extra?.bot_user_id ?? "" }),
+  },
+  {
+    connectorId: "connector_google_analytics",
+    isConfigured: isGoogleOAuthConfigured,
+    notConfiguredReason: googleOAuthNotConfiguredReason,
+    buildConfig: googleAnalyticsOAuthConfig,
+    // Google's real token response has no analytics-specific extra
+    // field worth caching — property/account selection happens via
+    // the real list_accounts/list_properties tools at call time, not
+    // baked into Connection.metadata.
   },
 ]
 

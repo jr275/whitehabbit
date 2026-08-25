@@ -19,6 +19,13 @@ export interface OAuth2Config {
   clientSecret: string
   redirectUri: string
   scope: string
+  /** Extra, real authorize-URL query params a specific provider's
+   * documented flow requires beyond the standard OAuth2 set — e.g.
+   * Google's real `access_type=offline&prompt=consent` (needed to
+   * actually receive a refresh_token at all). Generic here so no
+   * provider needs its own authorize-URL-building code — see
+   * providers/google-oauth.ts. */
+  extraAuthorizeParams?: Record<string, string>
 }
 
 export interface OAuth2TokenResponse {
@@ -42,6 +49,7 @@ export function buildAuthorizeUrl(config: OAuth2Config, state: string): string {
   url.searchParams.set("redirect_uri", config.redirectUri)
   url.searchParams.set("scope", config.scope)
   url.searchParams.set("state", state)
+  for (const [key, value] of Object.entries(config.extraAuthorizeParams ?? {})) url.searchParams.set(key, value)
   return url.toString()
 }
 

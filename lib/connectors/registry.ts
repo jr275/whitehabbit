@@ -10,6 +10,7 @@ import "server-only"
 
 import type { Connection, ConnectorCapability, ConnectorDefinition } from "./types"
 import { buildMcpConnector } from "./mcp-connector"
+import { googleAnalyticsConnector } from "./providers/google-analytics"
 import { salesforceConnector } from "./providers/salesforce"
 import { slackConnector } from "./providers/slack"
 import { testConnector } from "./test-connector"
@@ -142,17 +143,6 @@ const PLACEHOLDER_CONNECTORS: ConnectorDefinition[] = [
     buildTools: () => [],
   },
   {
-    id: "connector_google_analytics",
-    name: "Google Analytics",
-    description: "Real site/app performance data. Not yet implemented — architecture only.",
-    provider: "google",
-    category: "analytics",
-    authenticationType: "oauth2",
-    capabilities: [],
-    enabled: false,
-    buildTools: () => [],
-  },
-  {
     id: "connector_stripe",
     name: "Stripe",
     description: "Payments, subscriptions, revenue. Not yet implemented — architecture only.",
@@ -165,7 +155,7 @@ const PLACEHOLDER_CONNECTORS: ConnectorDefinition[] = [
   },
 ]
 
-export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [testConnector, slackConnector, salesforceConnector, mcpConnector, ...PLACEHOLDER_CONNECTORS]
+export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [testConnector, slackConnector, salesforceConnector, googleAnalyticsConnector, mcpConnector, ...PLACEHOLDER_CONNECTORS]
 
 export function registerConnector(connector: ConnectorDefinition): void {
   if (CONNECTOR_REGISTRY.some((c) => c.id === connector.id)) {
