@@ -115,6 +115,70 @@ describe.skipIf(!hasDb)("Category A — dynamic connectors (Custom REST Connecto
     expect(buildDynamicConnectorTools(row)).toEqual([]) // never builds tools for an unconnected custom connector
   })
 
+  /* ================================================================ *
+   * Fase D6 — the real "Test connection" check (POST .../test's
+   * underlying function) and the real OpenAPI import pipeline (POST
+   * .../import-openapi's underlying function), both exercised through
+   * the actual functions the API routes call — never a re-implemented
+   * shortcut.
+   * ================================================================ */
+
+  it("testCustomRestConnector reports a real, live success against a reachable server", async () => {
+    const { createOrganization, createCustomConnector } = await import("@/lib/db/repo")
+    const { testCustomRestConnector } = await import("@/lib/connectors/custom-rest")
+    const org = await createOrganization(`Test Conn Success ${randomUUID()}`)
+    const row = await createCustomConnector({ orgId: org.id, kind: "rest", name: "Reachable API", config: { baseUrl, authType: "none" } })
+    const result = await testCustomRestConnector(row)
+    expect(result.ok).toBe(true)
+    expect(result.latencyMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it("testCustomRestConnector reports a real, honest failure against an unreachable server — never a fabricated success", async () => {
+    const { createOrganization, createCustomConnector } = await import("@/lib/db/repo")
+    const { testCustomRestConnector } = await import("@/lib/connectors/custom-rest")
+    const org = await createOrganization(`Test Conn Failure ${randomUUID()}`)
+    // Port 1 on loopback: nothing listens there — a real connection
+    // failure, not a simulated one.
+    const row = await createCustomConnector({ orgId: org.id, kind: "rest", name: "Unreachable API", config: { baseUrl: "http://127.0.0.1:1", authType: "none" } })
+    const result = await testCustomRestConnector(row)
+    expect(result.ok).toBe(false)
+    expect(result.error).toBeTruthy()
+  })
+
+  it("the real OpenAPI import pipeline (parseOpenApiSpec -> updateCustomConnectorDiscovery) derives each action's risk from its real HTTP method — a DELETE operation never comes back low-risk just because the spec didn't say so explicitly", async () => {
+    const { createOrganization, createCustomConnector, updateCustomConnectorDiscovery } = await import("@/lib/db/repo")
+    const { parseOpenApiSpec } = await import("@/lib/connectors/openapi-import")
+    const org = await createOrganization(`OpenAPI Import ${randomUUID()}`)
+    const row = await createCustomConnector({ orgId: org.id, kind: "rest", name: "Imported API", config: { baseUrl, authType: "none" } })
+
+    const spec = JSON.stringify({
+      openapi: "3.0.0",
+      info: { title: "Test", version: "1.0" },
+      paths: {
+        "/widgets": {
+          get: { operationId: "list_widgets", responses: { "200": { description: "ok" } } },
+          post: { operationId: "create_widget", responses: { "200": { description: "ok" } } },
+        },
+        "/widgets/{id}": {
+          delete: { operationId: "delete_widget", parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "ok" } } },
+        },
+      },
+    })
+
+    const { actions } = parseOpenApiSpec(spec)
+    const updated = await updateCustomConnectorDiscovery(row.id, org.id, { status: "connected", discoveredTools: actions })
+
+    const list = updated!.discoveredTools.find((a) => a.id === "list_widgets")!
+    const create = updated!.discoveredTools.find((a) => a.id === "create_widget")!
+    const del = updated!.discoveredTools.find((a) => a.id === "delete_widget")!
+    expect(list.permission).toBe("read")
+    expect(list.riskLevel).toBe("low")
+    expect(create.permission).toBe("write")
+    expect(create.riskLevel).toBe("medium")
+    expect(del.permission).toBe("delete")
+    expect(del.riskLevel).toBe("high")
+  })
+
   // Connector platform audit, Fase D5 — the BLOCKER: the generic "call"
   // action can issue ANY real HTTP method, so its declared permission/
   // riskLevel must be the most conservative one requiresApprovalByDefault()

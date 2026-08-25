@@ -13,6 +13,10 @@ export const RATE_LIMITS = {
   worker_release: { limit: 30, windowMs: 60_000 },
   worker_run: { limit: 10, windowMs: 60_000 }, // real LLM calls — tighter
   connection_create: { limit: 20, windowMs: 60_000 },
+  custom_connector_create: { limit: 20, windowMs: 60_000 },
+  // Real outbound HTTP probes against an org-configured URL — tighter
+  // than creation, matching worker_run's "real external call" caution.
+  custom_connector_test: { limit: 10, windowMs: 60_000 },
 } as const
 
 export async function enforceRateLimit(scope: keyof typeof RATE_LIMITS, subject: string): Promise<void> {

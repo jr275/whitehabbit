@@ -126,6 +126,27 @@ function parseRetryAfter(header: string | null): number | undefined {
   return Number.isFinite(seconds) ? seconds * 1000 : undefined
 }
 
+/** Real, live "Test connection" check (connector platform audit,
+ * section 10/17/23) — a genuine GET against the connector's own
+ * configured origin, with whatever real credential is currently
+ * stored, through the exact same safeFetch/SSRF/redirect/size-cap
+ * path every actual call already uses. Never infers health from
+ * "a credential exists"; a provider that rejects the credential (401/
+ * 403) or is simply unreachable reports that honestly. Distinct from
+ * a Worker-invoked Tool call: this never goes through the approval
+ * gate (matching app/api/connections/[id]/test's same reasoning — a
+ * bare GET to a connector's own root is not a side-effecting action),
+ * and is never itself an approval bypass for a declared action, since
+ * it only ever hits the connector's own base origin, not an arbitrary
+ * declared action's path. */
+export async function testCustomRestConnector(row: CustomConnector): Promise<{ ok: boolean; error?: string; latencyMs: number }> {
+  const started = Date.now()
+  const result = await callRest(row, { method: "GET", path: "/" })
+  const latencyMs = Date.now() - started
+  if (result.ok) return { ok: true, latencyMs }
+  return { ok: false, error: result.error, latencyMs }
+}
+
 /** Every discovered action gets a real, individually-invocable
  * ToolAction whose input is exactly the caller's declared fields
  * (never the raw method/path/query wrapper) — the httpMethod/httpPath
