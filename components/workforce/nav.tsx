@@ -35,7 +35,7 @@ export function WorkforceNav() {
             <span className="relative h-2 w-2 rounded-full bg-primary shadow-[0_0_10px_var(--color-primary)]" />
           </span>
           <span className="font-mono text-[12px] font-medium uppercase tracking-[0.22em] text-foreground">
-            WhiteHabbit
+            Menlo Whitehabbit
           </span>
         </Link>
 

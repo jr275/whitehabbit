@@ -8,7 +8,7 @@ const geistSans = Geist({ subsets: ['latin'], variable: '--font-geist-sans' })
 const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-geist-mono' })
 
 export const metadata: Metadata = {
-  title: 'WhiteHabbit — AI Agent Factory',
+  title: 'Menlo Whitehabbit — AI Agent Factory',
   description:
     'Build, deploy, and operate an AI workforce from one observable operating layer.',
   generator: 'v0.app',

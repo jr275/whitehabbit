@@ -1,7 +1,7 @@
 "use client"
 
 /* ------------------------------------------------------------------ *
- * WhiteHabbit — HUD
+ * Menlo Whitehabbit — HUD
  * Extremely minimal. Floats above the fabric. Shows only identity and
  * liveness; everything else is contextual.
  * ------------------------------------------------------------------ */
@@ -57,7 +57,7 @@ export function Hud({
     >
       {/* left — brand */}
       <div className="font-mono text-[11px] uppercase tracking-[0.35em] text-muted-foreground">
-        WhiteHabbit
+        Menlo Whitehabbit
       </div>
 
       {/* center — worker identity */}

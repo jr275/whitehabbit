@@ -41,7 +41,7 @@ export function OutcomeHero({ onAssemble }: { onAssemble: (outcome: string) => v
         <span className="mb-8 inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3.5 py-1.5 backdrop-blur">
           <Sparkles className="h-3.5 w-3.5 text-primary" />
           <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-            WhiteHabbit — AI Workforce
+            Menlo Whitehabbit — AI Workforce
           </span>
         </span>
 

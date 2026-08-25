@@ -3,7 +3,7 @@ import { IntegrationsWorkspace } from "@/components/integrations/integrations-wo
 import { getRuntimeMode } from "@/lib/runtime-mode"
 
 export const metadata: Metadata = {
-  title: "Integrations | WhiteHabbit",
+  title: "Integrations | Menlo Whitehabbit",
   description: "Govern the tools, permissions, and data access available to your AI workforce.",
 }
 
