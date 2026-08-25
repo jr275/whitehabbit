@@ -1,93 +1,29 @@
 "use client"
 
-/* ------------------------------------------------------------------ *
- * Operational top nav — a slim, persistent bar across the light
- * surfaces. Studio and Outputs are the one real, connected product;
- * that's the whole primary nav.
- *
- * The Marketing Command Center at /insights now joins the operational
- * navigation because it combines clearly labeled demo intelligence with
- * the same persisted Worker execution ledger used by Studio and Outputs.
- * ------------------------------------------------------------------ */
-
-import { Circle, LogOut } from "lucide-react"
+import { Boxes, Circle, LogOut, Menu, X } from "lucide-react"
 import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useState } from "react"
 
-const LINKS = [
-  { href: "/products", label: "Products" },
-  { href: "/insights", label: "Command Center" },
-  { href: "/studio", label: "Studio" },
-  { href: "/outputs", label: "Outputs" },
+const GROUPS = [
+  { label: "Build", links: [{ href: "/workforce", label: "Factory" }, { href: "/studio", label: "Studio" }, { href: "/integrations", label: "Integrations" }] },
+  { label: "Operate", links: [{ href: "/insights", label: "Command" }, { href: "/outputs", label: "Executions" }, { href: "/observatory", label: "Observatory" }] },
 ]
 
 export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview" | "production" }) {
   const pathname = usePathname()
   const { data: session } = useSession()
+  const [open, setOpen] = useState(false)
   const orgName = (session as { organizationName?: string } | null)?.organizationName
+  const links = GROUPS.flatMap((group) => group.links)
 
-  return (
-    <header className="sticky top-0 z-40 border-b border-border bg-card/80 backdrop-blur-md">
-      <div className="mx-auto flex h-14 max-w-[1400px] items-center gap-6 px-5 sm:px-8">
-        {/* brand */}
-        <Link href="/" className="flex items-center gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary">
-            <Circle className="h-3 w-3 fill-primary-foreground text-primary-foreground" />
-          </span>
-          <span className="font-mono text-[13px] font-semibold tracking-tight text-foreground">
-            WhiteHabbit
-          </span>
-        </Link>
-
-        {/* section links */}
-        <nav className="flex items-center gap-1">
-          {LINKS.map((l) => {
-            const active = pathname.startsWith(l.href)
-            return (
-              <Link
-                key={l.href}
-                href={l.href}
-                className={`rounded-md px-3 py-1.5 text-[13px] transition-colors ${
-                  active
-                    ? "bg-secondary font-medium text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {l.label}
-              </Link>
-            )
-          })}
-        </nav>
-
-        {/* right — real runtime mode, real authenticated organization, real sign-out */}
-        <div className="ml-auto flex items-center gap-2">
-          {runtimeMode && runtimeMode !== "production" && (
-            <span className="hidden rounded-full border border-warn/30 bg-warn/10 px-2.5 py-1 font-mono text-[9.5px] uppercase tracking-wider text-warn sm:inline">
-              {runtimeMode}
-            </span>
-          )}
-          {orgName && (
-            <div className="hidden items-center gap-2 rounded-full border border-border bg-secondary px-3 py-1.5 sm:flex">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-grow opacity-60" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-grow" />
-              </span>
-              <span className="max-w-[10rem] truncate font-mono text-[11px] tracking-tight text-foreground">{orgName}</span>
-            </div>
-          )}
-          {session && (
-            <button
-              onClick={() => signOut({ callbackUrl: "/login" })}
-              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              title="Sign out"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Sign out</span>
-            </button>
-          )}
-        </div>
-      </div>
-    </header>
-  )
+  return <header className="sticky top-0 z-40 border-b border-border bg-card/90 backdrop-blur-xl">
+    <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-5 px-4 sm:px-6">
+      <Link href="/workforce" className="flex items-center gap-2" aria-label="WhiteHabbit home"><span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground"><Boxes className="size-3.5" /></span><span className="font-mono text-[13px] font-semibold tracking-tight text-foreground">WhiteHabbit</span></Link>
+      <nav className="hidden min-w-0 items-center gap-5 lg:flex" aria-label="Product navigation">{GROUPS.map((group) => <div key={group.label} className="flex items-center gap-1"><span className="mr-1 font-mono text-[8px] uppercase tracking-[0.2em] text-muted-foreground/60">{group.label}</span>{group.links.map((link) => { const active = pathname.startsWith(link.href); return <Link key={link.href} href={link.href} className={`rounded-md px-2.5 py-1.5 text-xs transition-colors ${active ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"}`}>{link.label}</Link> })}</div>)}</nav>
+      <div className="ml-auto flex items-center gap-2">{runtimeMode && runtimeMode !== "production" && <span className="hidden rounded-full border border-warn/30 bg-warn/10 px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-warn sm:inline">{runtimeMode}</span>}{orgName && <div className="hidden items-center gap-2 rounded-full border border-border bg-secondary px-3 py-1.5 sm:flex"><Circle className="size-1.5 fill-grow text-grow" /><span className="max-w-32 truncate font-mono text-[10px] text-foreground">{orgName}</span></div>}{session && <button onClick={() => signOut({ callbackUrl: "/login" })} className="hidden items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:flex"><LogOut className="size-3.5" />Sign out</button>}<button onClick={() => setOpen((value) => !value)} className="flex size-9 items-center justify-center rounded-lg border border-border text-muted-foreground lg:hidden" aria-expanded={open} aria-label="Toggle product navigation">{open ? <X className="size-4" /> : <Menu className="size-4" />}</button></div>
+    </div>
+    {open && <nav className="border-t border-border px-4 py-4 lg:hidden" aria-label="Mobile product navigation"><div className="grid gap-5 sm:grid-cols-2">{GROUPS.map((group) => <div key={group.label} className="flex flex-col gap-1"><span className="px-2 pb-1 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">{group.label}</span>{group.links.map((link) => <Link key={link.href} href={link.href} onClick={() => setOpen(false)} className={`rounded-lg px-3 py-2 text-sm ${pathname.startsWith(link.href) ? "bg-secondary text-foreground" : "text-muted-foreground"}`}>{link.label}</Link>)}</div>)}</div></nav>}
+  </header>
 }
