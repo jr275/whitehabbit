@@ -7,8 +7,9 @@ import { usePathname } from "next/navigation"
 import { useState } from "react"
 
 const GROUPS = [
-  { label: "Build", links: [{ href: "/workforce", label: "Factory" }, { href: "/studio", label: "Studio" }, { href: "/integrations", label: "Integrations" }] },
-  { label: "Operate", links: [{ href: "/insights", label: "Command" }, { href: "/outputs", label: "Executions" }, { href: "/observatory", label: "Observatory" }] },
+  { label: "Build", links: [{ href: "/factory", label: "Factory" }, { href: "/studio", label: "Studio" }, { href: "/library", label: "Skills" }] },
+  { label: "Connect", links: [{ href: "/integrations", label: "Integrations" }] },
+  { label: "Operate", links: [{ href: "/workforce", label: "Workforce" }, { href: "/outputs", label: "Executions" }, { href: "/approvals", label: "Approvals" }, { href: "/observatory", label: "Observatory" }] },
 ]
 
 export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview" | "production" }) {
@@ -20,7 +21,7 @@ export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview
 
   return <header className="sticky top-0 z-40 border-b border-border bg-card/90 backdrop-blur-xl">
     <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-5 px-4 sm:px-6">
-      <Link href="/workforce" className="flex items-center gap-2" aria-label="WhiteHabbit home"><span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground"><Boxes className="size-3.5" /></span><span className="font-mono text-[13px] font-semibold tracking-tight text-foreground">WhiteHabbit</span></Link>
+      <Link href="/" className="flex items-center gap-2" aria-label="WhiteHabbit home"><span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground"><Boxes className="size-3.5" /></span><span className="font-mono text-[13px] font-semibold tracking-tight text-foreground">WhiteHabbit</span></Link>
       <nav className="hidden min-w-0 items-center gap-5 lg:flex" aria-label="Product navigation">{GROUPS.map((group) => <div key={group.label} className="flex items-center gap-1"><span className="mr-1 font-mono text-[8px] uppercase tracking-[0.2em] text-muted-foreground/60">{group.label}</span>{group.links.map((link) => { const active = pathname.startsWith(link.href); return <Link key={link.href} href={link.href} className={`rounded-md px-2.5 py-1.5 text-xs transition-colors ${active ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"}`}>{link.label}</Link> })}</div>)}</nav>
       <div className="ml-auto flex items-center gap-2">{runtimeMode && runtimeMode !== "production" && <span className="hidden rounded-full border border-warn/30 bg-warn/10 px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-warn sm:inline">{runtimeMode}</span>}{orgName && <div className="hidden items-center gap-2 rounded-full border border-border bg-secondary px-3 py-1.5 sm:flex"><Circle className="size-1.5 fill-grow text-grow" /><span className="max-w-32 truncate font-mono text-[10px] text-foreground">{orgName}</span></div>}{session && <button onClick={() => signOut({ callbackUrl: "/login" })} className="hidden items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground sm:flex"><LogOut className="size-3.5" />Sign out</button>}<button onClick={() => setOpen((value) => !value)} className="flex size-9 items-center justify-center rounded-lg border border-border text-muted-foreground lg:hidden" aria-expanded={open} aria-label="Toggle product navigation">{open ? <X className="size-4" /> : <Menu className="size-4" />}</button></div>
     </div>
