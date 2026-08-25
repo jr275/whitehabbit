@@ -3,8 +3,11 @@
 import { ArrowLeft, ArrowRight, Check, Loader2, ShieldAlert, Sparkles } from "lucide-react"
 import { signIn, useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { TopNav } from "@/components/studio/top-nav"
+import { agentHealth, agentIdentity } from "@/lib/workforce/agent-identity"
 import { SKILL_CATALOG } from "@/lib/workforce/catalog"
+import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 import type { AgentBlueprint } from "@/lib/workforce/seed"
 
 type Phase = "brief" | "generating" | "review" | "creating"
@@ -12,11 +15,13 @@ type Phase = "brief" | "generating" | "review" | "creating"
 export function AgentFactory() {
   const router = useRouter()
   const { status } = useSession()
+  const workforce = useWorkforce()
   const [phase, setPhase] = useState<Phase>("brief")
   const [objective, setObjective] = useState("")
   const [blueprint, setBlueprint] = useState<AgentBlueprint | null>(null)
   const [mode, setMode] = useState<"development" | "production">("production")
   const [error, setError] = useState<string | null>(null)
+  useEffect(() => { if (status === "authenticated") void workforceStore.hydrate() }, [status])
 
   async function ensureWorkspace() {
     if (status === "authenticated") return
@@ -53,7 +58,7 @@ export function AgentFactory() {
   const update = <K extends keyof AgentBlueprint>(key: K, value: AgentBlueprint[K]) => setBlueprint((current) => current ? { ...current, [key]: value } : current)
   const busy = phase === "generating" || phase === "creating"
 
-  return <main className="min-h-dvh bg-background bg-substrate px-5 py-8 text-foreground sm:px-8">
+  return <div className="min-h-dvh bg-background text-foreground"><TopNav /><main className="bg-substrate px-5 py-8 sm:px-8">
     <div className="mx-auto flex max-w-6xl flex-col gap-8">
       <header className="flex items-center justify-between gap-4 border-b border-border pb-5"><div><p className="font-mono text-[10px] uppercase tracking-[0.28em] text-primary">WhiteHabbit / Agent Factory</p><p className="mt-2 text-sm text-muted-foreground">Brief → Blueprint → Review → Create → Configure → Test → Deploy</p></div><span className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">{phase === "review" ? "Review gate" : phase}</span></header>
       {phase !== "review" && phase !== "creating" ? <section className="mx-auto flex w-full max-w-3xl flex-col gap-7 py-16 text-center">
@@ -66,9 +71,11 @@ export function AgentFactory() {
         <aside className="flex flex-col gap-4"><div className="rounded-2xl border border-border bg-card p-5"><p className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">Contract check</p><ul className="mt-4 flex flex-col gap-3 text-xs"><CheckRow>Skill exists in runtime registry</CheckRow><CheckRow>Organization-scoped persistence</CheckRow><CheckRow>Creates as editable draft</CheckRow></ul></div><div className="rounded-2xl border border-warn/30 bg-warn/5 p-5"><div className="flex gap-3"><ShieldAlert className="size-4 shrink-0 text-warn"/><div><p className="text-xs font-medium">Not configured</p><p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">Credentials, channels, knowledge sources, schedules, and deployment remain explicit Studio steps.</p></div></div></div><p className="font-mono text-[9px] uppercase tracking-[0.15em] text-muted-foreground">Analysis mode: {mode}</p><button onClick={() => void createWorker()} disabled={busy || !blueprint.name.trim() || !blueprint.role.trim() || !blueprint.mission.trim()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 font-mono text-[11px] uppercase tracking-[0.18em] text-primary-foreground disabled:opacity-40">{busy ? <Loader2 className="size-4 animate-spin"/> : <ArrowRight className="size-4"/>}{busy ? "Creating Agent" : "Create Agent"}</button></aside>
       </section> : null}
       {error && <p role="alert" className="mx-auto text-sm text-destructive">{error}</p>}
+      {phase === "brief" && workforce.hydrated && workforce.workers.length > 0 && <section className="border-t border-border pt-8"><div className="flex items-end justify-between gap-4"><div><p className="font-mono text-[9px] uppercase tracking-[0.2em] text-primary">Your AI workforce</p><h2 className="mt-2 text-2xl font-semibold">Build, configure and manage your agents.</h2></div><span className="font-mono text-[9px] uppercase text-muted-foreground">{workforce.workers.length} agents</span></div><div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{workforce.workers.map((worker) => { const identity = agentIdentity(worker); const health = agentHealth(worker); const runs = workforce.executions.filter((execution) => execution.workerId === worker.id); const lastRun = [...runs].sort((a, b) => b.startedAt - a.startedAt)[0]; return <article key={worker.id} className="rounded-2xl border border-border bg-card p-5"><div className="flex items-start gap-3"><img src={identity.image} alt="" className="size-12 rounded-xl object-cover"/><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-3"><h3 className="truncate font-semibold">{identity.name}</h3><span className="font-mono text-[8px] uppercase text-primary">{worker.status}</span></div><p className="mt-1 truncate text-xs text-muted-foreground">{identity.role}</p></div></div><p className="mt-5 line-clamp-2 min-h-10 text-sm leading-relaxed text-muted-foreground">{worker.mission || "Objective not configured."}</p><div className="mt-5 grid grid-cols-3 gap-3"><FactoryMetric label="Config" value={`${health.readiness}%`}/><FactoryMetric label="Skills" value={String(health.enabledSkills)}/><FactoryMetric label="Runs" value={String(runs.length)}/></div><p className="mt-4 font-mono text-[8px] text-muted-foreground">{lastRun ? `Last run ${new Date(lastRun.startedAt).toLocaleString()}` : "No executions yet"}</p><div className="mt-5 flex gap-2"><button onClick={() => router.push(`/studio?worker=${worker.id}`)} className="flex-1 rounded-lg bg-primary px-3 py-2 font-mono text-[9px] uppercase tracking-[0.12em] text-primary-foreground">Open Studio</button><button onClick={() => router.push(`/workforce?worker=${worker.id}`)} className="rounded-lg border border-border px-3 py-2 font-mono text-[9px] uppercase tracking-[0.12em]">Run</button></div></article> })}</div></section>}
     </div>
-  </main>
+  </main></div>
 }
 
 function Field({ label, wide = false, children }: { label: string; wide?: boolean; children: React.ReactNode }) { return <label className={`flex flex-col gap-2 ${wide ? "sm:col-span-2" : ""}`}><span className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">{label}</span><div className="[&_input]:w-full [&_input]:rounded-lg [&_input]:border [&_input]:border-border [&_input]:bg-background [&_input]:px-3 [&_input]:py-2.5 [&_input]:text-sm [&_select]:w-full [&_select]:rounded-lg [&_select]:border [&_select]:border-border [&_select]:bg-background [&_select]:px-3 [&_select]:py-2.5 [&_select]:text-sm [&_textarea]:w-full [&_textarea]:resize-none [&_textarea]:rounded-lg [&_textarea]:border [&_textarea]:border-border [&_textarea]:bg-background [&_textarea]:px-3 [&_textarea]:py-2.5 [&_textarea]:text-sm">{children}</div></label> }
 function CheckRow({ children }: { children: React.ReactNode }) { return <li className="flex items-center gap-2"><Check className="size-3 text-grow"/><span>{children}</span></li> }
+function FactoryMetric({ label, value }: { label: string; value: string }) { return <div><p className="font-mono text-[8px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p><p className="mt-1 text-sm font-semibold tabular-nums">{value}</p></div> }
