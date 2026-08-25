@@ -20,7 +20,7 @@ import { OUTCOME_PRESETS, SKILL_CATEGORIES, SKILL_CATEGORY_LABEL, TOOL_BOUNDARY_
 import { computeReadiness } from "@/lib/workforce/selectors"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
-export type StepKey = "identity" | "mission" | "knowledge" | "skills" | "tools" | "behavior" | "channels" | "test" | "release"
+export type StepKey = "identity" | "mission" | "knowledge" | "skills" | "tools" | "behavior" | "channels" | "output"
 
 const STEPS: { key: StepKey; number: string; label: string }[] = [
   { key: "identity", number: "01", label: "Identity" },
@@ -29,9 +29,8 @@ const STEPS: { key: StepKey; number: string; label: string }[] = [
   { key: "skills", number: "04", label: "Skills" },
   { key: "tools", number: "05", label: "Tools" },
   { key: "behavior", number: "06", label: "Behavior" },
-  { key: "channels", number: "07", label: "Channels" },
-  { key: "test", number: "08", label: "Test" },
-  { key: "release", number: "09", label: "Release" },
+  { key: "channels", number: "07", label: "Permissions" },
+  { key: "output", number: "08", label: "Output" },
 ]
 
 function stepSummary(worker: Worker, key: StepKey): string {
@@ -49,11 +48,9 @@ function stepSummary(worker: Worker, key: StepKey): string {
     case "behavior":
       return `${worker.behaviors.length} rule${worker.behaviors.length === 1 ? "" : "s"}`
     case "channels":
-      return `${worker.channels.filter((c) => c.connected).length} connected`
-    case "test":
-      return worker.tested ? "Passed" : "Not tested"
-    case "release":
-      return worker.releasedVersionId ? "Live" : "Not released"
+      return `${worker.channels.filter((c) => c.connected).length} channels · ${worker.autonomy}`
+    case "output":
+      return worker.releasedVersionId ? "Verified · Live" : worker.tested ? "Verified · Ready to release" : "Needs verification"
   }
 }
 
@@ -145,10 +142,15 @@ function StepEditor({ step, worker, onAdvance }: { step: StepKey; worker: Worker
       return <BehaviorStep worker={worker} onAdvance={onAdvance} />
     case "channels":
       return <ChannelsStep worker={worker} onAdvance={onAdvance} />
-    case "test":
-      return <TestStep worker={worker} onAdvance={onAdvance} />
-    case "release":
-      return <ReleaseStep worker={worker} />
+    case "output":
+      return (
+        <div className="flex flex-col gap-6">
+          <TestStep worker={worker} onAdvance={onAdvance} />
+          <div className="border-t border-border pt-5">
+            <ReleaseStep worker={worker} />
+          </div>
+        </div>
+      )
   }
 }
 
