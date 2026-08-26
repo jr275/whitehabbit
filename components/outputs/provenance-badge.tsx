@@ -8,7 +8,7 @@ const META: Record<ResultProvenance, { label: string; className: string }> = {
   not_connected: { label: "NOT CONNECTED", className: "border-border bg-secondary text-muted-foreground" },
 }
 
-export function ProvenanceBadge({ provenance }: { provenance: ResultProvenance }) {
+export function ProvenanceBadge({ provenance, className = "" }: { provenance: ResultProvenance; className?: string }) {
   const meta = META[provenance]
-  return <span className={`inline-flex rounded-md border px-2 py-1 font-mono text-[9px] font-semibold tracking-[0.12em] ${meta.className}`}>{meta.label}</span>
+  return <span className={`inline-flex rounded-md border px-2 py-1 font-mono text-[9px] font-semibold tracking-[0.12em] ${meta.className} ${className}`}>{meta.label}</span>
 }
