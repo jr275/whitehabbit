@@ -25,6 +25,7 @@ import { toolsMap } from "@/lib/agent/tools/registry"
 import type { ExecutionReasonCode, RuntimeEventType, SkillExecutionResult, WorkerContext } from "@/lib/agent/types"
 import { ApprovalRequiredError, InvalidCredentialError, ProviderError, SkillBlockedError } from "@/lib/agent/types"
 import * as repo from "@/lib/db/repo"
+import { ingestSeoOpportunityPlan } from "@/lib/opportunity/ingest"
 import type {
   MetricRecord,
   Worker,
@@ -178,6 +179,25 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
       }
       await repo.insertOutput(output, run.orgId)
       emit("output_created", { outputId: output.id, title: output.title, qualityScore: evaluation.qualityScore })
+
+      // Knowledge Graph / Opportunity Engine ingestion (docs/adr/ADR-006,
+      // ADR-014): real for skill_seo_opportunity output only today.
+      // Fire-and-forget-but-awaited, non-fatal — a failure here must
+      // never fail the execution it's derived from, mirroring the
+      // appendWorkerMemory() pattern below.
+      if (skill.outputType === "seo_opportunity_plan") {
+        try {
+          await ingestSeoOpportunityPlan({
+            orgId: run.orgId,
+            executionId: execution.id,
+            outputId: output.id,
+            structured: result.structured,
+            evaluation,
+          })
+        } catch (ingestErr) {
+          console.error("[runtime] ingestSeoOpportunityPlan failed (non-fatal)", ingestErr)
+        }
+      }
 
       const emissions = skill.metrics(result, evaluation)
       const metricRecords: MetricRecord[] = emissions.map((m) => ({
