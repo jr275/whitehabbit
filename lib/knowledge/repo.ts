@@ -9,7 +9,8 @@ import "server-only"
 
 import { randomUUID } from "node:crypto"
 import { query, queryOne } from "@/lib/db/client"
-import type { Entity, EntityEvidence, EntityRelationship, VerificationStatus } from "./model"
+import type { Entity, EntityEvidence, EntityMergeCandidate, EntityRelationship, MergeCandidateStatus, VerificationStatus } from "./model"
+import { decideResolution, DEFAULT_RESOLUTION_THRESHOLDS, type ResolutionThresholds } from "./resolution"
 
 interface EntitySqlRow {
   id: string
@@ -180,11 +181,30 @@ export async function createRelationship(input: {
   }
 }
 
+/** Idempotency guard for relationship creation from a re-run pipeline
+ * (§36: no duplicate rows just because a job runs again) — used by
+ * lib/knowledge/ingest-from-crawl.ts before calling createRelationship. */
+export async function relationshipExists(orgId: string, sourceEntityId: string, targetEntityId: string, relationshipType: string): Promise<boolean> {
+  const row = await queryOne(
+    "SELECT 1 FROM entity_relationships WHERE org_id = $1 AND source_entity_id = $2 AND target_entity_id = $3 AND relationship_type = $4",
+    [orgId, sourceEntityId, targetEntityId, relationshipType],
+  )
+  return row !== null
+}
+
 export async function listRelationshipsForEntity(entityId: string, orgId: string): Promise<EntityRelationship[]> {
   const rows = await query<RelationshipSqlRow>(
     "SELECT * FROM entity_relationships WHERE org_id = $1 AND (source_entity_id = $2 OR target_entity_id = $2) ORDER BY created_at DESC",
     [orgId, entityId],
   )
+  return rows.map(rowToRelationship)
+}
+
+/** All relationships for a project in one query — used by
+ * lib/opportunity/discovery.ts to compute every canonical entity's
+ * relationship degree without an N+1 query per entity. */
+export async function listRelationshipsForProject(orgId: string, projectId: string): Promise<EntityRelationship[]> {
+  const rows = await query<RelationshipSqlRow>("SELECT * FROM entity_relationships WHERE org_id = $1 AND project_id = $2", [orgId, projectId])
   return rows.map(rowToRelationship)
 }
 
@@ -199,6 +219,7 @@ interface EvidenceSqlRow {
   retrieved_at: string
   confidence: number | null
   verification_status: VerificationStatus
+  crawl_page_id: string | null
   created_at: string
 }
 
@@ -214,6 +235,7 @@ function rowToEvidence(r: EvidenceSqlRow): EntityEvidence {
     retrievedAt: Number(r.retrieved_at),
     confidence: r.confidence,
     verificationStatus: r.verification_status,
+    crawlPageId: r.crawl_page_id,
     createdAt: Number(r.created_at),
   }
 }
@@ -231,14 +253,15 @@ export async function addEvidence(input: {
   sourceType: string
   confidence?: number
   verificationStatus?: VerificationStatus
+  crawlPageId?: string
 }): Promise<EntityEvidence> {
   const id = `evid_${randomUUID()}`
   const now = Date.now()
   const verificationStatus = input.verificationStatus ?? "unverified"
   await query(
-    `INSERT INTO entity_evidence (id, org_id, project_id, entity_id, fact, source_url, source_type, retrieved_at, confidence, verification_status, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $8)`,
-    [id, input.orgId, input.projectId, input.entityId, input.fact, input.sourceUrl ?? null, input.sourceType, now, input.confidence ?? null, verificationStatus],
+    `INSERT INTO entity_evidence (id, org_id, project_id, entity_id, fact, source_url, source_type, retrieved_at, confidence, verification_status, crawl_page_id, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $8)`,
+    [id, input.orgId, input.projectId, input.entityId, input.fact, input.sourceUrl ?? null, input.sourceType, now, input.confidence ?? null, verificationStatus, input.crawlPageId ?? null],
   )
   return {
     id,
@@ -251,8 +274,175 @@ export async function addEvidence(input: {
     retrievedAt: now,
     confidence: input.confidence ?? null,
     verificationStatus,
+    crawlPageId: input.crawlPageId ?? null,
     createdAt: now,
   }
+}
+
+/* ================================================================== *
+ * ENTITY RESOLUTION (§7) — real, threshold-based, auditable.
+ * ================================================================== */
+
+export interface ResolveEntityResult {
+  entity: Entity
+  decision: "exact" | "auto_merge" | "review_candidate" | "distinct"
+  mergedInto: Entity | null
+}
+
+/** The real resolution path used by extraction pipelines (unlike
+ * upsertEntityByName's exact-match-only fast path, still used by the
+ * older skill_seo_opportunity ingestion for its simpler needs). Always
+ * creates a real entity row for the new mention, then:
+ *   - exact case-insensitive name+type match -> reuses that row, no new row created
+ *   - similarity >= autoMerge -> creates the row, sets its
+ *     canonical_entity_id to the best match, records an AUDITABLE
+ *     entity_merge_candidates row with status "auto_merged"
+ *   - similarity in [review, autoMerge) -> creates the row, records a
+ *     "pending" entity_merge_candidates row for a human to decide
+ *   - otherwise -> creates the row, stays fully separate
+ */
+export async function resolveOrCreateEntity(
+  orgId: string,
+  projectId: string,
+  entityType: string,
+  name: string,
+  attributes: Record<string, unknown> = {},
+  thresholds: ResolutionThresholds = DEFAULT_RESOLUTION_THRESHOLDS,
+): Promise<ResolveEntityResult> {
+  const trimmedName = name.trim()
+  const exact = await queryOne<EntitySqlRow>("SELECT * FROM entities WHERE project_id = $1 AND entity_type = $2 AND lower(name) = lower($3)", [
+    projectId,
+    entityType,
+    trimmedName,
+  ])
+  if (exact) return { entity: rowToEntity(exact), decision: "exact", mergedInto: null }
+
+  const existingRows = await query<EntitySqlRow>(
+    "SELECT * FROM entities WHERE project_id = $1 AND entity_type = $2 AND canonical_entity_id IS NULL LIMIT 500",
+    [projectId, entityType],
+  )
+  const candidates = existingRows.map((r) => ({ id: r.id, name: r.name }))
+  const resolution = decideResolution(trimmedName, candidates, thresholds)
+
+  const id = `entity_${randomUUID()}`
+  const now = Date.now()
+
+  if (resolution.decision === "auto_merge" && resolution.bestMatch) {
+    const canonicalRow = existingRows.find((r) => r.id === resolution.bestMatch!.id)!
+    await query(
+      "INSERT INTO entities (id, org_id, project_id, entity_type, name, canonical_entity_id, attributes, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)",
+      [id, orgId, projectId, entityType, trimmedName, canonicalRow.id, JSON.stringify(attributes), now],
+    )
+    await recordMergeCandidate(orgId, projectId, canonicalRow.id, id, resolution.confidence, "auto_merged")
+    return {
+      entity: { id, orgId, projectId, entityType, name: trimmedName, canonicalEntityId: canonicalRow.id, attributes, createdAt: now, updatedAt: now },
+      decision: "auto_merge",
+      mergedInto: rowToEntity(canonicalRow),
+    }
+  }
+
+  await query(
+    "INSERT INTO entities (id, org_id, project_id, entity_type, name, canonical_entity_id, attributes, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, $7)",
+    [id, orgId, projectId, entityType, trimmedName, JSON.stringify(attributes), now],
+  )
+  const created: Entity = { id, orgId, projectId, entityType, name: trimmedName, canonicalEntityId: null, attributes, createdAt: now, updatedAt: now }
+
+  if (resolution.decision === "review_candidate" && resolution.bestMatch) {
+    const canonicalRow = existingRows.find((r) => r.id === resolution.bestMatch!.id)!
+    await recordMergeCandidate(orgId, projectId, canonicalRow.id, id, resolution.confidence, "pending")
+    return { entity: created, decision: "review_candidate", mergedInto: null }
+  }
+  return { entity: created, decision: "distinct", mergedInto: null }
+}
+
+async function recordMergeCandidate(orgId: string, projectId: string, entityId: string, candidateEntityId: string, confidence: number, status: MergeCandidateStatus): Promise<void> {
+  const id = `merge_${randomUUID()}`
+  const now = Date.now()
+  await query(
+    `INSERT INTO entity_merge_candidates (id, org_id, project_id, entity_id, candidate_entity_id, confidence, status, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [id, orgId, projectId, entityId, candidateEntityId, confidence, status, now],
+  )
+}
+
+interface MergeCandidateSqlRow {
+  id: string
+  org_id: string
+  project_id: string
+  entity_id: string
+  candidate_entity_id: string
+  confidence: number
+  status: MergeCandidateStatus
+  reviewed_by: string | null
+  reviewed_at: string | null
+  created_at: string
+}
+
+function rowToMergeCandidate(r: MergeCandidateSqlRow): EntityMergeCandidate {
+  return {
+    id: r.id,
+    orgId: r.org_id,
+    projectId: r.project_id,
+    entityId: r.entity_id,
+    candidateEntityId: r.candidate_entity_id,
+    confidence: r.confidence,
+    status: r.status,
+    reviewedBy: r.reviewed_by,
+    reviewedAt: r.reviewed_at ? Number(r.reviewed_at) : null,
+    createdAt: Number(r.created_at),
+  }
+}
+
+export async function listMergeCandidates(orgId: string, projectId: string, status: MergeCandidateStatus = "pending"): Promise<EntityMergeCandidate[]> {
+  const rows = await query<MergeCandidateSqlRow>(
+    "SELECT * FROM entity_merge_candidates WHERE org_id = $1 AND project_id = $2 AND status = $3 ORDER BY created_at DESC",
+    [orgId, projectId, status],
+  )
+  return rows.map(rowToMergeCandidate)
+}
+
+export async function getMergeCandidate(id: string, orgId: string): Promise<EntityMergeCandidate | null> {
+  const row = await queryOne<MergeCandidateSqlRow>("SELECT * FROM entity_merge_candidates WHERE id = $1 AND org_id = $2", [id, orgId])
+  return row ? rowToMergeCandidate(row) : null
+}
+
+/** A human decision on a pending merge candidate. Approving sets the
+ * candidate entity's canonical_entity_id — the actual merge — and is
+ * exactly as auditable as an automatic merge (both live in this same
+ * table; only `status` distinguishes how the merge was decided). */
+export async function reviewMergeCandidate(id: string, orgId: string, decision: "approved" | "rejected", reviewedBy: string): Promise<EntityMergeCandidate | null> {
+  const candidate = await getMergeCandidate(id, orgId)
+  if (!candidate || candidate.status !== "pending") return null
+  const now = Date.now()
+  if (decision === "approved") {
+    await query("UPDATE entities SET canonical_entity_id = $1, updated_at = $2 WHERE id = $3 AND org_id = $4", [
+      candidate.entityId,
+      now,
+      candidate.candidateEntityId,
+      orgId,
+    ])
+  }
+  await query("UPDATE entity_merge_candidates SET status = $1, reviewed_by = $2, reviewed_at = $3 WHERE id = $4", [decision, reviewedBy, now, id])
+  return { ...candidate, status: decision, reviewedBy, reviewedAt: now }
+}
+
+/** Only canonical entities (never a row that has itself been merged
+ * away) — what opportunity discovery and the Knowledge Graph UI should
+ * treat as "the real distinct entities" in a project. */
+export async function listCanonicalEntities(orgId: string, projectId: string, opts: { entityType?: string; limit?: number } = {}): Promise<Entity[]> {
+  const limit = Math.min(opts.limit ?? 200, 500)
+  if (opts.entityType) {
+    const rows = await query<EntitySqlRow>(
+      "SELECT * FROM entities WHERE org_id = $1 AND project_id = $2 AND entity_type = $3 AND canonical_entity_id IS NULL ORDER BY created_at DESC LIMIT $4",
+      [orgId, projectId, opts.entityType, limit],
+    )
+    return rows.map(rowToEntity)
+  }
+  const rows = await query<EntitySqlRow>(
+    "SELECT * FROM entities WHERE org_id = $1 AND project_id = $2 AND canonical_entity_id IS NULL ORDER BY created_at DESC LIMIT $3",
+    [orgId, projectId, limit],
+  )
+  return rows.map(rowToEntity)
 }
 
 export async function listEvidenceForEntity(entityId: string, orgId: string): Promise<EntityEvidence[]> {

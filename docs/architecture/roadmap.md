@@ -25,38 +25,51 @@ revision. UI surfacing (an Opportunities list page) is the immediate next
 increment, deliberately not bundled into this one (see
 `docs/architecture/vertical-slice.md`).
 
-## Phase 3 — Opportunity Engine UI + real Website Discovery
-- Opportunities list/detail UI (§62) reading this revision's API.
-- `WebsiteDiscoveryAgent` (§10): given a URL, safely crawl (reusing
-  `lib/security/ssrf-guard.ts`), discover sitemap/robots/canonical
-  structure, and produce a versioned `WebsiteKnowledgeProfile` — this is
-  the real "Connect any website" onboarding (§9), which today's Programmatic
-  SEO onboarding approximates with a text-answered questionnaire only.
-- Exit criterion: a tenant provides a URL and gets a real Discovery Report
-  (§9) plus entities seeded from real crawled content, not just from one
-  skill's LLM-inferred topics.
+## Phase 3 — Opportunity Engine UI + real Website Discovery — ✅ shipped
+`WebsiteDiscoveryAgent` (`lib/website-discovery/orchestrator.ts`,
+`lib/crawler/*`), a real Opportunity Engine UI (`/opportunities`), a real
+Knowledge Graph UI (`/knowledge`), and a real Website onboarding UI
+(`/websites`) all shipped in the vertical-slice revision. Exit criterion
+met: a tenant provides a URL and gets a real, persisted
+`WebsiteKnowledgeProfile` plus entities seeded from real crawled structured
+data and text, not just one skill's LLM-inferred topics.
 
-## Phase 4 — Durable workflow migration (unblocks Content Factory)
-Adopt Temporal (or equivalent) per ADR-003's trigger. Migrate
-`executeTask()`'s body into workflow/activity split without changing its
-external event contract. Exit criterion: a workflow step can crash and
-resume without re-running completed steps or losing durable state.
+## Phase 4 — Durable workflow migration (unblocks a truly resumable Content Factory)
+Not yet done — both the website-discovery and content-generation pipelines
+still run synchronously in-process (ADR-003/ADR-016, `docs/architecture/
+risks.md` R-16), bounded by conservative limits so this is safe at current
+scale. Adopt Temporal (or equivalent) per ADR-003's trigger once a step
+genuinely needs to survive a process crash mid-execution. Exit criterion:
+a workflow step can crash and resume without re-running completed steps or
+losing durable state.
 
-## Phase 5 — Content Factory multi-agent pipeline (§22)
-Research→Entity→Data→Outline→Writer→SEO→GEO→Schema→InternalLink→
-FactCheck→Quality→Publisher, each a real agent step with its own input/
-output contract, on top of Phase 4's durable substrate. Gated by
-Information Gain (ADR-015) — no step may produce a publishable page for an
-Opportunity whose `information_gain_score` is `NULL` or below threshold.
-Exit criterion: an approved Opportunity can produce a QA'd, human-approvable
-draft Page end-to-end.
+## Phase 5 — Content Factory multi-agent pipeline (§22) — ✅ shipped (v1)
+`lib/content-pipeline/*` implements Research→Outline→Draft→SEO→GEO→Quality
+as real, individually-persisted steps (`agent_run_steps` +
+`content_artifacts`), gated by Information Gain (ADR-015's amendment: now a
+real deterministic score for discovery-sourced opportunities) — a page that
+fails the quality gate is persisted as `quality_rejected` with explicit
+reasons, never silently generated anyway. Not yet split out: Entity/Data
+enrichment, FactCheck, and Schema/InternalLink as their own distinct agent
+steps (folded into Research/Draft and the separate `lib/pages/json-ld.ts` +
+`lib/internal-links/*` modules respectively) — a reasonable v1
+simplification, revisit if a real need to inspect them as separate steps
+emerges. Exit criterion met: an approved Opportunity produces a QA'd,
+human-publishable draft Page end-to-end.
 
-## Phase 6 — Page Engine + public-site app (ADR-006, ADR-007)
-`Page`/`PageVersion`/`ContentBlock` model, `RouteTemplate`, `apps/public-site`
-serving `/[...slug]`, JSON-LD Schema Engine, sitemap shards, on-demand
-revalidation. This is also the trigger to begin the monorepo split
-(ADR-000). Exit criterion: an approved, QA'd page renders live at a real
-URL with valid JSON-LD and appears in a sitemap.
+## Phase 6 — Page Engine + public rendering — ✅ shipped (minimal, in-app — ADR-016)
+`Page`/`PageVersion` model, JSON-LD Schema Engine, a dynamic global
+sitemap, and a minimal public render route
+(`app/sites/[projectId]/[slug]/page.tsx`) all shipped — deliberately inside
+this app rather than a separate `apps/public-site` (ADR-016 amends
+ADR-007's timing). Not yet done: a generalized `RouteTemplate` engine,
+per-tenant domain binding (ADR-010), sitemap sharding (not needed at
+current page volume). Exit criterion met: an approved, QA'd page renders
+live at a real URL with valid, validated JSON-LD and appears in the
+sitemap — proven by `tests/e2e/vertical-slice.test.ts`. The trigger to
+build a real separate `apps/public-site` (ADR-000/ADR-007) is unchanged:
+real per-tenant domain binding or page volume that outgrows a single
+in-app route.
 
 ## Phase 7 — Learning loop integrations
 Search Console warehouse (§32), Trend Engine (§31), AI Visibility (§33),

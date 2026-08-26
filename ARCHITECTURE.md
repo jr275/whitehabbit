@@ -98,16 +98,42 @@ triggers, not calendar dates — see `docs/architecture/roadmap.md`.
   mapped step-by-step onto what exists, what this revision adds, and what's
   still open.
 
-## 4. What this revision changes
+## 4. Revision history
 
-This revision adds the first real Knowledge Graph + Opportunity Engine
-persistence layer and wires it into the one skill that already produces
+**Revision 1** added the first real Knowledge Graph + Opportunity Engine
+persistence layer and wired it into the one skill that already produces
 opportunity-shaped output (`skill_seo_opportunity`), so opportunities the
-Programmatic SEO worker discovers are no longer ephemeral `outputs.structured`
-JSON — they become first-class, tenant- and project-scoped, provenance-
-carrying rows that can be listed, scored explainably, approved, or rejected
-through a real API. This is deliberately the *next* concrete step in the
-§76 vertical slice (Knowledge Graph → Opportunity discovery → scoring →
-approval), built on top of the existing, working agent-execution substrate
-rather than beside it. See `docs/architecture/vertical-slice.md` §"This
-revision" for the exact boundary of what is and is not included.
+Programmatic SEO worker discovers became first-class, tenant- and project-
+scoped, provenance-carrying rows — listable, scored explainably, approvable,
+rejectable through a real API.
+
+**Revision 2 (this one)** completes the full §76 vertical slice end to end:
+a real Website model and SSRF-safe, bounded, robots-aware crawler
+(`lib/crawler/*`); a deterministic Website Knowledge Profile builder
+(`lib/knowledge-profile/*`); evidence-first Entity Extraction from real
+structured data + text heuristics (`lib/knowledge/extraction.ts`) feeding a
+real, threshold-based, auditable Entity Resolution path
+(`lib/knowledge/resolution.ts`); a deterministic Opportunity Discovery
+engine that finds real gaps in the Knowledge Graph (`lib/opportunity/
+discovery.ts`) scored by a real, deterministic Information Gain model
+(`lib/opportunity/information-gain.ts`); a PageBrief builder
+(`lib/pagebrief/*`); a six-step Content Generation Pipeline — Research,
+Outline, Draft (the one LLM call), SEO, GEO/AEO, and a real Quality gate
+that can reject a page with explicit reasons (`lib/content-pipeline/*`); a
+Page/PageVersion model with immutable versions and an explicit publish
+action (`lib/pages/*`); real JSON-LD generation and validation
+(`lib/pages/json-ld.ts`); relationship-based internal link recommendations
+(`lib/internal-links/*`); a minimal public Next.js render route and a
+dynamic sitemap (ADR-016); and a full UI surface (`/websites`, `/knowledge`,
+`/opportunities`, `/pages/:id`, `/agent-runs/:id`). A new `agent_runs`/
+`agent_run_steps` ledger (ADR-016) makes every one of these system
+pipelines inspectable the same way Worker executions already were.
+
+Two new architectural decisions were required and are recorded in
+**ADR-016**: a parallel execution ledger for pipelines that aren't tied to
+a Worker, and shipping public rendering as a minimal in-app route now
+rather than waiting for ADR-007's separate `apps/public-site`.
+
+See `docs/architecture/vertical-slice.md` for the exact, step-by-step
+status of the full §76 chain, and `tests/e2e/vertical-slice.test.ts` for
+the automated proof that it actually works end to end.

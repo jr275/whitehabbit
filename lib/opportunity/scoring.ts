@@ -9,17 +9,33 @@
 import type { OpportunityScoreComponents } from "./model"
 
 export const SCORE_WEIGHTS: Record<keyof OpportunityScoreComponents, number> = {
-  sourceGroundingScore: 0.4,
-  outlineCompletenessScore: 0.3,
-  confidenceScore: 0.3,
+  sourceGroundingScore: 0.2,
+  outlineCompletenessScore: 0.15,
+  confidenceScore: 0.15,
+  entityCoverageScore: 0.2,
+  businessValueScore: 0.15,
+  informationGainScore: 0.15,
   demandScore: 0,
   trendScore: 0,
-  businessValueScore: 0,
   competitionScore: 0,
   authorityGapScore: 0,
-  informationGainScore: 0,
   citationPotentialScore: 0,
   cannibalizationRiskScore: 0,
+}
+
+/** §11's required UI distinction: a component is either a real,
+ * directly-computed fact ("known"), a real but heuristic estimate
+ * ("estimated" — honestly weaker evidence than "known"), or genuinely
+ * absent because no integration/service computes it yet
+ * ("unavailable"). Never collapse "estimated" into "known" — the UI
+ * must be able to tell a reader which is which. */
+export type ScoreComponentBasis = "known" | "estimated" | "unavailable"
+
+const ESTIMATED_COMPONENTS = new Set<keyof OpportunityScoreComponents>(["businessValueScore"])
+
+export function classifyScoreComponent(key: keyof OpportunityScoreComponents, value: number | null): ScoreComponentBasis {
+  if (value == null) return "unavailable"
+  return ESTIMATED_COMPONENTS.has(key) ? "estimated" : "known"
 }
 
 export interface FinalScoreResult {
@@ -47,13 +63,13 @@ export function computeFinalScore(components: OpportunityScoreComponents): Final
   const weighted = weightSum > 0
     ? available.reduce((sum, [key, value]) => sum + value * SCORE_WEIGHTS[key], 0) / weightSum
     // every available component happened to have zero configured weight
-    // (shouldn't occur with today's 3 computed components, but keep this
-    // honest rather than dividing by zero) — fall back to a plain average.
+    // (shouldn't occur with today's computed components) — fall back to
+    // a plain average rather than dividing by zero.
     : available.reduce((sum, [, value]) => sum + value, 0) / available.length
 
   const componentLabels = available.map(([key]) => key.replace(/Score$/, "")).join(", ")
   return {
     finalScore: Math.round(weighted),
-    notes: `Preliminary score from ${available.length}/${totalComponentCount} components (${componentLabels}). Remaining components require integrations not yet connected (Search Console, trend data, competitor/SERP data, Information Gain analysis) — see docs/architecture/risks.md R-7.`,
+    notes: `Score from ${available.length}/${totalComponentCount} components (${componentLabels}). Remaining components require integrations not yet connected (Search Console, trend data, competitor/SERP data) — see docs/architecture/risks.md R-7.`,
   }
 }

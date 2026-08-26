@@ -24,6 +24,30 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Testing
+
+```bash
+pnpm test
+```
+
+Runs the full suite (`vitest`) against a real PostgreSQL database — set
+`DATABASE_URL` to a real, reachable Postgres instance first (locally:
+`sudo service postgresql start && createdb whitehabbit_test`, then
+`DATABASE_URL=postgres://postgres:postgres@localhost:5432/whitehabbit_test`,
+which is also the default `vitest.config.ts` falls back to). The suite's
+global setup applies every migration under `migrations/` automatically and
+truncates all tenant-owned tables before each run — see
+`tests/setup/global-setup.ts`. Tests never silently skip for a missing
+database; they fail loudly with the reason, matching this codebase's
+"never fake success" convention (see `ARCHITECTURE.md`).
+
+Includes real unit tests (SSRF guard, entity resolution, opportunity
+scoring, information gain, robots.txt/HTML extraction), a tenant-isolation
+integration suite (`tests/integration/`), and one deterministic end-to-end
+test that runs the entire Website → Crawl → Knowledge Graph → Opportunity →
+Page → Publish → Public render vertical slice against a fixture website
+(`tests/e2e/`).
+
 ## Learn More
 
 To learn more, take a look at the following resources:

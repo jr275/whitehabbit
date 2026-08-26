@@ -47,5 +47,25 @@ export interface EntityEvidence {
   retrievedAt: number
   confidence: number | null
   verificationStatus: VerificationStatus
+  /** the exact crawled page this fact came from, when it came from a
+   * crawl (null for evidence from other sources, e.g. web search). */
+  crawlPageId: string | null
+  createdAt: number
+}
+
+export type MergeCandidateStatus = "pending" | "approved" | "rejected" | "auto_merged"
+
+export interface EntityMergeCandidate {
+  id: string
+  orgId: string
+  projectId: string
+  /** the canonical entity this candidate would merge into */
+  entityId: string
+  /** the newer entity proposed as a duplicate of entityId */
+  candidateEntityId: string
+  confidence: number
+  status: MergeCandidateStatus
+  reviewedBy: string | null
+  reviewedAt: number | null
   createdAt: number
 }

@@ -111,6 +111,47 @@ function developmentSeoOpportunityFixture(): string {
   })
 }
 
+/** The matching fixture for lib/content-pipeline/draft.ts's parseDraft().
+ * Unlike the other fixtures above, this one actually parses the real
+ * prompt text (built deterministically by draft.ts's buildPrompt() —
+ * "Target intent: ...", "[0] claim text", ...) so the fixture content
+ * genuinely reflects the real PageBrief/ResearchArtifact it was asked
+ * to write from, rather than generic boilerplate. This matters because
+ * real downstream checks (lib/content-pipeline/seo.ts's intent-match,
+ * quality.ts's entity/evidence coverage) need real signal to evaluate
+ * even in development mode — still clearly labeled "[DEV]" throughout,
+ * and still zero tokens/cost, still never a real model call.
+ * claimIndices only ever reference indices that were actually present
+ * in the prompt's claim list, never an out-of-range index. */
+function developmentDraftFixture(input: LlmCallInput): string {
+  const intentMatch = input.prompt.match(/Target intent: (.+)/)
+  const targetIntent = intentMatch ? intentMatch[1].trim() : "this page"
+
+  const claims: { index: number; text: string }[] = []
+  for (const m of input.prompt.matchAll(/^\[(\d+)\] (.+)$/gm)) {
+    claims.push({ index: Number(m[1]), text: m[2].trim() })
+  }
+
+  const title = `[DEV] ${targetIntent}`.slice(0, 70)
+  const metaDescription = `[DEV] Deterministic fixture page addressing: ${targetIntent}. LLM_DEV_MODE is enabled — no external provider was called.`.slice(0, 160)
+
+  const overviewBody = claims[0]
+    ? `[DEV] ${targetIntent}. ${claims[0].text}`
+    : `[DEV] ${targetIntent}. This is a deterministic development fixture — LLM_DEV_MODE is enabled, so no external provider was called, and no research claims were available to cite.`
+  const keyFactsBody = claims[1]
+    ? `[DEV] ${claims[1].text}`
+    : `[DEV] Second development fixture section, included so downstream SEO/GEO/quality checks have more than one section to evaluate — still not a real model response.`
+
+  return JSON.stringify({
+    title,
+    metaDescription,
+    sections: [
+      { heading: "Overview", body: overviewBody, claimIndices: claims[0] ? [claims[0].index] : [] },
+      { heading: "Key facts", body: keyFactsBody, claimIndices: claims[1] ? [claims[1].index] : [] },
+    ],
+  })
+}
+
 /** The matching fixture for customer-conversation.ts's parseConversation(). */
 function developmentConversationFixture(): string {
   return JSON.stringify({
@@ -135,6 +176,7 @@ function developmentFixtureFor(input: LlmCallInput): string {
   if (input.system.includes('"leads":[')) return developmentLeadsFixture()
   if (input.system.includes('"opportunities":[')) return developmentSeoOpportunityFixture()
   if (input.system.includes('"reasoning_summary"')) return developmentConversationFixture()
+  if (input.system.includes('"claimIndices"')) return developmentDraftFixture(input)
   return developmentTrendsFixture()
 }
 

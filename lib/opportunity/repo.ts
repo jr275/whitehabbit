@@ -3,19 +3,24 @@ import "server-only"
 /* ================================================================== *
  * OPPORTUNITY ENGINE — repository. Org- and project-scoped throughout,
  * matching lib/db/repo.ts's convention. See docs/adr/ADR-006,
- * ADR-014 for the status-transition/audit model.
+ * ADR-014, ADR-016 for the status-transition/audit model and the two
+ * real provenance paths (a Worker Skill execution, or a website-
+ * discovery agent_run).
  * ================================================================== */
 
 import { randomUUID } from "node:crypto"
 import { query, queryOne } from "@/lib/db/client"
-import type { Opportunity, OpportunityScoreComponents, OpportunityStatus } from "./model"
+import type { Opportunity, OpportunityScoreComponents, OpportunityStatus, OpportunityType } from "./model"
 
 interface OpportunitySqlRow {
   id: string
   org_id: string
   project_id: string
-  source_execution_id: string
-  source_output_id: string
+  source_execution_id: string | null
+  source_output_id: string | null
+  source_agent_run_id: string | null
+  website_id: string | null
+  opportunity_type: OpportunityType | null
   primary_entity_id: string | null
   title: string
   topic: string
@@ -25,6 +30,7 @@ interface OpportunitySqlRow {
   source_grounding_score: number | null
   outline_completeness_score: number | null
   confidence_score: number | null
+  entity_coverage_score: number | null
   demand_score: number | null
   trend_score: number | null
   business_value_score: number | null
@@ -35,6 +41,7 @@ interface OpportunitySqlRow {
   cannibalization_risk_score: number | null
   final_score: number | null
   score_notes: string | null
+  information_gain_reasons: string[] | null
   reviewed_by: string | null
   reviewed_at: string | null
   created_at: string
@@ -48,6 +55,9 @@ function rowToOpportunity(r: OpportunitySqlRow): Opportunity {
     projectId: r.project_id,
     sourceExecutionId: r.source_execution_id,
     sourceOutputId: r.source_output_id,
+    sourceAgentRunId: r.source_agent_run_id,
+    websiteId: r.website_id,
+    opportunityType: r.opportunity_type,
     primaryEntityId: r.primary_entity_id,
     title: r.title,
     topic: r.topic,
@@ -57,6 +67,7 @@ function rowToOpportunity(r: OpportunitySqlRow): Opportunity {
     sourceGroundingScore: r.source_grounding_score,
     outlineCompletenessScore: r.outline_completeness_score,
     confidenceScore: r.confidence_score,
+    entityCoverageScore: r.entity_coverage_score,
     demandScore: r.demand_score,
     trendScore: r.trend_score,
     businessValueScore: r.business_value_score,
@@ -67,6 +78,7 @@ function rowToOpportunity(r: OpportunitySqlRow): Opportunity {
     cannibalizationRiskScore: r.cannibalization_risk_score,
     finalScore: r.final_score,
     scoreNotes: r.score_notes,
+    informationGainReasons: r.information_gain_reasons,
     reviewedBy: r.reviewed_by,
     reviewedAt: r.reviewed_at ? Number(r.reviewed_at) : null,
     createdAt: Number(r.created_at),
@@ -77,8 +89,14 @@ function rowToOpportunity(r: OpportunitySqlRow): Opportunity {
 export interface CreateOpportunityInput {
   orgId: string
   projectId: string
-  sourceExecutionId: string
-  sourceOutputId: string
+  /** exactly one provenance path must be set: the Worker Skill path
+   * (sourceExecutionId + sourceOutputId) or the discovery-pipeline path
+   * (sourceAgentRunId + websiteId) — matches the DB CHECK constraint. */
+  sourceExecutionId?: string | null
+  sourceOutputId?: string | null
+  sourceAgentRunId?: string | null
+  websiteId?: string | null
+  opportunityType?: OpportunityType | null
   primaryEntityId?: string | null
   title: string
   topic: string
@@ -87,6 +105,7 @@ export interface CreateOpportunityInput {
   scores: OpportunityScoreComponents
   finalScore: number | null
   scoreNotes: string | null
+  informationGainReasons?: string[] | null
 }
 
 export async function createOpportunity(input: CreateOpportunityInput): Promise<Opportunity> {
@@ -94,26 +113,29 @@ export async function createOpportunity(input: CreateOpportunityInput): Promise<
   const now = Date.now()
   await query(
     `INSERT INTO opportunities (
-       id, org_id, project_id, source_execution_id, source_output_id, primary_entity_id,
+       id, org_id, project_id, source_execution_id, source_output_id, source_agent_run_id, website_id, opportunity_type, primary_entity_id,
        title, topic, target_intent, outline, status,
-       source_grounding_score, outline_completeness_score, confidence_score,
+       source_grounding_score, outline_completeness_score, confidence_score, entity_coverage_score,
        demand_score, trend_score, business_value_score, competition_score,
        authority_gap_score, information_gain_score, citation_potential_score, cannibalization_risk_score,
-       final_score, score_notes, created_at, updated_at
+       final_score, score_notes, information_gain_reasons, created_at, updated_at
      ) VALUES (
-       $1, $2, $3, $4, $5, $6,
-       $7, $8, $9, $10, 'discovered',
-       $11, $12, $13,
+       $1, $2, $3, $4, $5, $6, $7, $8, $9,
+       $10, $11, $12, $13, 'discovered',
        $14, $15, $16, $17,
        $18, $19, $20, $21,
-       $22, $23, $24, $24
+       $22, $23, $24, $25,
+       $26, $27, $28, $29, $29
      )`,
     [
       id,
       input.orgId,
       input.projectId,
-      input.sourceExecutionId,
-      input.sourceOutputId,
+      input.sourceExecutionId ?? null,
+      input.sourceOutputId ?? null,
+      input.sourceAgentRunId ?? null,
+      input.websiteId ?? null,
+      input.opportunityType ?? null,
       input.primaryEntityId ?? null,
       input.title,
       input.topic,
@@ -122,6 +144,7 @@ export async function createOpportunity(input: CreateOpportunityInput): Promise<
       input.scores.sourceGroundingScore,
       input.scores.outlineCompletenessScore,
       input.scores.confidenceScore,
+      input.scores.entityCoverageScore,
       input.scores.demandScore,
       input.scores.trendScore,
       input.scores.businessValueScore,
@@ -132,6 +155,7 @@ export async function createOpportunity(input: CreateOpportunityInput): Promise<
       input.scores.cannibalizationRiskScore,
       input.finalScore,
       input.scoreNotes,
+      input.informationGainReasons ? JSON.stringify(input.informationGainReasons) : null,
       now,
     ],
   )
@@ -139,8 +163,11 @@ export async function createOpportunity(input: CreateOpportunityInput): Promise<
     id,
     orgId: input.orgId,
     projectId: input.projectId,
-    sourceExecutionId: input.sourceExecutionId,
-    sourceOutputId: input.sourceOutputId,
+    sourceExecutionId: input.sourceExecutionId ?? null,
+    sourceOutputId: input.sourceOutputId ?? null,
+    sourceAgentRunId: input.sourceAgentRunId ?? null,
+    websiteId: input.websiteId ?? null,
+    opportunityType: input.opportunityType ?? null,
     primaryEntityId: input.primaryEntityId ?? null,
     title: input.title,
     topic: input.topic,
@@ -150,6 +177,7 @@ export async function createOpportunity(input: CreateOpportunityInput): Promise<
     ...input.scores,
     finalScore: input.finalScore,
     scoreNotes: input.scoreNotes,
+    informationGainReasons: input.informationGainReasons ?? null,
     reviewedBy: null,
     reviewedAt: null,
     createdAt: now,
@@ -177,6 +205,16 @@ export async function listOpportunities(orgId: string, projectId: string, opts: 
  * if the opportunity doesn't belong to orgId. */
 export async function getOpportunity(id: string, orgId: string): Promise<Opportunity | null> {
   const row = await queryOne<OpportunitySqlRow>("SELECT * FROM opportunities WHERE id = $1 AND org_id = $2", [id, orgId])
+  return row ? rowToOpportunity(row) : null
+}
+
+/** Idempotency guard (§36): a re-run of discovery must never create a
+ * second opportunity of the same type for the same entity. */
+export async function getOpportunityForEntityAndType(orgId: string, projectId: string, entityId: string, type: OpportunityType): Promise<Opportunity | null> {
+  const row = await queryOne<OpportunitySqlRow>(
+    "SELECT * FROM opportunities WHERE org_id = $1 AND project_id = $2 AND primary_entity_id = $3 AND opportunity_type = $4",
+    [orgId, projectId, entityId, type],
+  )
   return row ? rowToOpportunity(row) : null
 }
 
@@ -212,4 +250,8 @@ export async function reviewOpportunity(
     orgId,
   ])
   return { ...current, status: decision, reviewedBy, reviewedAt: now, updatedAt: now }
+}
+
+export async function updateOpportunityStatus(id: string, orgId: string, status: OpportunityStatus): Promise<void> {
+  await query("UPDATE opportunities SET status = $1, updated_at = $2 WHERE id = $3 AND org_id = $4", [status, Date.now(), id, orgId])
 }

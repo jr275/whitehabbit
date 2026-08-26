@@ -37,3 +37,26 @@ actually check it.
   decision informed by the components that *do* exist (source grounding,
   outline completeness, confidence) plus their own judgment, until
   Information Gain scoring is real.
+
+## Amendment (vertical-slice revision)
+
+`lib/opportunity/information-gain.ts` now implements the real, deterministic
+`InformationGainService` this ADR anticipated: `informationGainScore` is
+computed (never `NULL`) for opportunities produced by the website-discovery
+pipeline (`lib/opportunity/discovery.ts`), from real counted signals —
+related-entity count, source diversity, first-party structured-data
+evidence, local specificity, sibling/comparison entities, and whether an
+equivalent page already exists — never an LLM opinion, exactly matching
+§12's "not just an LLM opinion" requirement. Every point is attributed in
+`information_gain_reasons`, stored alongside the score.
+
+This ADR's core discipline still holds: opportunities produced by the
+older `skill_seo_opportunity` ingestion path (`lib/opportunity/ingest.ts`)
+still carry `informationGainScore: NULL`, because that path has none of the
+graph signals this model needs — a page-planning LLM call is not a
+substitute for real entity/relationship/evidence data. The gate this ADR
+established — a future page-generation step must treat `NULL` as
+"blocked," not just a low score — is unchanged and now has a real non-NULL
+value to gate on for discovery-sourced opportunities specifically; see
+`lib/content-pipeline/quality.ts`'s quality gate, which enforces exactly
+that.

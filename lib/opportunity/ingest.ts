@@ -89,6 +89,7 @@ export async function ingestSeoOpportunityPlan(input: IngestSeoOpportunityPlanIn
       sourceGroundingScore,
       outlineCompletenessScore,
       confidenceScore: typeof raw.confidence === "number" ? raw.confidence : null,
+      entityCoverageScore: null,
       demandScore: null,
       trendScore: null,
       businessValueScore: null,
