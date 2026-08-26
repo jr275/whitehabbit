@@ -60,6 +60,7 @@ export interface Job {
 export const DEFAULT_CONCURRENCY_LIMITS: Record<WorkflowPipeline, number> = {
   website_discovery: 3,
   content_generation: 5,
+  trend_analysis: 3, // never actually consulted — trend_analysis is never enqueued/dequeued (see lib/workflow/types.ts's WorkflowPipeline doc comment); kept only so this Record stays exhaustively typed
 }
 
 const PRIORITY_RANK: Record<WorkflowPriority, number> = { critical: 0, high: 1, normal: 2, low: 3, background: 4 }

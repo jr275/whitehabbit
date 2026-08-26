@@ -14,6 +14,9 @@ export type AgentCapability =
   | "extract_entities"
   | "write_discovery_profile"
   | "write_opportunity"
+  | "detect_trends"
+  | "run_ai_visibility_prompt"
+  | "ingest_external_data"
   | "write_page_brief"
   | "write_content_draft"
   | "write_page_version"
@@ -27,7 +30,7 @@ export type AgentCapability =
   | "delete_tenant_data"
   | "modify_billing"
 
-export type AgentType = "WebsiteDiscoveryAgent" | "ContentGenerationAgent" | "PublisherAgent"
+export type AgentType = "WebsiteDiscoveryAgent" | "ContentGenerationAgent" | "PublisherAgent" | "TrendAnalysisAgent" | "AIVisibilityAgent" | "DataIngestionAgent"
 
 /** One explicit allow-list per agent type — everything not listed is
  * denied by default (assertCapability below), never inferred. */
@@ -35,6 +38,9 @@ const AGENT_CAPABILITIES: Record<AgentType, ReadonlySet<AgentCapability>> = {
   WebsiteDiscoveryAgent: new Set(["crawl_website", "read_robots", "read_sitemap", "extract_entities", "write_discovery_profile", "write_opportunity"]),
   ContentGenerationAgent: new Set(["write_page_brief", "write_content_draft", "write_page_version"]),
   PublisherAgent: new Set(["publish_page_version", "invalidate_cache", "request_revalidation"]),
+  TrendAnalysisAgent: new Set(["detect_trends", "write_opportunity"]),
+  AIVisibilityAgent: new Set(["run_ai_visibility_prompt"]),
+  DataIngestionAgent: new Set(["ingest_external_data"]),
 }
 
 export class CapabilityDeniedError extends Error {

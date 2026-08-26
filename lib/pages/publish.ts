@@ -17,6 +17,7 @@ import { getEntity } from "@/lib/knowledge/repo"
 import { generateInternalLinks } from "@/lib/internal-links/generate"
 import { resolveCanonicalUrl } from "@/lib/domains/canonical"
 import { assertCapability } from "@/lib/workflow/permissions"
+import { takePageScoreSnapshot } from "@/lib/intelligence/page-score-snapshots"
 import { buildJsonLd, validateJsonLd } from "./json-ld"
 import { getPageBrief } from "@/lib/pagebrief/repo"
 import { attachPublishArtifacts, getLatestVersion, getPage, publishPage } from "./repo"
@@ -60,6 +61,10 @@ export async function publishPageAction(pageId: string, orgId: string) {
   await publishPage(pageId, orgId, version.id, canonicalUrl)
   await generateInternalLinks(page, brief?.primaryEntityId ?? null)
   await updateOpportunityStatus(page.opportunityId, orgId, "published")
+  // §31-32: a published page must generate future signals — the real
+  // learning loop starts with a real pre_publish baseline snapshot.
+  // Best-effort: never lets a snapshot failure block a real publish.
+  await takePageScoreSnapshot(orgId, pageId, "pre_publish").catch(() => {})
 
   assertCapability("PublisherAgent", "request_revalidation")
   try {

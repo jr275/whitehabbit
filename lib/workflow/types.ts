@@ -24,8 +24,17 @@ export type WorkflowStatus =
 
 export type WorkflowStepStatus = "queued" | "running" | "succeeded" | "failed" | "skipped" | "retrying"
 
-export type WorkflowPipeline = "website_discovery" | "content_generation"
-export type WorkflowSubjectType = "website" | "opportunity"
+/* "trend_analysis" (Phase 5B, §16, ADR-024) is deliberately never
+ * dispatched through the step-job queue (lib/workflow/step-worker.ts) —
+ * it's a fast, deterministic scan over already-persisted signals/
+ * observations, not a slow crawl or LLM call, so it runs synchronously
+ * within a single workflowEngine.start()+runStep()+finalizeWorkflow()
+ * call (see lib/intelligence/trend-opportunity.ts). It still gets a
+ * real WorkflowRun row for the same reason every other real pipeline
+ * does: tenant-scoped observability and a real provenance FK for the
+ * opportunities it creates. */
+export type WorkflowPipeline = "website_discovery" | "content_generation" | "trend_analysis"
+export type WorkflowSubjectType = "website" | "opportunity" | "project"
 export type WorkflowPriority = "critical" | "high" | "normal" | "low" | "background"
 
 export interface BudgetPolicy {

@@ -23,7 +23,7 @@ export type OpportunityStatus =
 /** Real, deterministic gap types the discovery pipeline (§10) can
  * produce — never fabricated categories, always derived from an
  * actual observed gap in the Knowledge Graph. */
-export type OpportunityType = "entity_coverage_gap" | "market_gap" | "question_gap" | "comparison" | "supporting_content" | "hub" | "spoke"
+export type OpportunityType = "entity_coverage_gap" | "market_gap" | "question_gap" | "comparison" | "supporting_content" | "hub" | "spoke" | "trend_driven"
 
 export interface OpportunityScoreComponents {
   /** % of this run's identified opportunities that cite a real source — computed for skill-sourced opportunities only. */
