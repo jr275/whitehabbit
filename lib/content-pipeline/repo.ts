@@ -62,3 +62,16 @@ export async function listArtifactsForBrief(pageBriefId: string, orgId: string):
   ])
   return rows.map(rowToArtifact)
 }
+
+/** The real, DB-driven rehydration a step-level job needs (Phase 5A):
+ * a step dispatched as its own job/process can never rely on an earlier
+ * step's in-memory closure — it re-fetches that step's full persisted
+ * artifact by (agentRunId, type) instead. Scoped to THIS run, never a
+ * stale artifact from an earlier terminated run for the same brief. */
+export async function getArtifact<T = unknown>(orgId: string, agentRunId: string, type: ContentArtifactType): Promise<T | null> {
+  const rows = await query<ArtifactSqlRow>(
+    "SELECT * FROM content_artifacts WHERE org_id = $1 AND agent_run_id = $2 AND type = $3 ORDER BY created_at DESC LIMIT 1",
+    [orgId, agentRunId, type],
+  )
+  return rows.length ? (rowToArtifact(rows[0]).content as T) : null
+}

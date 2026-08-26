@@ -178,3 +178,30 @@ and ADR-010 are marked superseded rather than deleted, so the earlier
 introduced — Temporal was deliberately not adopted (ADR-017); the
 durability guarantees come from Postgres, the platform's existing sole
 datastore.
+
+**Revision 4 (Phase 5A, ADR-023)** removes the one durability gap
+Revision 3 explicitly left open: a single orchestrator call still ran an
+entire pipeline synchronously within one HTTP request or one queue-worker
+job. Every step of both pipelines is now its own independent, durable,
+tenant-scoped job (`lib/workflow/step-worker.ts`) — starting, resuming, or
+retrying a workflow, or approving a publish, only ever enqueues the next
+single step and returns; a worker tick executes exactly one step,
+persists, and enqueues the next. `lib/website-discovery/steps.ts` and
+`lib/content-pipeline/steps.ts` are now the single source of truth for
+each pipeline's step logic; the two `orchestrator.ts` files became thin
+in-process drivers over the same functions (the "LegacySyncExecutionAdapter"),
+used only by tests/internal callers that want a synchronous result — zero
+step logic is duplicated between the queue-driven and synchronous paths.
+`jobs` gained a real lease (`lease_expires_at`) so a crashed worker's
+claimed-but-never-finished job is recovered (`reapExpiredLeases()`) rather
+than stuck `locked` forever, proven by a simulated crash in
+`tests/integration/step-execution.test.ts`. `tenant_budgets` (real since
+Revision 3 but unread) now actually governs both per-tenant concurrency
+admission and budget resolution (`lib/workflow/budget-policy.ts`),
+alongside a new `project_budgets` override layer — closing Revision 3's
+R-22. The real, accepted cost: completing one whole pipeline now needs
+4–7 sequential step dispatches instead of 1 (measured and extrapolated in
+`docs/architecture/load-test-report.md`) — the durability property this
+phase exists to deliver, not a hidden regression. One new ADR
+(**ADR-023**) records the decision to extend the existing Job model
+rather than introduce a parallel `WorkflowStepJob` concept.

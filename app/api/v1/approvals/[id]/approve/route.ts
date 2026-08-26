@@ -1,24 +1,22 @@
 import "server-only"
 
-/* POST /api/v1/approvals/:id/approve — the one real path a human
- * takes to unblock a WAITING_APPROVAL workflow (§12, §13: "never let
- * an LLM decide its own permission" — this route is the only writer
- * of an 'approved' decision, and it always runs as the authenticated
+/* POST /api/v1/approvals/:id/approve — the one real path a human takes
+ * to unblock a WAITING_APPROVAL workflow (§12, §13: "never let an LLM
+ * decide its own permission" — this route is the only writer of an
+ * 'approved' decision, and it always runs as the authenticated
  * reviewer, never the requesting agent). Resumes the workflow and
- * re-invokes the real orchestrator so the approval is actually acted
- * on (e.g. publication continues), exactly like a manual resume. */
+ * enqueues the "decide_publish" step job (Phase 5A, ADR-023) — never
+ * runs the pipeline inline within this request. Re-dispatching
+ * "decide_publish" finds the approval already decided and proceeds to
+ * publish (or reports rejection) — the same idempotent check that made
+ * this safe before Phase 5A, unchanged in substance. */
 
 import { NextResponse } from "next/server"
 import { NotFoundError, ValidationError, withApiHandler } from "@/lib/api-error"
 import { recordAudit } from "@/lib/db/repo"
-import { runWebsiteDiscovery } from "@/lib/website-discovery/orchestrator"
-import { getWebsite } from "@/lib/websites/repo"
-import { runContentGeneration } from "@/lib/content-pipeline/orchestrator"
-import { getOpportunity } from "@/lib/opportunity/repo"
-import { buildPageBriefFromOpportunity } from "@/lib/pagebrief/build"
-import { getPageBriefByOpportunity } from "@/lib/pagebrief/repo"
 import { decideApproval, getApproval } from "@/lib/workflow/approval"
 import { workflowEngine } from "@/lib/workflow/engine"
+import { enqueueStepJob } from "@/lib/workflow/step-worker"
 import { requireSession } from "@/lib/session"
 
 type Params = { params: Promise<{ id: string }> }
@@ -44,17 +42,8 @@ export async function POST(req: Request, { params }: Params) {
     await recordAudit({ orgId: organizationId, userId, action: "approval.approve", resourceType: "approval", resourceId: id })
 
     const run = await workflowEngine.getStatus(existing.workflowRunId, organizationId)
-    if (run) {
-      if (run.pipeline === "website_discovery") {
-        const website = await getWebsite(run.subjectId, organizationId)
-        if (website) await runWebsiteDiscovery(website)
-      } else if (run.pipeline === "content_generation") {
-        const opportunity = await getOpportunity(run.subjectId, organizationId)
-        if (opportunity) {
-          const brief = (await getPageBriefByOpportunity(opportunity.id, organizationId)) ?? (await buildPageBriefFromOpportunity(opportunity))
-          await runContentGeneration(opportunity, brief)
-        }
-      }
+    if (run && run.pipeline === "content_generation") {
+      await enqueueStepJob(run, "decide_publish")
     }
 
     return NextResponse.json({ approval: decided })

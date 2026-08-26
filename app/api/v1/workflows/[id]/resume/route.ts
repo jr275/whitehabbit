@@ -1,21 +1,19 @@
 import "server-only"
 
 /* POST /api/v1/workflows/:id/resume — transitions PAUSED/WAITING back
- * to RUNNING and re-invokes the real orchestrator for this run's
- * subject, which (thanks to per-step checkpointing) skips every
- * already-succeeded step and continues from the real checkpoint (§4). */
+ * to RUNNING and enqueues exactly the next step job, computed from the
+ * run's real checkpoint (§4, Phase 5A ADR-023) — never re-executes the
+ * whole pipeline inline. Checkpoint-resume means that next step (and
+ * every one after it) skips any work already durably completed. */
 
 import { NextResponse } from "next/server"
-import { ConflictError, NotFoundError, ValidationError, withApiHandler } from "@/lib/api-error"
+import { ConflictError, NotFoundError, withApiHandler } from "@/lib/api-error"
 import { recordAudit } from "@/lib/db/repo"
-import { runWebsiteDiscovery } from "@/lib/website-discovery/orchestrator"
-import { getWebsite } from "@/lib/websites/repo"
-import { runContentGeneration } from "@/lib/content-pipeline/orchestrator"
-import { getOpportunity } from "@/lib/opportunity/repo"
-import { buildPageBriefFromOpportunity } from "@/lib/pagebrief/build"
-import { getPageBriefByOpportunity } from "@/lib/pagebrief/repo"
 import { workflowEngine } from "@/lib/workflow/engine"
 import { InvalidWorkflowTransitionError } from "@/lib/workflow/types"
+import { enqueueStepJob } from "@/lib/workflow/step-worker"
+import { nextWebsiteDiscoveryStep } from "@/lib/website-discovery/steps"
+import { nextContentGenerationStep } from "@/lib/content-pipeline/steps"
 import { requireSession } from "@/lib/session"
 
 type Params = { params: Promise<{ id: string }> }
@@ -27,26 +25,21 @@ export async function POST(_req: Request, { params }: Params) {
     const existing = await workflowEngine.getStatus(id, organizationId)
     if (!existing) throw new NotFoundError()
 
+    let resumed
     try {
-      await workflowEngine.resume(id, organizationId)
+      resumed = await workflowEngine.resume(id, organizationId)
     } catch (err) {
       if (err instanceof InvalidWorkflowTransitionError) throw new ConflictError(err.message)
       throw err
     }
     await recordAudit({ orgId: organizationId, userId, action: "workflow.resume", resourceType: "workflow_run", resourceId: id })
 
-    if (existing.pipeline === "website_discovery") {
-      const website = await getWebsite(existing.subjectId, organizationId)
-      if (!website) throw new ValidationError("The website this run belongs to no longer exists.")
-      await runWebsiteDiscovery(website)
-    } else if (existing.pipeline === "content_generation") {
-      const opportunity = await getOpportunity(existing.subjectId, organizationId)
-      if (!opportunity) throw new ValidationError("The opportunity this run belongs to no longer exists.")
-      const brief = (await getPageBriefByOpportunity(opportunity.id, organizationId)) ?? (await buildPageBriefFromOpportunity(opportunity))
-      await runContentGeneration(opportunity, brief)
-    }
+    const nextStep =
+      resumed.pipeline === "website_discovery"
+        ? nextWebsiteDiscoveryStep(resumed.checkpoint?.lastCompletedSequence ?? null)
+        : nextContentGenerationStep(resumed.checkpoint?.lastCompletedSequence ?? null)
+    if (nextStep) await enqueueStepJob(resumed, nextStep)
 
-    const updated = await workflowEngine.getStatus(id, organizationId)
-    return NextResponse.json({ workflow: updated })
+    return NextResponse.json({ workflow: resumed })
   })
 }

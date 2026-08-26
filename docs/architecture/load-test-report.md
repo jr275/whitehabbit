@@ -9,33 +9,63 @@ below, not hand-written estimates. Run again after any change to
 - **10 tenants**, 5 projects each (50 total), real rows.
 - **4000 pending jobs** in a real backlog, real `jobs` table.
 - **20 dequeue ticks**, each running the exact query shape
-  `lib/workflow/queue.ts#dequeue()` uses: over-fetch `40`
-  candidates via `FOR UPDATE SKIP LOCKED`, then one real
-  `countActiveRuns()`-shaped query **per candidate** admitted (the real
-  per-tenant concurrency check), then a batch status update.
+  `lib/workflow/queue.ts#dequeue()` uses post-Phase-5A: over-fetch
+  `40` candidates via `FOR UPDATE SKIP LOCKED`, then per
+  admitted candidate a real `countActiveRuns()`-shaped query (the
+  per-tenant concurrency check, N+1-shaped, unchanged since Phase 4) plus,
+  once per distinct org seen in the tick, a real `tenant_budgets` lookup
+  (new in Phase 5A, §6 — resolveConcurrencyLimit()'s per-tenant override
+  read), then a batch status update.
 
 | Metric | Value |
 |---|---|
 | Backlog size | 4000 jobs |
-| Tick p50 latency | 8.1ms |
-| Tick p95 latency | 14.0ms |
-| Tick p99 latency | 14.0ms |
-| Jobs admitted per tick | 10 |
-| Implied throughput (p50-based) | ~1239.1 jobs/sec per worker tick |
+| Tick p50 latency | 6.3ms |
+| Tick p95 latency | 10.4ms |
+| Tick p99 latency | 10.4ms |
+| Jobs (steps) admitted per tick | 10 |
+| Implied throughput (p50-based) | ~1595.1 jobs/sec per worker tick |
+
+## Before/after: what Phase 5A's step-level queueing actually costs and buys (§45)
+
+Phase 4's queue dequeued one job per **whole pipeline** (a website_discovery
+or content_generation run executed start-to-finish inline). Phase 5A
+dequeues one job per **step** — the same `dequeue()` query, same measured
+latency above, but each pipeline now needs multiple sequential job
+dispatches (4 for website_discovery,
+7 for content_generation) to reach a terminal
+state instead of one.
+
+| | Phase 4 (whole-pipeline jobs) | Phase 5A (step-level jobs) |
+|---|---|---|
+| Jobs dequeued/tick at measured throughput | 10.0 | 10 |
+| **Whole pipelines completed**/tick-equivalent | 10.0 | ~1.82 (avg 5.5 steps/pipeline) |
+| Crash mid-pipeline | loses all progress since the last checkpoint *boundary the whole job crossed* — Phase 4 already checkpointed steps within one job, but a killed worker still had to be re-invoked as one unit | recoverable at the exact step (lease expiry + reapExpiredLeases(), proven in tests/integration/step-execution.test.ts) |
+| HTTP request behavior | ran the whole pipeline inline (bounded by a serverless timeout) | enqueues one job, returns immediately — never runs a step inline (§8 acceptance criterion) |
+
+**Real, honest trade-off**: per-tick *pipeline completion* throughput drops
+by roughly the average step count (~5.5x fewer whole pipelines
+finish per tick at the same jobs/tick rate) in exchange for the durability
+property this phase exists to deliver — genuine crash recovery at step
+granularity and an HTTP contract that never blocks on a whole pipeline.
+This is the real, named cost of Objective A, not a hidden regression.
 
 ## Extrapolation to the target scale (not measured — math from the above)
 
 Target: 10 tenants / 100 projects / 10,000 opportunities / 100,000 pages / 1,000,000 workflow events.
 
-- At the measured ~1239.1 jobs/sec/tick and one tick per
-  `POST /api/v1/workflows/process` invocation, draining a backlog large
-  enough to produce 100,000 pages (one `content_generation`
-  job each, at minimum) would need on the order of
-  10,000 ticks — at a 5-minute cron cadence (this
-  repo's `vercel.json`) that is **35 days**
+- At the measured ~1595.1 jobs/sec/tick, and
+  7 step jobs needed per completed page
+  (Phase 5A — up from 1 whole-pipeline job in Phase 4), draining a backlog
+  large enough to produce 100,000 pages would need on the
+  order of 70,000 ticks — at a 5-minute cron
+  cadence (this repo's `vercel.json`) that is
+  **244 days**
   of continuous draining with zero new work arriving, worker-throughput
   alone. This is the real, named reason a single 5-minute-cron worker tick
-  is a Phase-4-scale mechanism, not a target-scale one (see
+  is a Phase-5-scale mechanism, not a target-scale one — closing this gap
+  means a shorter cron interval (a cost/plan decision) or more parallel
+  worker capacity per tick, not more architecture (see
   `docs/architecture/risks.md`).
 - `1,000,000` workflow events (`agent_run_steps` rows, at Postgres
   `LISTEN`/`NOTIFY` trigger cost per write) is within Postgres's own
@@ -48,7 +78,7 @@ Target: 10 tenants / 100 projects / 10,000 opportunities / 100,000 pages / 1,000
 1. **Per-candidate `countActiveRuns()` query inside `dequeue()`** — the
    real query above shows this is one extra round-trip per *admitted*
    candidate, not batched. At today's over-fetch multiplier (`limit * 4`)
-   and small tenant counts this is invisible (sub-14ms p95 above); at
+   and small tenant counts this is invisible (sub-10ms p95 above); at
    hundreds of concurrent tenants with deep backlogs this becomes the
    dominant per-tick cost. The fix is mechanical (one aggregated
    `GROUP BY org_id, pipeline` query instead of N individual ones) and is

@@ -44,7 +44,8 @@ retry, budget enforcement (ADR-019), formalized capability permissions
 (ADR-018), and real-time execution events via Postgres LISTEN/NOTIFY
 (ADR-021). `lib/website-discovery/orchestrator.ts` and
 `lib/content-pipeline/orchestrator.ts` were migrated onto this engine in
-place (R-16 resolved) — no parallel pipeline, no big-bang rewrite. Exit
+place (checkpoint-resume — R-16 *partially* resolved, see Phase 4.5 below
+for the rest) — no parallel pipeline, no big-bang rewrite. Exit
 criterion met: `tests/integration/durable-workflow.test.ts` proves a step
 already succeeded is never re-executed on a simulated resume, a manual
 retry moves a FAILED run through RETRYING back to RUNNING, a budget breach
@@ -58,6 +59,23 @@ API surface — `/api/v1/workflows`, `/api/v1/approvals`, `/api/v1/domains`,
 `/api/v1/route-templates` — is real and tenant-isolated; a dedicated UI
 consuming it beyond the existing agent-run detail view is the next
 increment).
+
+## Phase 4.5 — Step-level async execution — ✅ shipped (ADR-023)
+Closed the durability gap Phase 4 explicitly left open (R-16): no HTTP
+request runs a whole pipeline, or even a whole step's retry loop, inline
+anymore. Every step is its own independent, durable, tenant-scoped job
+(`lib/workflow/step-worker.ts`); starting/resuming/retrying a workflow or
+approving a publish enqueues exactly the next step and returns
+immediately. Real lease-based crash recovery
+(`lib/workflow/queue.ts#reapExpiredLeases`) replaces "locked forever if
+the worker dies." Also closed R-22 (tenant_budgets now actually read into
+concurrency/budget resolution — `lib/workflow/budget-policy.ts`). Exit
+criterion met: `tests/integration/step-execution.test.ts` proves an HTTP
+entry point only enqueues, one worker tick advances exactly one step, a
+simulated crash recovers without duplicating work, and a paused/cancelled
+run's stray job is a real no-op. Real, accepted cost: completing one whole
+pipeline now needs 4-7 sequential step dispatches instead of 1 — measured
+and extrapolated in `docs/architecture/load-test-report.md`.
 
 ## Phase 5 — Content Factory multi-agent pipeline (§22) — ✅ shipped (v1)
 `lib/content-pipeline/*` implements Research→Outline→Draft→SEO→GEO→Quality

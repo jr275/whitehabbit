@@ -1,17 +1,15 @@
 import "server-only"
 
-/* POST /api/projects/:projectId/websites/:websiteId/discover — runs
- * the real WebsiteDiscoveryAgent (§3): a bounded, SSRF-safe crawl,
- * entity extraction/resolution, knowledge profile, and opportunity
- * discovery, as one durable agent_run.
+/* POST /api/projects/:projectId/websites/:websiteId/discover — starts
+ * the real WebsiteDiscoveryAgent (§3) as a durable WorkflowRun.
  *
- * Runs synchronously within this request — there is no background
- * worker/queue yet (ADR-003). Bounded by DEFAULT_CRAWL_LIMITS
- * specifically so this stays within a reasonable request lifetime;
- * moving this to a real background job is the named next step once
- * a durable workflow engine exists (docs/architecture/roadmap.md
- * Phase 4). A website already mid-discovery is rejected rather than
- * started twice (§36 idempotency). */
+ * Phase 5A (ADR-023): this request NEVER runs the pipeline itself. It
+ * starts (or idempotently reattaches to) the WorkflowRun, enqueues
+ * exactly the first step job, and returns immediately — the crawl,
+ * entity extraction, knowledge profile, and opportunity discovery each
+ * run as their own durable, retryable, crash-recoverable step job,
+ * drained by the worker tick (POST /api/v1/workflows/process). Poll
+ * GET /api/v1/workflows/:id (or its SSE /events stream) for progress. */
 
 import { NextResponse } from "next/server"
 import { NotFoundError, ValidationError, withApiHandler } from "@/lib/api-error"
@@ -19,7 +17,10 @@ import { recordAudit } from "@/lib/db/repo"
 import { enforceRateLimit } from "@/lib/rate-limit"
 import { requireSession } from "@/lib/session"
 import { getWebsite } from "@/lib/websites/repo"
-import { runWebsiteDiscovery } from "@/lib/website-discovery/orchestrator"
+import { assertCapability } from "@/lib/workflow/permissions"
+import { workflowEngine } from "@/lib/workflow/engine"
+import { enqueueStepJob } from "@/lib/workflow/step-worker"
+import { nextWebsiteDiscoveryStep } from "@/lib/website-discovery/steps"
 
 type Params = { params: Promise<{ projectId: string; websiteId: string }> }
 
@@ -37,8 +38,20 @@ export async function POST(_req: Request, { params }: Params) {
       throw new ValidationError(`Discovery is already running for this website (status: ${website.discoveryStatus}).`)
     }
 
+    assertCapability("WebsiteDiscoveryAgent", "crawl_website")
+    // idempotent: reattaches to an already-active run for this website
+    // rather than starting a second one (§6).
+    const run = await workflowEngine.start({
+      orgId: website.orgId,
+      projectId: website.projectId,
+      pipeline: "website_discovery",
+      subjectType: "website",
+      subjectId: website.id,
+    })
+    const nextStep = nextWebsiteDiscoveryStep(run.checkpoint?.lastCompletedSequence ?? null)
+    if (nextStep) await enqueueStepJob(run, nextStep)
+
     await recordAudit({ orgId: organizationId, userId, action: "website.discover", resourceType: "website", resourceId: website.id })
-    const result = await runWebsiteDiscovery(website)
-    return NextResponse.json({ result })
+    return NextResponse.json({ workflow: run }, { status: 202 })
   })
 }

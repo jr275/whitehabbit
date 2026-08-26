@@ -35,6 +35,18 @@ export function buildJobIdempotencyKey(orgId: string, type: string, subjectId: s
   return `job:${orgId}:${type}:${subjectId}`
 }
 
+/** Step-level job idempotency key (Phase 5A, ADR-023): one active queued
+ * job per (workflowRunId, stepName) at a time — prevents accidentally
+ * double-enqueuing the same step (e.g. a retried enqueue call after a
+ * network blip on the caller's side). Scoped to active job statuses only
+ * (the same partial-index pattern as buildWorkflowIdempotencyKey), so the
+ * SAME step name can be legitimately re-enqueued later — e.g. content
+ * generation's "decide_publish" step, re-dispatched after a human
+ * approval decision. */
+export function buildStepJobIdempotencyKey(workflowRunId: string, stepName: string): string {
+  return `step:${workflowRunId}:${stepName}`
+}
+
 /** WorkflowStep idempotency: (workflowRunId, step, sequence) is already
  * a real UNIQUE constraint from Phase 3 (agent_run_steps) — this helper
  * exists so callers build the same key shape consistently when they

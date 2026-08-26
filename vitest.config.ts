@@ -28,6 +28,16 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 30_000,
     globalSetup: ["./tests/setup/global-setup.ts"],
+    // Every integration/e2e test in this suite shares ONE real Postgres
+    // database (truncated once at global setup, not per file) and, as of
+    // Phase 5A, a real global job queue (lib/workflow/queue.ts's
+    // dequeue() is intentionally unscoped — a real worker drains ALL
+    // tenants' due jobs). Running test FILES in parallel would let two
+    // files race over the same queue rows nondeterministically — a real
+    // bug this phase's own step-execution tests surfaced. Test files
+    // still run as fast as before (each file's tests still run in one
+    // pass), just not interleaved with another file's DB/queue writes.
+    fileParallelism: false,
     env: {
       DATABASE_URL: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/whitehabbit_test",
       AUTH_SECRET: process.env.AUTH_SECRET ?? "test-only-secret-do-not-use-in-production",

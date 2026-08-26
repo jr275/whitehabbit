@@ -1,22 +1,18 @@
 import "server-only"
 
 /* POST /api/v1/workflows/:id/retry — manual retry of a terminal
- * FAILED/TIMED_OUT run (distinct from the automatic in-process retry
- * inside runStep(), §5). Resets to RUNNING and re-invokes the real
- * orchestrator so checkpoint-resume can pick up past the last
- * succeeded step (§4, §29). */
+ * FAILED/TIMED_OUT run. Moves FAILED/TIMED_OUT -> RETRYING -> RUNNING
+ * (§3) and enqueues exactly the next step job from the real checkpoint
+ * (Phase 5A ADR-023) — never re-runs the whole pipeline inline. */
 
 import { NextResponse } from "next/server"
-import { ConflictError, NotFoundError, ValidationError, withApiHandler } from "@/lib/api-error"
+import { ConflictError, NotFoundError, withApiHandler } from "@/lib/api-error"
 import { recordAudit } from "@/lib/db/repo"
-import { runWebsiteDiscovery } from "@/lib/website-discovery/orchestrator"
-import { getWebsite } from "@/lib/websites/repo"
-import { runContentGeneration } from "@/lib/content-pipeline/orchestrator"
-import { getOpportunity } from "@/lib/opportunity/repo"
-import { buildPageBriefFromOpportunity } from "@/lib/pagebrief/build"
-import { getPageBriefByOpportunity } from "@/lib/pagebrief/repo"
 import { workflowEngine } from "@/lib/workflow/engine"
 import { InvalidWorkflowTransitionError } from "@/lib/workflow/types"
+import { enqueueStepJob } from "@/lib/workflow/step-worker"
+import { nextWebsiteDiscoveryStep } from "@/lib/website-discovery/steps"
+import { nextContentGenerationStep } from "@/lib/content-pipeline/steps"
 import { requireSession } from "@/lib/session"
 
 type Params = { params: Promise<{ id: string }> }
@@ -28,26 +24,21 @@ export async function POST(_req: Request, { params }: Params) {
     const existing = await workflowEngine.getStatus(id, organizationId)
     if (!existing) throw new NotFoundError()
 
+    let retried
     try {
-      await workflowEngine.retry(id, organizationId)
+      retried = await workflowEngine.retry(id, organizationId)
     } catch (err) {
       if (err instanceof InvalidWorkflowTransitionError) throw new ConflictError(err.message)
       throw err
     }
     await recordAudit({ orgId: organizationId, userId, action: "workflow.retry", resourceType: "workflow_run", resourceId: id })
 
-    if (existing.pipeline === "website_discovery") {
-      const website = await getWebsite(existing.subjectId, organizationId)
-      if (!website) throw new ValidationError("The website this run belongs to no longer exists.")
-      await runWebsiteDiscovery(website)
-    } else if (existing.pipeline === "content_generation") {
-      const opportunity = await getOpportunity(existing.subjectId, organizationId)
-      if (!opportunity) throw new ValidationError("The opportunity this run belongs to no longer exists.")
-      const brief = (await getPageBriefByOpportunity(opportunity.id, organizationId)) ?? (await buildPageBriefFromOpportunity(opportunity))
-      await runContentGeneration(opportunity, brief)
-    }
+    const nextStep =
+      retried.pipeline === "website_discovery"
+        ? nextWebsiteDiscoveryStep(retried.checkpoint?.lastCompletedSequence ?? null)
+        : nextContentGenerationStep(retried.checkpoint?.lastCompletedSequence ?? null)
+    if (nextStep) await enqueueStepJob(retried, nextStep)
 
-    const updated = await workflowEngine.getStatus(id, organizationId)
-    return NextResponse.json({ workflow: updated })
+    return NextResponse.json({ workflow: retried })
   })
 }

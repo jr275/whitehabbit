@@ -1,49 +1,32 @@
 import "server-only"
 
 /* ================================================================== *
- * WEBSITE DISCOVERY ORCHESTRATOR — the real §3 WebsiteDiscoveryAgent:
- * crawl -> knowledge profile -> entity extraction/resolution ->
- * opportunity discovery, as one durable, checkpointed, resumable
- * WorkflowRun (ADR-016, ADR-017 — Phase 4).
+ * WEBSITE DISCOVERY — LegacySyncExecutionAdapter (Phase 5A, ADR-023).
  *
- * workflowEngine.start() is idempotent: calling this again for the
- * same website while a previous attempt is still active (not yet
- * succeeded/failed/cancelled) returns THAT SAME run, and runStep()
- * skips every already-succeeded step, resuming from the real
- * checkpoint instead of re-crawling or re-extracting from scratch.
+ * This function is NOT the primary execution path anymore. The real
+ * path (used by every HTTP entry point — see app/api/projects/[id]/
+ * websites/[id]/discover/route.ts) enqueues one step job
+ * (lib/workflow/step-worker.ts#enqueueStepJob) and returns immediately;
+ * a worker tick executes exactly one step per job, persists, and
+ * enqueues the next. No HTTP request runs this whole function anymore.
  *
- * Design rule that makes resume actually correct: NEVER rely on a
- * step closure's outer-scope side effects to carry state to a later
- * step. A resumed step's closure never runs at all (runStep returns
- * its cached output instead) — so every later step re-derives what it
- * needs either from the real, already-persisted database rows, or
- * from the small `output`/`checkpointData` runStep() actually returns
- * (which is correct in both the fresh and the resumed case, because
- * that value is exactly what completeStep() persisted after the
- * closure's writes had already fully landed, whichever attempt did it).
- *
- * This function is the LegacySyncExecutionAdapter (§40): it still runs
- * entirely in-process within one request/call — the exact same shape
- * as Phase 3 — but every step now goes through the same checkpointed,
- * retried, budget-checked runStep() the queue-driven path
- * (lib/workflow/worker.ts) also uses, so both paths share one real
- * durability implementation.
+ * runWebsiteDiscovery() still exists because tests and internal/admin
+ * callers sometimes want "run this to completion and give me the
+ * result" without touching the queue at all — it drives the exact same
+ * step-dispatch functions (lib/website-discovery/steps.ts) in a plain
+ * in-process loop, so there is zero duplicated step logic between the
+ * two paths; this is a thin driver, not a second implementation.
  * ================================================================== */
 
-import { runCrawl } from "@/lib/crawler/crawl"
 import { DEFAULT_CRAWL_LIMITS, type CrawlLimits } from "@/lib/crawler/model"
-import { listLinksForSourcePage, listPagesForCrawl } from "@/lib/crawler/repo"
 import type { SafeFetchFn } from "@/lib/crawler/safe-fetch"
-import { buildKnowledgeProfile } from "@/lib/knowledge-profile/builder"
-import { createKnowledgeProfile } from "@/lib/knowledge-profile/repo"
-import { listCanonicalEntities } from "@/lib/knowledge/repo"
-import { runEntityExtraction } from "@/lib/knowledge/ingest-from-crawl"
-import { discoverOpportunities } from "@/lib/opportunity/discovery"
 import { assertCapability } from "@/lib/workflow/permissions"
-import { finalizeWorkflow, runStep, workflowEngine } from "@/lib/workflow/engine"
+import { finalizeWorkflow, workflowEngine } from "@/lib/workflow/engine"
+import * as workflowRepo from "@/lib/workflow/repo"
 import type { WorkflowRun } from "@/lib/workflow/types"
 import { updateDiscoveryStatus } from "@/lib/websites/repo"
 import type { Website } from "@/lib/websites/model"
+import { dispatchWebsiteDiscoveryStep, nextWebsiteDiscoveryStep } from "./steps"
 
 export interface WebsiteDiscoveryResult {
   agentRunId: string
@@ -70,77 +53,23 @@ export async function runWebsiteDiscovery(
   })
 
   try {
-    await updateDiscoveryStatus(website.id, "discovering")
-
-    const crawlResult = await runStep(run, 1, "crawl", { startUrl: website.url }, async () => {
-      const result = await runCrawl({
-        orgId: website.orgId,
-        projectId: website.projectId,
-        websiteId: website.id,
-        agentRunId: run.id,
-        startUrl: website.url,
-        limits,
-        fetchPage,
-      })
-      if (result.crawl.status === "failed") throw new Error("Crawl failed — no pages could be fetched from this website.")
-      return { output: { crawlId: result.crawl.id, pagesDiscovered: result.crawl.pagesDiscovered, pagesCrawled: result.crawl.pagesCrawled, errorCount: result.crawl.errorCount } }
-    })
-    const crawlId = crawlResult.output.crawlId as string
-    // real, from the database, whether this step just ran or was resumed
-    const pages = await listPagesForCrawl(crawlId, website.orgId)
-    const hasRobotsOrSitemap = pages.some((p) => p.crawlDepth === 0)
-    await updateDiscoveryStatus(website.id, "crawled")
-    await updateDiscoveryStatus(website.id, "analyzing")
-
-    assertCapability("WebsiteDiscoveryAgent", "extract_entities")
-    const extractionResult = await runStep(run, 2, "extract_entities", { pagesCrawled: pages.filter((p) => p.crawledAt).length }, async () => {
-      const summary = await runEntityExtraction(website.orgId, website.projectId, pages)
-      return {
-        output: {
-          created: summary.createdCount,
-          exactMatch: summary.exactMatchCount,
-          autoMerged: summary.autoMergedCount,
-          reviewCandidates: summary.reviewCandidateCount,
-          relationshipsCreated: summary.relationshipsCreated,
-        },
+    let current = nextWebsiteDiscoveryStep(run.checkpoint?.lastCompletedSequence ?? null)
+    while (current) {
+      const freshRun = (await workflowRepo.getWorkflowRun(run.id, run.orgId))!
+      const outcome = await dispatchWebsiteDiscoveryStep(freshRun, website, current, { limits, fetchPage })
+      if (outcome.kind !== "advance") {
+        if (outcome.kind === "terminal" && outcome.status === "succeeded") {
+          await finalizeWorkflow(run.id, run.orgId, "succeeded")
+        } else {
+          const reason = outcome.kind === "terminal" ? (outcome.errorReason ?? "Website discovery failed.") : "Website discovery paused unexpectedly."
+          throw new Error(reason)
+        }
+        break
       }
-    })
-
-    const homepage = pages[0]
-    const homepageLinks = homepage ? await listLinksForSourcePage(homepage.id, website.orgId) : []
-
-    await runStep(run, 3, "build_profile", null, async () => {
-      // real, from the database — correct whether extraction just ran or
-      // was resumed from an earlier attempt.
-      const canonicalEntities = (await listCanonicalEntities(website.orgId, website.projectId, { limit: 500 })).map((e) => ({ type: e.entityType, name: e.name, confidence: 0.7 }))
-      const { profile, confidence } = buildKnowledgeProfile({
-        hostname: website.hostname,
-        pages,
-        entityCandidates: canonicalEntities,
-        hasRobotsTxt: hasRobotsOrSitemap,
-        hasSitemap: hasRobotsOrSitemap,
-        homepageAnchorTexts: homepageLinks.filter((l) => l.isInternal).map((l) => l.anchorText ?? ""),
-      })
-      await createKnowledgeProfile({ orgId: website.orgId, projectId: website.projectId, websiteId: website.id, sourceCrawlId: crawlId, profile, confidence })
-      return { output: { detectedVertical: profile.detectedVertical, entityTypeCount: profile.primaryEntityTypes.length } }
-    })
-
-    assertCapability("WebsiteDiscoveryAgent", "write_opportunity")
-    const opportunityStep = await runStep(run, 4, "discover_opportunities", null, async () => {
-      const opportunities = await discoverOpportunities({ orgId: website.orgId, projectId: website.projectId, websiteId: website.id, agentRunId: run.id })
-      return { output: { opportunitiesCreated: opportunities.length } }
-    })
-
-    await finalizeWorkflow(run.id, run.orgId, "succeeded")
-    await updateDiscoveryStatus(website.id, "ready")
-
-    return {
-      agentRunId: run.id,
-      crawlId,
-      pagesCrawled: pages.filter((p) => p.crawledAt).length,
-      entitiesCreated: extractionResult.output.created as number,
-      opportunitiesCreated: opportunityStep.output.opportunitiesCreated as number,
+      current = outcome.nextStep
     }
+
+    return await buildResult(run.id, run.orgId)
   } catch (err) {
     const message = err instanceof Error ? err.message : "Website discovery failed for an unknown reason."
     await finalizeWorkflow(run.id, run.orgId, "failed", { errorReason: message }).catch(() => {
@@ -149,5 +78,20 @@ export async function runWebsiteDiscovery(
     })
     await updateDiscoveryStatus(website.id, "failed", message)
     throw err
+  }
+}
+
+async function buildResult(runId: string, orgId: string): Promise<WebsiteDiscoveryResult> {
+  const [crawlStep, extractStep, discoverStep] = await Promise.all([
+    workflowRepo.getStep(runId, "crawl", 1, orgId),
+    workflowRepo.getStep(runId, "extract_entities", 2, orgId),
+    workflowRepo.getStep(runId, "discover_opportunities", 4, orgId),
+  ])
+  return {
+    agentRunId: runId,
+    crawlId: (crawlStep?.output?.crawlId as string) ?? "",
+    pagesCrawled: (crawlStep?.output?.pagesCrawled as number) ?? 0,
+    entitiesCreated: (extractStep?.output?.created as number) ?? 0,
+    opportunitiesCreated: (discoverStep?.output?.opportunitiesCreated as number) ?? 0,
   }
 }

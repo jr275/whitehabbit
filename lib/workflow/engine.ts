@@ -13,7 +13,8 @@ import "server-only"
  * checked after every step (§10).
  * ================================================================== */
 
-import { assertWithinBudget, DEFAULT_BUDGET, emptyUsage } from "./budget"
+import { assertWithinBudget, emptyUsage } from "./budget"
+import { resolveBudgetPolicy } from "./budget-policy"
 import { computeBackoffMs, DEFAULT_RETRY_POLICY, isRetryableError } from "./retry"
 import * as repo from "./repo"
 import { assertValidTransition } from "./state-machine"
@@ -64,7 +65,11 @@ export interface WorkflowEngine {
 
 class PostgresWorkflowEngineImpl implements WorkflowEngine {
   async start(input: Parameters<WorkflowEngine["start"]>[0]): Promise<WorkflowRun> {
-    return repo.createWorkflowRun({ ...input, budget: input.budget ?? DEFAULT_BUDGET })
+    // §6 resolution: explicit override -> project_budgets -> DEFAULT_BUDGET
+    // (lib/workflow/budget-policy.ts) — never a hardcoded default when a
+    // real project-level override exists.
+    const budget = await resolveBudgetPolicy(input.orgId, input.projectId, input.budget)
+    return repo.createWorkflowRun({ ...input, budget })
   }
 
   async getStatus(id: string, orgId: string): Promise<WorkflowRun | null> {
