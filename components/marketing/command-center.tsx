@@ -105,7 +105,7 @@ export function MarketingCommandCenter() {
               <div key={s.key} className="bg-card p-4">
                 <div className="flex items-start justify-between gap-2">
                   <span className="font-mono text-[26px] font-medium tabular-nums tracking-tight text-foreground">{s.value.toLocaleString()}</span>
-                  <ProvenanceBadge state={s.state} />
+                  <ProvenanceBadge provenance={s.state} />
                 </div>
                 <p className="mt-1 text-[12px] text-muted-foreground">{s.label}</p>
               </div>

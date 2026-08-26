@@ -1,7 +1,7 @@
 "use client"
 
 /* ------------------------------------------------------------------ *
- * WhiteHabbit — CREATE + ASSEMBLE
+ * Menlo Whitehabbit — CREATE + ASSEMBLE
  * The first thing the user sees is not a worker. It is an invitation
  * to create one. Their intention becomes the worker.
  * ------------------------------------------------------------------ */
@@ -50,7 +50,7 @@ export function CreateOverlay({
             className="w-full max-w-2xl text-center"
           >
             <p className="mb-6 font-mono text-[11px] uppercase tracking-[0.35em] text-muted-foreground">
-              WhiteHabbit
+              Menlo Whitehabbit
             </p>
             <h1 className="text-balance text-4xl font-medium tracking-tight sm:text-5xl">
               What should your worker do?

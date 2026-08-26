@@ -17,17 +17,14 @@ import "server-only"
  * comes back at all, a deterministic keyword fallback still produces
  * a real, valid, runnable Worker rather than failing the request. */
 
-import { randomUUID } from "node:crypto"
 import { NextResponse } from "next/server"
-import { hydrateWorkerLiveState } from "@/lib/agent/hydrate"
 import { callLlm } from "@/lib/agent/tools/llm"
 import { withApiHandler, ValidationError } from "@/lib/api-error"
-import { recordAudit, upsertWorker } from "@/lib/db/repo"
 import { logger } from "@/lib/observability/logger"
 import { enforceRateLimit } from "@/lib/rate-limit"
 import { requireSession } from "@/lib/session"
 import { SKILL_CATALOG } from "@/lib/workforce/catalog"
-import { buildWorkerFromBlueprint, type AgentBlueprint } from "@/lib/workforce/seed"
+import type { AgentBlueprint } from "@/lib/workforce/seed"
 
 const SYSTEM_PROMPT = `You are an AI Agent Factory's blueprint analyst. A user describes a job they want an AI worker to do. You must design that worker using ONLY the real, currently-executable skills listed below — never invent a skill that isn't in this list.
 
@@ -137,10 +134,6 @@ export async function POST(req: Request) {
       logger.warn("blueprint_llm_unavailable", { organizationId, userId, reason: llmResult.blockedReason ?? llmResult.error })
     }
 
-    const worker = buildWorkerFromBlueprint(`worker_${randomUUID()}`, blueprint)
-    const saved = await upsertWorker(worker, organizationId, userId)
-    await recordAudit({ orgId: organizationId, userId, action: "worker.assemble", resourceType: "worker", resourceId: saved.id, metadata: { objective, primarySkillId: blueprint.primarySkillId, mode } })
-
-    return NextResponse.json({ worker: hydrateWorkerLiveState(saved), blueprint, mode })
+    return NextResponse.json({ blueprint, mode })
   })
 }

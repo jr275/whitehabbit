@@ -9,16 +9,15 @@
  * shows the real reason instead of pretending one exists.
  * ------------------------------------------------------------------ */
 
-import { ArrowLeft, ArrowUpRight, Check, X } from "lucide-react"
+import { ArrowLeft, Check, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { DevModeTag } from "@/components/outputs/output-table"
 import { ProvenanceBadge } from "@/components/outputs/provenance-badge"
-import { ProvenanceGraph } from "@/components/outputs/provenance-graph"
+import { formatBusinessValue, metricsForOutput, provenanceForExecution } from "@/lib/workforce/business-results"
 import { SKILL_CATALOG, TOOL_CATALOG } from "@/lib/workforce/catalog"
-import { deriveBusinessOutcome } from "@/lib/workforce/business-outcome"
-import type { BusinessEvent, MetricRecord, Worker, WorkerEvent, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
+import type { MetricRecord, Worker, WorkerEvent, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
 import { EXECUTION_STATUS_META, OUTPUT_TYPE_META } from "@/lib/workforce/model"
-import { buildExecutionStages, buildPipelineStages, businessEventLabel, isToday, resultProvenanceState, sourceLabel, timeOfDay, type ExecutionStageStep } from "@/lib/workforce/selectors"
+import { buildExecutionStages, isToday, timeOfDay } from "@/lib/workforce/selectors"
 
 export type DrawerFilter = { kind: "type"; workerId: string; type: string; title: string } | { kind: "execution"; executionId: string }
 
@@ -35,9 +34,8 @@ export function OutputDrawer({
   tasks,
   executions,
   outputs,
-  events,
-  businessEvents,
   metrics,
+  events,
   onClose,
 }: {
   filter: DrawerFilter
@@ -45,9 +43,8 @@ export function OutputDrawer({
   tasks: WorkerTask[]
   executions: WorkerExecution[]
   outputs: WorkerOutput[]
-  events: WorkerEvent[]
-  businessEvents: BusinessEvent[]
   metrics: MetricRecord[]
+  events: WorkerEvent[]
   onClose: () => void
 }) {
   const list =
@@ -108,7 +105,7 @@ export function OutputDrawer({
               {list.length === 0 && <p className="px-5 py-8 text-center text-[13px] text-muted-foreground">No outputs to show.</p>}
             </ul>
           ) : (
-            <DetailView output={activeOutput} execution={activeExecution} task={activeTask} events={events} businessEvents={businessEvents} metrics={metrics} />
+            <DetailView output={activeOutput} execution={activeExecution} task={activeTask} metrics={metrics} events={events} />
           )}
         </div>
       </div>
@@ -118,25 +115,18 @@ export function OutputDrawer({
 
 function BlockedDetail({ execution, task, events }: { execution: WorkerExecution; task?: WorkerTask; events: WorkerEvent[] }) {
   const meta = EXECUTION_STATUS_META[execution.status]
-  const stages = execution.pipelineState ? buildPipelineStages(execution) : buildExecutionStages(execution, events)
+  const stages = buildExecutionStages(execution, events)
   return (
     <div className="flex flex-col gap-4 px-5 py-5">
       <div className="rounded-lg border border-warn/30 bg-warn/5 p-4">
         <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-warn">{meta.label}</p>
         <p className="mt-2 text-[13px] leading-relaxed text-foreground">{execution.blockedReason ?? "No reason recorded."}</p>
-        {execution.reasonCode === "missing_credential" && (execution.blockedReason ?? "").toLowerCase().includes("salesforce") && (
-          <a href="/integrations/connector_salesforce" className="mt-2 inline-block text-[12px] font-medium text-primary hover:underline">
-            Connect Salesforce →
-          </a>
-        )}
       </div>
 
       <div>
-        <SectionLabel>{execution.pipelineState ? "Execution graph — real, per-stage state" : "Execution timeline — exactly how far it got"}</SectionLabel>
+        <SectionLabel>Execution timeline — exactly how far it got</SectionLabel>
         <ExecutionTimeline stages={stages} />
       </div>
-
-      <RetryStepAction execution={execution} stages={stages} />
 
       <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">
         <MetaRow k="Task" v={task?.title ?? "—"} />
@@ -151,73 +141,10 @@ function BlockedDetail({ execution, task, events }: { execution: WorkerExecution
   )
 }
 
-/** Section 18/19 — "retry failed step": only rendered when a real
- * pipeline stage is genuinely in "failed" and this skill supports
- * retrying it (POST /api/executions/[id]/retry-step reports the real
- * reason if not — e.g. a non-retryable stage, or the skill has no
- * retryStage()). Never replays an already-completed stage. */
-function RetryStepAction({ execution, stages }: { execution: WorkerExecution; stages: ExecutionStageStep[] }) {
-  const [state, setState] = useState<{ busy: boolean; error?: string; done?: boolean }>({ busy: false })
-  const failedStage = stages.find((s) => s.status === "failed")
-  if (!execution.pipelineState || !failedStage) return null
-
-  async function retry() {
-    setState({ busy: true })
-    try {
-      const res = await fetch(`/api/executions/${execution.id}/retry-step`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ stage: failedStage!.key }) })
-      const body = await res.json().catch(() => null)
-      if (!res.ok) {
-        setState({ busy: false, error: body?.error ?? "Retry failed." })
-        return
-      }
-      setState({ busy: false, done: true })
-    } catch (err) {
-      setState({ busy: false, error: err instanceof Error ? err.message : "Retry failed." })
-    }
-  }
-
-  return (
-    <div className="rounded-lg border border-border bg-secondary/30 p-3">
-      <p className="text-[12px] text-foreground">
-        <span className="font-medium">{failedStage.label}</span> failed — retrying only re-runs this step, never a stage that already completed for real.
-      </p>
-      {state.error && <p className="mt-1.5 text-[11.5px] text-destructive">{state.error}</p>}
-      {state.done ? (
-        <p className="mt-2 text-[11.5px] text-grow">Retried — refresh to see the real result.</p>
-      ) : (
-        <button
-          onClick={retry}
-          disabled={state.busy}
-          className="mt-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-[11.5px] font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-60"
-        >
-          {state.busy ? "Retrying…" : `Retry ${failedStage.label}`}
-        </button>
-      )}
-    </div>
-  )
-}
-
 /** Real stage-by-stage progression — see buildExecutionStages(). A stage
  * the run never reached renders as a hollow, muted step, not a fake
  * checkmark; the stage that actually failed renders red with the real
  * reason. Durations shown are the same real numbers the live stream used. */
-const STAGE_STATUS_STYLE: Record<ExecutionStageStep["status"], { dot: string; text: string }> = {
-  done: { dot: "border-grow bg-grow/15 text-grow", text: "text-foreground" },
-  failed: { dot: "border-destructive bg-destructive/15 text-destructive", text: "text-destructive" },
-  blocked: { dot: "border-warn bg-warn/15 text-warn", text: "text-warn" },
-  waiting_for_approval: { dot: "border-primary bg-primary/15 text-primary", text: "text-primary" },
-  rejected: { dot: "border-destructive bg-destructive/15 text-destructive", text: "text-destructive" },
-  skipped: { dot: "border-border bg-secondary/60 text-muted-foreground", text: "text-muted-foreground" },
-  pending: { dot: "border-border bg-card text-muted-foreground/40", text: "text-muted-foreground/60" },
-}
-
-const STAGE_STATUS_LABEL: Partial<Record<ExecutionStageStep["status"], string>> = {
-  blocked: "Blocked",
-  waiting_for_approval: "Waiting for approval",
-  rejected: "Rejected",
-  skipped: "Skipped",
-}
-
 export function ExecutionTimeline({ stages, live = false }: { stages: ReturnType<typeof buildExecutionStages>; live?: boolean }) {
   // the real stage list is already ordered; while a run is actually in
   // progress (live), the first not-yet-reached stage is the one it's
@@ -227,26 +154,35 @@ export function ExecutionTimeline({ stages, live = false }: { stages: ReturnType
     <ol className="flex flex-col gap-0">
       {stages.map((s, i) => {
         const isCurrent = i === currentIdx
-        const style = STAGE_STATUS_STYLE[s.status]
         return (
           <li key={s.key} className="relative flex gap-3 pb-3 last:pb-0">
             {i < stages.length - 1 && <span className="absolute left-[9px] top-5 h-[calc(100%-0.5rem)] w-px bg-border" />}
-            <span className={`z-10 mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border transition-colors duration-300 ${isCurrent && s.status === "pending" ? "border-primary bg-primary/15 text-primary" : style.dot}`}>
-              {s.status === "done" ? <Check className="h-2.5 w-2.5" /> : <span className={`h-1.5 w-1.5 rounded-full bg-current ${isCurrent && s.status === "pending" ? "animate-pulse" : ""}`} />}
+            <span
+              className={`z-10 mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border transition-colors duration-300 ${
+                s.status === "done"
+                  ? "border-grow bg-grow/15 text-grow"
+                  : s.status === "failed"
+                    ? "border-destructive bg-destructive/15 text-destructive"
+                    : isCurrent
+                      ? "border-primary bg-primary/15 text-primary"
+                      : "border-border bg-card text-muted-foreground/40"
+              }`}
+            >
+              {s.status === "done" ? (
+                <Check className="h-2.5 w-2.5" />
+              ) : (
+                <span className={`h-1.5 w-1.5 rounded-full bg-current ${isCurrent ? "animate-pulse" : ""}`} />
+              )}
             </span>
             <div className="min-w-0 flex-1 pt-px">
               <div className="flex items-baseline justify-between gap-2">
-                <span className={`text-[12.5px] font-medium ${isCurrent && s.status === "pending" ? "text-primary" : style.text}`}>
+                <span className={`text-[12.5px] font-medium ${isCurrent ? "text-primary" : s.status === "pending" ? "text-muted-foreground/60" : "text-foreground"}`}>
                   {s.label}
-                  {STAGE_STATUS_LABEL[s.status] && <span className="ml-1.5 font-mono text-[9px] uppercase tracking-wider opacity-80">{STAGE_STATUS_LABEL[s.status]}</span>}
                 </span>
-                <span className="flex shrink-0 items-center gap-1.5">
-                  {s.attempts != null && s.attempts > 1 && <span className="font-mono text-[9.5px] tabular-nums text-warn">{s.attempts} attempts</span>}
-                  {s.durationMs != null && <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">{s.durationMs}ms</span>}
-                </span>
+                {s.durationMs != null && <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground">{s.durationMs}ms</span>}
               </div>
-              {s.detail && <p className={`mt-0.5 text-[11px] leading-relaxed ${s.status === "failed" || s.status === "rejected" ? "text-destructive" : s.status === "blocked" || s.status === "waiting_for_approval" ? "text-warn" : "text-muted-foreground"}`}>{s.detail}</p>}
-              {isCurrent && s.status === "pending" && !s.detail && <p className="mt-0.5 text-[11px] text-primary">In progress</p>}
+              {s.detail && <p className={`mt-0.5 text-[11px] leading-relaxed ${s.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>{s.detail}</p>}
+              {isCurrent && !s.detail && <p className="mt-0.5 text-[11px] text-primary">In progress</p>}
               {s.status === "pending" && !isCurrent && !s.detail && <p className="mt-0.5 text-[11px] italic text-muted-foreground/60">Not reached</p>}
             </div>
           </li>
@@ -256,54 +192,24 @@ export function ExecutionTimeline({ stages, live = false }: { stages: ReturnType
   )
 }
 
-function DetailView({
-  output,
-  execution,
-  task,
-  events,
-  businessEvents,
-  metrics,
-}: {
-  output: WorkerOutput
-  execution?: WorkerExecution
-  task?: WorkerTask
-  events: WorkerEvent[]
-  businessEvents: BusinessEvent[]
-  metrics: MetricRecord[]
-}) {
+function DetailView({ output, execution, task, metrics, events }: { output: WorkerOutput; execution?: WorkerExecution; task?: WorkerTask; metrics: MetricRecord[]; events: WorkerEvent[] }) {
   const template = task ? SKILL_CATALOG.find((s) => s.id === task.skillId) : undefined
   const toolNames = template?.requiredTools.map((id) => TOOL_CATALOG.find((t) => t.id === id)?.name ?? id).join(", ")
   const isDev = execution?.executionMode === "development"
-  const stages = execution ? (execution.pipelineState ? buildPipelineStages(execution) : buildExecutionStages(execution, events, output)) : []
-  const outcome = deriveBusinessOutcome(output, execution)
-
-  const businessEvent = businessEvents.find((be) => be.outputId === output.id)
-  const relatedMetrics = metrics.filter((m) => m.executionId === output.executionId)
-  const businessMetrics = relatedMetrics.filter((m) => m.kind === "business")
-  const provenance = resultProvenanceState(execution)
+  const stages = execution ? buildExecutionStages(execution, events, output) : []
+  const recordedMetrics = metricsForOutput(output, metrics)
 
   return (
     <div className="flex flex-col gap-5 px-5 py-5">
       <div>
         <div className="flex items-center gap-2">
           <h3 className="text-pretty text-[16px] font-semibold leading-snug text-foreground">{output.title}</h3>
+          <ProvenanceBadge provenance={provenanceForExecution(execution)} />
           {isDev && <DevModeTag />}
         </div>
         <div className="mt-2 grid grid-cols-2 gap-3">
           <Field label="Status">
-            {/* Section 9 — a partially-completed execution (e.g.
-             * Salesforce succeeded, Slack failed) still has a real,
-             * "completed" WorkerOutput — the execution's own status
-             * (not the output's) is what actually distinguishes it
-             * from a fully clean run; never silently shown as plain
-             * "Completed" when it wasn't. */}
-            {execution && execution.status !== "completed" ? (
-              <span className={`font-mono text-[12px] ${EXECUTION_STATUS_META[execution.status].tone === "bad" ? "text-destructive" : EXECUTION_STATUS_META[execution.status].tone === "warn" ? "text-warn" : "text-foreground"}`}>
-                {EXECUTION_STATUS_META[execution.status].label}
-              </span>
-            ) : (
-              <span className={`font-mono text-[12px] ${output.status === "failed" ? "text-destructive" : "text-grow"}`}>{output.status === "failed" ? "Failed" : "Completed"}</span>
-            )}
+            <span className={`font-mono text-[12px] ${output.status === "failed" ? "text-destructive" : "text-grow"}`}>{output.status === "failed" ? "Failed" : "Completed"}</span>
           </Field>
           <Field label="Quality">
             <span className="font-mono text-[13px] tabular-nums text-foreground">{output.qualityScore ?? "—"}%</span>
@@ -322,117 +228,25 @@ function DetailView({
         </div>
       </div>
 
-      {outcome && (
-        <div>
-          <div className="mb-1.5 flex items-center gap-2">
-            <ResultLabel>Business impact</ResultLabel>
-            {isDev && <span className="rounded-full border border-warn/30 bg-warn/10 px-2 py-0.5 font-mono text-[8.5px] uppercase tracking-wider text-warn">Demo data</span>}
-          </div>
-          <div className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
-            <p className="text-[13px] font-medium leading-snug text-foreground">{outcome.headline}</p>
-
-            {outcome.evidence.length > 0 && (
-              <ul className="mt-2.5 flex flex-col gap-1">
-                {outcome.evidence.map((e, i) => (
-                  <li key={i} className="flex gap-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-                    <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground/50" />
-                    {e}
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {outcome.impact.map((m) => (
-                <div key={m.label} className={`rounded-md border px-2.5 py-2 ${m.real ? "border-border bg-secondary/30" : "border-dashed border-border/70"}`}>
-                  <p className="font-mono text-[8.5px] uppercase tracking-wider text-muted-foreground">{m.label}</p>
-                  {m.real ? (
-                    <p className="mt-0.5 font-mono text-[15px] font-semibold tabular-nums text-foreground">{m.value}</p>
-                  ) : (
-                    <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground/70">{m.connectHint}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {outcome.actionsPerformed.length > 0 && (
-              <div className="mt-3">
-                <p className="font-mono text-[9.5px] uppercase tracking-wider text-muted-foreground">Actions performed</p>
-                <ul className="mt-1 flex flex-col gap-1">
-                  {outcome.actionsPerformed.map((a, i) => (
-                    <li key={i} className="flex items-center gap-1.5 text-[11.5px] text-foreground">
-                      <Check className="h-3 w-3 shrink-0 text-grow" />
-                      {a}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <div className="mt-3 flex items-start gap-1.5 rounded-md bg-primary/5 px-2.5 py-2">
-              <ArrowUpRight className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
-              <p className="text-[11px] leading-relaxed text-foreground">{outcome.nextRecommendedAction}</p>
-            </div>
-
-            {outcome.confidence != null && <p className="mt-2 font-mono text-[9.5px] text-muted-foreground">Confidence — real, structural score: {outcome.confidence}%</p>}
-          </div>
-        </div>
-      )}
-
-      {/* Evidence & provenance — the real, persisted chain this exact
-       * output produced (never the ephemeral display-only outcome
-       * above): section 5/6/15. Technical ids live here, in the
-       * detail view, never in the plain-language sections above. */}
       <div>
-        <div className="mb-1.5 flex items-center gap-2">
-          <ResultLabel>Evidence &amp; provenance</ResultLabel>
-          <ProvenanceBadge state={provenance} />
-        </div>
-
-        <div id="prov-graph" className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
-          <ProvenanceGraph
-            nodes={[
-              { key: "execution", label: "Worker execution", id: execution?.id, anchorId: "prov-execution" },
-              { key: "output", label: "Worker output", id: output.id, anchorId: "prov-output" },
-              { key: "event", label: "Business event", id: businessEvent?.id, anchorId: businessEvent ? "prov-event" : undefined },
-              { key: "metric", label: "Business metric", id: businessMetrics[0]?.id, anchorId: businessMetrics[0] ? "prov-event" : undefined },
-            ]}
-          />
-
-          {businessEvent ? (
-            <div id="prov-event" className="mt-3 border-t border-border pt-3">
-              <p className="text-[12.5px] font-medium text-foreground">{businessEventLabel(businessEvent.type, businessEvent.numericValue)}</p>
-              <dl className="mt-2 flex flex-col gap-1">
-                <EvidenceRow k="Business event type" v={businessEvent.type} />
-                {businessMetrics.map((m) => (
-                  <EvidenceRow key={m.id} k="Metric" v={`${m.key} = ${m.value}${m.unit ?? ""}`} />
-                ))}
-                <EvidenceRow k="Source" v={sourceLabel(businessEvent.source, isDev)} />
-                {businessEvent.confidence != null && <EvidenceRow k="Confidence" v={`${businessEvent.confidence}%`} />}
-                <EvidenceRow k="Recorded" v={new Date(businessEvent.occurredAt).toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" })} />
-              </dl>
-
-              {Array.isArray((businessEvent.payload as { accounts?: unknown[] })?.accounts) && (
-                <EvidenceList items={(businessEvent.payload as { accounts: { company: string; score: number; evidence: string }[] }).accounts} render={(a) => `${a.company} — score ${a.score}: ${a.evidence}`} />
-              )}
-              {Array.isArray((businessEvent.payload as { trends?: unknown[] })?.trends) && (
-                <EvidenceList items={(businessEvent.payload as { trends: { name: string; why_it_matters: string }[] }).trends} render={(t) => `${t.name} — ${t.why_it_matters}`} />
-              )}
-              {Array.isArray((businessEvent.payload as { opportunities?: unknown[] })?.opportunities) && (
-                <EvidenceList items={(businessEvent.payload as { opportunities: { topic: string; title: string }[] }).opportunities} render={(o) => `${o.topic} — "${o.title}"`} />
-              )}
-            </div>
-          ) : (
-            <p className="mt-3 border-t border-border pt-3 text-[11.5px] text-muted-foreground/70">
-              This output type doesn&apos;t have a mapped Business Event yet — no business result was recorded for it.
-            </p>
-          )}
-        </div>
-      </div>
-
-      <div id="prov-output">
         <ResultLabel>Result</ResultLabel>
         <p className="whitespace-pre-line rounded-lg border border-border bg-card px-3.5 py-3 text-[13px] leading-relaxed text-foreground shadow-sm">{output.content}</p>
+      </div>
+
+      <div>
+        <SectionLabel>Business metrics recorded</SectionLabel>
+        {recordedMetrics.length > 0 ? <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">{recordedMetrics.map((metric) => <MetaRow key={metric.id} k={metric.key.replaceAll("_", " ")} v={formatBusinessValue(metric.value, metric.unit ?? "")} />)}</dl> : <p className="rounded-lg border border-dashed border-border px-3 py-3 text-[11.5px] text-muted-foreground">No business-impact metric was recorded for this output. Operational activity is not being presented as business impact.</p>}
+      </div>
+
+      <div>
+        <SectionLabel>Decision trace</SectionLabel>
+        <ol className="flex flex-col gap-2 rounded-lg border border-border bg-secondary/20 p-3 text-[11.5px] text-foreground">
+          <li><span className="text-muted-foreground">Input / Task · </span>{task?.title ?? "No task title recorded"}</li>
+          <li><span className="text-muted-foreground">Skill · </span>{template?.name ?? task?.skillId ?? "Not recorded"}</li>
+          <li><span className="text-muted-foreground">Evidence · </span>{output.sources?.length ? `${output.sources.length} source${output.sources.length === 1 ? "" : "s"}` : "No external sources recorded"}</li>
+          <li><span className="text-muted-foreground">Recorded output · </span>{output.title}</li>
+          <li><span className="text-muted-foreground">Business result · </span>{recordedMetrics.length ? `${recordedMetrics.length} metric${recordedMetrics.length === 1 ? "" : "s"} recorded` : "Not connected"}</li>
+        </ol>
       </div>
 
       {output.evaluation && (
@@ -473,12 +287,10 @@ function DetailView({
 
       {stages.length > 0 && (
         <div>
-          <SectionLabel>{execution?.pipelineState ? "Execution graph" : "Execution timeline"}</SectionLabel>
+          <SectionLabel>Execution timeline</SectionLabel>
           <ExecutionTimeline stages={stages} />
         </div>
       )}
-
-      {execution && <RetryStepAction execution={execution} stages={stages} />}
 
       {task && (
         <div>
@@ -487,10 +299,9 @@ function DetailView({
         </div>
       )}
 
-      <div id="prov-execution">
-        <SectionLabel>Execution metadata</SectionLabel>
-        <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">
-          {execution && <MetaRow k="Execution" v={execution.id} />}
+      <details className="group rounded-lg border border-border bg-secondary/20">
+        <summary className="cursor-pointer list-none px-3 py-3 font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">Technical execution details</summary>
+        <dl className="flex flex-col divide-y divide-border border-t border-border">
           {isDev && <MetaRow k="Mode" v="Development simulation — no external LLM was called" />}
           <MetaRow k="Timestamp" v={new Date(output.createdAt).toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" })} />
           <MetaRow k="Duration" v={execution?.durationMs ? `${Math.round(execution.durationMs / 1000)}s` : "—"} />
@@ -499,7 +310,7 @@ function DetailView({
           <MetaRow k="Cost" v={isDev ? "$0.0000 (development)" : execution?.costUsd != null ? `$${execution.costUsd.toFixed(4)}` : "—"} />
           <MetaRow k="Tools used" v={toolNames || "—"} />
         </dl>
-      </div>
+      </details>
     </div>
   )
 }
@@ -539,35 +350,6 @@ function MetaRow({ k, v }: { k: string; v: string }) {
     <div className="flex items-center justify-between gap-3 px-3 py-2">
       <dt className="shrink-0 text-[11.5px] text-muted-foreground">{k}</dt>
       <dd className="truncate text-right text-[11.5px] text-foreground">{v}</dd>
-    </div>
-  )
-}
-
-function EvidenceRow({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 text-[11px]">
-      <dt className="shrink-0 text-muted-foreground">{k}</dt>
-      <dd className="truncate text-right font-mono text-foreground">{v}</dd>
-    </div>
-  )
-}
-
-/** Real evidence already stored in the BusinessEvent's payload — never
- * hidden chain-of-thought, only the observable evidence a skill's
- * structured output actually produced (section 5). */
-function EvidenceList<T>({ items, render }: { items: T[]; render: (item: T) => string }) {
-  if (items.length === 0) return null
-  return (
-    <div className="mt-3 border-t border-border pt-2.5">
-      <p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Evidence</p>
-      <ul className="mt-1.5 flex flex-col gap-1">
-        {items.map((item, i) => (
-          <li key={i} className="flex gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
-            <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground/50" />
-            {render(item)}
-          </li>
-        ))}
-      </ul>
     </div>
   )
 }

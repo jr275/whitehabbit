@@ -13,27 +13,26 @@
  * ------------------------------------------------------------------ */
 
 import { Check, Loader2, Plus, Rocket, Trash2, X } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { BEHAVIOR_PRESETS, CHANNEL_CATALOG, KNOWLEDGE_TEMPLATES, SKILL_CATALOG, TONE_PRESETS, TOOL_CATALOG } from "@/lib/workforce/catalog"
 import type { Autonomy, ChannelId, SkillCategory, Worker } from "@/lib/workforce/model"
 import { OUTCOME_PRESETS, SKILL_CATEGORIES, SKILL_CATEGORY_LABEL, TOOL_BOUNDARY_META, toolExecutionBoundary } from "@/lib/workforce/model"
 import { computeReadiness } from "@/lib/workforce/selectors"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
-import { toolPermissionLabel, toolPermissionTone } from "@/lib/ui/permission-label"
 
-export type StepKey = "identity" | "mission" | "knowledge" | "skills" | "tools" | "integrations" | "behavior" | "channels" | "test" | "release"
+export type StepKey = "identity" | "mission" | "skills" | "knowledge" | "tools" | "memory" | "behavior" | "channels" | "output" | "evolution"
 
 const STEPS: { key: StepKey; number: string; label: string }[] = [
   { key: "identity", number: "01", label: "Identity" },
   { key: "mission", number: "02", label: "Mission" },
-  { key: "knowledge", number: "03", label: "Knowledge" },
-  { key: "skills", number: "04", label: "Skills" },
+  { key: "skills", number: "03", label: "Skills" },
+  { key: "knowledge", number: "04", label: "Knowledge" },
   { key: "tools", number: "05", label: "Tools" },
-  { key: "integrations", number: "06", label: "Integrations" },
-  { key: "behavior", number: "07", label: "Behavior" },
-  { key: "channels", number: "08", label: "Channels" },
-  { key: "test", number: "09", label: "Test" },
-  { key: "release", number: "10", label: "Release" },
+  { key: "memory", number: "06", label: "Memory" },
+  { key: "behavior", number: "07", label: "Autonomy" },
+  { key: "channels", number: "08", label: "Access" },
+  { key: "output", number: "09", label: "Performance" },
+  { key: "evolution", number: "10", label: "Evolution" },
 ]
 
 function stepSummary(worker: Worker, key: StepKey): string {
@@ -48,16 +47,16 @@ function stepSummary(worker: Worker, key: StepKey): string {
       return `${worker.skills.filter((s) => s.enabled).length} configured`
     case "tools":
       return `${worker.tools.filter((t) => t.connected).length} available`
-    case "integrations":
-      return `${worker.integrations.length} connected`
+    case "memory":
+      return "Learns from recorded outcomes"
     case "behavior":
       return `${worker.behaviors.length} rule${worker.behaviors.length === 1 ? "" : "s"}`
     case "channels":
-      return `${worker.channels.filter((c) => c.connected).length} connected`
-    case "test":
-      return worker.tested ? "Passed" : "Not tested"
-    case "release":
-      return worker.releasedVersionId ? "Live" : "Not released"
+      return `${worker.channels.filter((c) => c.connected).length} channels · ${worker.autonomy}`
+    case "output":
+      return worker.releasedVersionId ? "Verified · Live" : worker.tested ? "Verified · Ready to release" : "Needs verification"
+    case "evolution":
+      return worker.releasedVersionId ? "Learning from released work" : "Begins after first release"
   }
 }
 
@@ -145,17 +144,37 @@ function StepEditor({ step, worker, onAdvance }: { step: StepKey; worker: Worker
       return <SkillsStep worker={worker} onAdvance={onAdvance} />
     case "tools":
       return <ToolsStep worker={worker} onAdvance={onAdvance} />
-    case "integrations":
-      return <IntegrationsStep worker={worker} onAdvance={onAdvance} />
+    case "memory":
+      return <MemoryStep worker={worker} onAdvance={onAdvance} />
     case "behavior":
       return <BehaviorStep worker={worker} onAdvance={onAdvance} />
     case "channels":
       return <ChannelsStep worker={worker} onAdvance={onAdvance} />
-    case "test":
-      return <TestStep worker={worker} onAdvance={onAdvance} />
-    case "release":
-      return <ReleaseStep worker={worker} />
+    case "output":
+      return (
+        <div className="flex flex-col gap-6">
+          <TestStep worker={worker} onAdvance={onAdvance} />
+          <div className="border-t border-border pt-5">
+            <ReleaseStep worker={worker} />
+          </div>
+        </div>
+      )
+    case "evolution":
+      return <EvolutionStep worker={worker} />
   }
+}
+
+function MemoryStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => void }) {
+  const state = useWorkforce()
+  const memories = state.events.filter((event) => event.workerId === worker.id && ["output_created", "metric_recorded", "reasoning_completed", "task_completed"].includes(event.type)).sort((a, b) => b.timestamp - a.timestamp).slice(0, 4)
+  return <div className="flex flex-col gap-3"><p className="text-[11.5px] leading-relaxed text-muted-foreground">Memory is formed from real executions, evaluated outcomes, and recorded performance. It is read-only until memory mutation contracts are available.</p>{memories.length ? <div className="flex flex-col gap-2">{memories.map((event) => <div key={event.id} className="rounded-lg border border-border bg-card p-2.5"><p className="text-[11.5px] font-medium text-foreground">{event.type.replaceAll("_", " ")}</p><p className="mt-1 font-mono text-[8px] text-muted-foreground">{new Date(event.timestamp).toLocaleString()} · execution {event.executionId?.slice(0, 8) ?? "ledger"}</p></div>)}</div> : <p className="rounded-lg border border-dashed border-border p-3 text-[11px] leading-relaxed text-muted-foreground">No learned signals yet. Run this Worker and evaluate its outcomes to begin forming memory.</p>}<Continue onClick={onAdvance}/></div>
+}
+
+function EvolutionStep({ worker }: { worker: Worker }) {
+  const state = useWorkforce()
+  const runs = state.executions.filter((execution) => execution.workerId === worker.id)
+  const completed = runs.filter((execution) => execution.status === "completed").length
+  return <div className="flex flex-col gap-3"><p className="text-[11.5px] leading-relaxed text-muted-foreground">Evolution is grounded in released configuration and observed performance. Menlo Whitehabbit will never claim improvement without recorded evidence.</p>{worker.releasedVersionId ? <div className="rounded-lg border border-border bg-card p-3"><div className="flex items-center justify-between"><span className="font-mono text-[9px] uppercase text-primary">Released version</span><span className="font-mono text-[8px] uppercase text-grow">Live</span></div><p className="mt-2 text-[11px] text-muted-foreground">{worker.skills.filter((skill) => skill.enabled).length} skills · {worker.knowledge.length} knowledge sources · {worker.autonomy} autonomy</p><p className="mt-2 font-mono text-[8px] text-muted-foreground">{worker.releasedVersionId.slice(0, 12)}</p></div> : <p className="rounded-lg border border-dashed border-border p-3 text-[11px] text-muted-foreground">Build the first Worker version to establish an evolution baseline.</p>}<p className="font-mono text-[8px] uppercase tracking-[0.14em] text-muted-foreground">{runs.length} persisted execution{runs.length === 1 ? "" : "s"} · {completed} completed</p></div>
 }
 
 function Continue({ onClick, label = "Continue" }: { onClick: () => void; label?: string }) {
@@ -490,7 +509,6 @@ function ToolsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => voi
               <span className={`flex-1 text-left text-[12.5px] font-medium ${tool.enabled ? "text-foreground" : "text-muted-foreground"}`}>
                 {tool.name}
               </span>
-              <PermissionTag permission={tool.permission} />
               <RiskTag risk={tool.risk} />
             </button>
             <div className="mt-1.5 flex items-start justify-between gap-2 pl-[1.625rem]">
@@ -499,142 +517,6 @@ function ToolsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => voi
               </p>
               <BoundaryTag boundary={toolExecutionBoundary(tool)} />
             </div>
-            {/* the one tool every worker actually needs — never a
-             * confusing technical barrier, just the real fact and why
-             * it matters. Never a fake "connect" flow: the real fix is
-             * a real environment variable, so this links to nothing
-             * that isn't real. */}
-            {tool.id === "tool_llm" && !tool.connected && (
-              <p className="mt-1.5 pl-[1.625rem] text-[10.5px] italic text-muted-foreground">Required to run this worker — every skill needs a real AI model connected.</p>
-            )}
-          </div>
-        )
-      })}
-      <Continue onClick={onAdvance} />
-    </div>
-  )
-}
-
-/* ---- 06 Integrations — the real Agent Studio Integration Picker
- * (section "PHASE 4"). Add a real, connected Connector; select which
- * of its real actions this Worker may use, and each one's real
- * permission decision — enforced server-side in lib/agent/tool-
- * runner.ts's runToolAction(), not just this UI. Persists straight to
- * worker.integrations via the same PATCH path every other step uses. ---- */
-interface StudioConnectorAction {
-  id: string
-  label: string
-  permission: string
-  riskLevel: string
-}
-interface StudioConnector {
-  id: string
-  name: string
-  actions: StudioConnectorAction[]
-}
-interface StudioConnection {
-  id: string
-  connectorId: string
-  status: string
-  displayName?: string
-}
-
-function IntegrationsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => void }) {
-  const [connectors, setConnectors] = useState<StudioConnector[] | null>(null)
-  const [connections, setConnections] = useState<StudioConnection[]>([])
-
-  useEffect(() => {
-    Promise.all([
-      fetch("/api/connectors", { headers: { "content-type": "application/json" } }).then((r) => r.json()),
-      fetch("/api/connections", { headers: { "content-type": "application/json" } }).then((r) => r.json()),
-    ]).then(([c, conns]) => {
-      setConnectors(c.connectors ?? [])
-      setConnections(conns.connections ?? [])
-    })
-  }, [])
-
-  const connectedConnections = connections.filter((c) => c.status === "connected")
-
-  function toggleConnector(connector: StudioConnector, connectionId: string) {
-    const exists = worker.integrations.find((cfg) => cfg.connectorId === connector.id)
-    if (exists) {
-      workforceStore.setWorkerIntegrations(
-        worker.id,
-        worker.integrations.filter((cfg) => cfg.connectorId !== connector.id),
-      )
-    } else {
-      workforceStore.setWorkerIntegrations(worker.id, [
-        ...worker.integrations,
-        { connectorId: connector.id, connectionId, actions: connector.actions.map((a) => ({ actionId: a.id, enabled: false, permission: "requires_approval" as const })) },
-      ])
-    }
-  }
-
-  function toggleAction(connectorId: string, actionId: string) {
-    workforceStore.setWorkerIntegrations(
-      worker.id,
-      worker.integrations.map((cfg) => (cfg.connectorId !== connectorId ? cfg : { ...cfg, actions: cfg.actions.map((a) => (a.actionId === actionId ? { ...a, enabled: !a.enabled } : a)) })),
-    )
-  }
-
-  function setPermission(connectorId: string, actionId: string, permission: "allow" | "deny" | "requires_approval") {
-    workforceStore.setWorkerIntegrations(
-      worker.id,
-      worker.integrations.map((cfg) => (cfg.connectorId !== connectorId ? cfg : { ...cfg, actions: cfg.actions.map((a) => (a.actionId === actionId ? { ...a, permission } : a)) })),
-    )
-  }
-
-  if (!connectors) return <p className="text-[12.5px] text-muted-foreground">Loading…</p>
-
-  return (
-    <div className="flex flex-col gap-2">
-      {connectedConnections.length === 0 && (
-        <p className="text-[12.5px] text-muted-foreground">
-          No connected integrations yet.{" "}
-          <a href="/integrations" target="_blank" rel="noreferrer" className="text-primary underline">
-            Connect one in the Connector Hub
-          </a>
-          , then come back here.
-        </p>
-      )}
-      {connectedConnections.map((conn) => {
-        const connector = connectors.find((c) => c.id === conn.connectorId)
-        if (!connector || connector.actions.length === 0) return null
-        const cfg = worker.integrations.find((x) => x.connectorId === connector.id)
-        const added = !!cfg
-        return (
-          <div key={connector.id} className="rounded-lg border border-border bg-card px-2.5 py-2">
-            <button onClick={() => toggleConnector(connector, conn.id)} className="flex w-full items-center gap-2">
-              <Switch on={added} />
-              <span className={`flex-1 text-left text-[12.5px] font-medium ${added ? "text-foreground" : "text-muted-foreground"}`}>{connector.name}</span>
-              <span className="font-mono text-[9.5px] uppercase tracking-wider text-muted-foreground">{conn.displayName || conn.status}</span>
-            </button>
-            {added && cfg && (
-              <div className="mt-2 flex flex-col gap-1.5 pl-[1.625rem]">
-                {connector.actions.map((action) => {
-                  const actionCfg = cfg.actions.find((a) => a.actionId === action.id) ?? { actionId: action.id, enabled: false, permission: "requires_approval" as const }
-                  return (
-                    <div key={action.id} className="flex items-center gap-2">
-                      <button onClick={() => toggleAction(connector.id, action.id)} className="flex flex-1 items-center gap-1.5 text-left">
-                        <Switch on={actionCfg.enabled} />
-                        <span className={`truncate text-[11.5px] ${actionCfg.enabled ? "text-foreground" : "text-muted-foreground"}`}>{action.label}</span>
-                        <PermissionTag permission={action.permission as "read" | "write" | "publish" | "delete" | "financial" | "external_communication"} />
-                      </button>
-                      <select
-                        value={actionCfg.permission}
-                        onChange={(e) => setPermission(connector.id, action.id, e.target.value as "allow" | "deny" | "requires_approval")}
-                        disabled={!actionCfg.enabled}
-                        className="modal-input w-auto py-0.5 font-mono text-[10px] uppercase tracking-wider disabled:opacity-40"
-                      >
-                        <option value="allow">Allow</option>
-                        <option value="requires_approval">Requires approval</option>
-                        <option value="deny">Deny</option>
-                      </select>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
           </div>
         )
       })}
@@ -659,16 +541,6 @@ function BoundaryTag({ boundary }: { boundary: ReturnType<typeof toolExecutionBo
 function RiskTag({ risk }: { risk: "low" | "medium" | "high" | "critical" }) {
   const cls = risk === "critical" || risk === "high" ? "text-destructive bg-destructive/10" : risk === "medium" ? "text-warn bg-warn/10" : "text-grow bg-grow/10"
   return <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider ${cls}`}>{risk}</span>
-}
-
-/* Read-only / Write / Destructive — the same lib/ui/permission-label.ts
- * mapping Agent Detail's Tools tab and Connector Detail's actions
- * table use, so this label is identical everywhere a Tool/Action's
- * permission is shown. */
-function PermissionTag({ permission }: { permission: "read" | "write" | "publish" | "delete" | "financial" | "external_communication" }) {
-  const tone = toolPermissionTone(permission)
-  const cls = tone === "bad" ? "text-destructive bg-destructive/10" : tone === "warn" ? "text-warn bg-warn/10" : "text-grow bg-grow/10"
-  return <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider ${cls}`}>{toolPermissionLabel(permission)}</span>
 }
 
 /* ---- 06 Behavior ---- */

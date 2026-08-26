@@ -166,42 +166,9 @@
   }
 }
 
-/* ------------------------------------------------------------------ *
- * OPERATIONAL SURFACE — a scoped LIGHT theme for /studio, /outputs and
- * the operational shell. The immersive dark Fabric keeps the :root dark
- * tokens; anything inside .studio-surface flips to a precise, light,
- * information-dense studio palette. Brand blue + grow/warn/destructive
- * are preserved for continuity across both worlds.
- * ------------------------------------------------------------------ */
+/* Operational routes share the same quiet dark system as the rest of the product. */
 .studio-surface {
-  color-scheme: light;
-  --background: oklch(0.985 0.002 264);
-  --foreground: oklch(0.22 0.02 264);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.22 0.02 264);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.22 0.02 264);
-  --primary: oklch(0.52 0.235 264);
-  --primary-foreground: oklch(0.99 0.005 260);
-  --secondary: oklch(0.965 0.004 264);
-  --secondary-foreground: oklch(0.3 0.02 264);
-  --muted: oklch(0.965 0.004 264);
-  --muted-foreground: oklch(0.52 0.02 262);
-  --accent: oklch(0.95 0.02 264);
-  --accent-foreground: oklch(0.3 0.03 264);
-  --destructive: oklch(0.58 0.2 25);
-  --border: oklch(0.22 0.02 264 / 12%);
-  --input: oklch(0.22 0.02 264 / 16%);
-  --ring: oklch(0.52 0.235 264);
-  --alive: oklch(0.52 0.235 264);
-  --alive-foreground: oklch(0.99 0.005 260);
-  --grow: oklch(0.52 0.13 150);
-  --warn: oklch(0.62 0.15 65);
-  --chart-1: oklch(0.52 0.235 264);
-  --chart-2: oklch(0.52 0.13 150);
-  --chart-3: oklch(0.55 0.14 220);
-  --chart-4: oklch(0.62 0.15 65);
-  --chart-5: oklch(0.5 0.1 300);
+  color-scheme: dark;
 }
 
 @layer base {
@@ -221,11 +188,11 @@
       linear-gradient(to bottom, oklch(1 0 0 / 3%) 1px, transparent 1px);
     background-size: 44px 44px;
   }
-  /* light hairline grid for the operational surfaces */
+  /* Hairline grid for dense operational surfaces. */
   .bg-grid-light {
     background-image:
-      linear-gradient(to right, oklch(0.22 0.02 264 / 4%) 1px, transparent 1px),
-      linear-gradient(to bottom, oklch(0.22 0.02 264 / 4%) 1px, transparent 1px);
+      linear-gradient(to right, oklch(1 0 0 / 2.5%) 1px, transparent 1px),
+      linear-gradient(to bottom, oklch(1 0 0 / 2.5%) 1px, transparent 1px);
     background-size: 40px 40px;
   }
   /* thin light scrollbars for dense operational lists */
@@ -265,6 +232,39 @@
   .modal-input:focus-visible {
     border-color: var(--ring);
     box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 18%, transparent);
+  }
+  .studio-icon-button {
+    display: inline-flex;
+    width: 2.25rem;
+    height: 2.25rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: calc(var(--radius) - 2px);
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--muted-foreground);
+    transition: color 150ms ease, background-color 150ms ease;
+  }
+  .studio-icon-button:hover {
+    background: var(--secondary);
+    color: var(--foreground);
+  }
+  .studio-icon-button:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  .studio-icon-button > svg {
+    width: 1rem;
+    height: 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

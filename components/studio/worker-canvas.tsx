@@ -27,6 +27,7 @@ import type { StepKey } from "@/components/studio/build-panel"
 import { ExecutionTimeline } from "@/components/outputs/output-drawer"
 import { WorkerAvatar } from "@/components/workforce/worker-avatar"
 import { getProduct } from "@/lib/products/catalog"
+import { profileForWorker } from "@/lib/workforce/business-results"
 import { SKILL_CATALOG } from "@/lib/workforce/catalog"
 import { toolExecutionBoundary, TOOL_BOUNDARY_META, type Worker, type WorkerEvent, type WorkerExecution, type WorkerOutput, type WorkerTask } from "@/lib/workforce/model"
 import {
@@ -98,6 +99,7 @@ export function WorkerCanvas({
 }) {
   const { lastSaved } = useWorkforce()
   const product = worker.productId ? getProduct(worker.productId) : undefined
+  const profile = profileForWorker(worker)
   const readiness = computeReadiness(worker)
   const released = worker.status !== "draft"
   // a real blocker is shown as context, not a reason to prevent the
@@ -204,6 +206,14 @@ export function WorkerCanvas({
             onClick={() => onNavigateToStep("behavior")}
           />
         </div>
+
+        <section className="mx-auto mt-4 max-w-2xl overflow-hidden rounded-xl border border-border bg-card">
+          <div className="flex items-center gap-4 p-4">
+            <img src={profile.image} alt={`${profile.label} Super Agent`} className="size-20 rounded-xl object-cover" />
+            <div className="min-w-0 flex-1"><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">{profile.label} Super Agent</p><h2 className="mt-1 text-sm font-semibold text-foreground">Business objective</h2><p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">{worker.mission || profile.objective}</p></div>
+          </div>
+          <div className="grid border-t border-border sm:grid-cols-2">{profile.metrics.map((metric) => <div key={metric.key} className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0"><div><p className="text-[11.5px] font-medium text-foreground">{metric.label}</p><p className="mt-0.5 text-[10px] text-muted-foreground">{metric.activation}</p></div><span className="shrink-0 rounded-md border border-border bg-secondary px-2 py-1 font-mono text-[8px] tracking-wider text-muted-foreground">NOT CONNECTED</span></div>)}</div>
+        </section>
 
         {/* readiness — kept prominent (percent, bar, per-step checklist,
          * all real) but as a slim strip rather than the visual center. */}

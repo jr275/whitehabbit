@@ -46,7 +46,7 @@ export function SignalsPanel({
               </div>
               <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">{o.rationale}</p>
             </div>
-            <ProvenanceBadge state={isDemo ? "demo" : "real"} className="shrink-0" />
+            <ProvenanceBadge provenance={isDemo ? "demo" : "real"} className="shrink-0" />
           </div>
 
           <div className="mt-3 grid grid-cols-4 gap-2">

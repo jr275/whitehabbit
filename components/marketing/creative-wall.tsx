@@ -23,7 +23,7 @@ export function CreativeWall({ concepts, isDemo, onOpen }: { concepts: CreativeC
         <button key={c.id} onClick={() => onOpen(c)} className="flex flex-col rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/5">
           <div className="flex items-start justify-between gap-2">
             <span className="font-mono text-[10px] text-muted-foreground">{String(i + 1).padStart(2, "0")}</span>
-            <ProvenanceBadge state={isDemo ? "demo" : "real"} />
+            <ProvenanceBadge provenance={isDemo ? "demo" : "real"} />
           </div>
           <p className="mt-1 text-pretty text-[14px] font-semibold leading-snug text-foreground">{c.title}</p>
           <span className="mt-1 w-fit rounded-full bg-secondary px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-muted-foreground">{c.emotionalIntent}</span>

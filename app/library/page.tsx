@@ -45,7 +45,7 @@ export default function LibraryPage() {
               Worker Library
             </p>
             <h1 className="mt-3 text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-foreground sm:text-5xl">
-              Expert AI workers, pre-built by WhiteHabbit.
+              Expert AI workers, pre-built by Menlo Whitehabbit.
             </h1>
             <p className="mt-4 text-pretty text-base leading-relaxed text-muted-foreground">
               Why build an AI worker from zero? Each professional build already contains identity,

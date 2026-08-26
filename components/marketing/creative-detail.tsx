@@ -46,7 +46,7 @@ export function CreativeDetail({
             <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{worker.identity.name}</p>
             <h2 className="truncate text-[15px] font-semibold text-foreground">{concept.title}</h2>
           </div>
-          <ProvenanceBadge state={isDemo ? "demo" : "real"} />
+          <ProvenanceBadge provenance={isDemo ? "demo" : "real"} />
           <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground">
             <X className="h-4 w-4" />
           </button>
