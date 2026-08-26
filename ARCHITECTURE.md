@@ -57,6 +57,10 @@ pgvector yet. Structure:
 | Domains | **new in Revision 3** — `domains`/`domain_verifications` tables; `lib/domains/*` — real DNS TXT/CNAME verification, server-side host→tenant resolution (`proxy.ts`) | Domain/subdomain management (§15–17, ADR-018) |
 | Route templates | **new in Revision 3** — `route_templates` table; `lib/route-templates/*` — vertical-agnostic classification matcher | RouteTemplate registry (§19, classification-only — see risks.md R-24) |
 | Real-time events | **new in Revision 3** — Postgres `LISTEN`/`NOTIFY` triggers (`migrations/0005_workflow_notify.sql`); `GET /api/v1/workflows/:id/events` | Real-time execution events (§27) |
+| Step-level execution | **new in Revision 4** — `lib/workflow/step-worker.ts`, `lib/*/steps.ts` — one durable job per workflow step, real lease-based crash recovery | Step-level durable jobs (ADR-023) |
+| Intelligence domain | **new in Revision 5** — `lib/intelligence/*` — Signal/Evidence/Insight/Trend/Query/Role/Market/Recommendation, real Deep Research + Opportunity Graph/Explanation | Intelligence Layer domain model (ADR-024) |
+| Search Console | **new in Revision 5** — `lib/intelligence/search-console/*` — real schema, manual import + gated live OAuth, deterministic anomaly detection | Search Console integration (ADR-025) |
+| AI Visibility | **new in Revision 5** — `lib/intelligence/ai-visibility/*` — real LLM-provider prompts, citation graph | AI Visibility (ADR-028) |
 
 What does **not** exist yet, honestly: Temporal (or an equivalent managed
 durable-execution product) — `lib/workflow/*` provides a real,
@@ -96,11 +100,13 @@ triggers, not calendar dates — see `docs/architecture/roadmap.md`.
 
 ## 3. Document map
 
-- `docs/adr/ADR-000-evolve-in-place.md` … `ADR-022-*.md` — one architectural
+- `docs/adr/ADR-000-evolve-in-place.md` … `ADR-030-*.md` — one architectural
   decision each, per the brief's mandated list (§74), plus ADR-000 for the
   monorepo-timing decision above. ADR-017 through ADR-022 (Revision 3) cover
-  the durable workflow platform; ADR-003 and ADR-010 are marked superseded
-  by them rather than deleted.
+  the durable workflow platform; ADR-023 (Revision 4) covers step-level
+  async execution; ADR-024 through ADR-030 (Revision 5) cover the
+  Intelligence Layer foundation. ADR-003 and ADR-010 are marked superseded
+  rather than deleted.
 - `docs/architecture/domain-model.md` — the full entity model: what's
   implemented today, its column-level shape, and the target model it's a
   step toward.
@@ -178,6 +184,37 @@ and ADR-010 are marked superseded rather than deleted, so the earlier
 introduced — Temporal was deliberately not adopted (ADR-017); the
 durability guarantees come from Postgres, the platform's existing sole
 datastore.
+
+**Revision 5 (Phase 5B, ADR-024)** begins the product's transition from
+"AI-powered programmatic SEO platform" toward "Autonomous Knowledge +
+Search Intelligence Operating System" — a first-class Intelligence
+domain model (`lib/intelligence/*`) implementing the brief's
+OBSERVE→UNDERSTAND→DISCOVER→SCORE→DECIDE loop: Signal (raw, confidence-
+scored observations), a generic Evidence table alongside Revision 2's
+entity-specific one (ADR-029), Insight, Trend (ADR-026, real velocity/
+momentum math with a real minimum-volume floor), Query/Intent (a real
+rule-based classifier, never claiming to be ML), Role, Market/Metric
+(generic — no hard-coded vertical), external Data Connectors with real
+freshness-policy staleness detection, the Opportunity Graph + a real,
+deterministic Explanation (§25-26 — never an LLM justifying a decision
+after the fact), a Deep Research Agent (gap-focused, never writes
+content), Information Gain V2 + Gate (ADR-027, additive — v1 remains
+the fast discovery-time default), and a Recommendation Engine (ADR-030).
+Real Search Console (ADR-025: a manual-import path plus a real, if
+unexercised-in-this-sandbox, OAuth client) and AI Visibility (ADR-028:
+real prompts to a real configured LLM provider via the existing
+`callLlm()` abstraction — never a fabricated answer) integrations feed
+real signals into this model. A new `trend_analysis` `WorkflowPipeline`
+runs synchronously (a fast deterministic scan, never enqueued through
+the Phase 5A step-job queue). Seven new ADRs (**ADR-024 through
+ADR-030**) record these decisions. Deliberately not built this
+revision: a dedicated UI for any of this (API-first — see
+`docs/architecture/risks.md` R-33), and wiring the richer v2 Information
+Gain gate into the actual page-generation blocking path (still v1
+there). No fabricated data anywhere in this model — every table starts
+genuinely empty for a tenant with no real signal source configured yet,
+proven by `tests/integration/intelligence-layer.test.ts`'s 24 tests
+against real Postgres.
 
 **Revision 4 (Phase 5A, ADR-023)** removes the one durability gap
 Revision 3 explicitly left open: a single orchestrator call still ran an

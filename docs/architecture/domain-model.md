@@ -65,11 +65,24 @@ them (ADR-005, ADR-006, ADR-015) — only `source_grounding_score`,
 `outline_completeness_score`, and `confidence_score` are populated by this
 revision's ingestion path; the rest are reserved columns, not placeholders.
 
+## Implemented since this section was first written (kept here so the
+history stays legible — see each ADR for the real decision)
+
+Page / PageVersion / ContentBlock (§26–28, ADR-016), RouteTemplate (§27,
+classification-only — ADR-016 amendment, `route_templates`), TenantDomain
+(§57, ADR-018, `domains`/`domain_verifications` — supersedes ADR-010's
+original deferral), Trend/TrendSignal (§31, ADR-026, `trends`), Search
+Console warehouse (§32, ADR-025, `search_console_*`), AI Visibility (§33,
+ADR-028, `ai_prompts`/`ai_runs`/`ai_answers`/`ai_citations`), DataSource/
+Dataset (§20, ADR-024, `data_sources`/`datasets`/`dataset_versions`/
+`data_observations`), Role/Market as dedicated first-class tables (§14–15,
+ADR-024, `roles`/`markets`/`metric_definitions`/`metric_observations`).
+
 ## Not yet modeled at all
 
-Page / PageVersion / ContentBlock (§26–28), RouteTemplate (§27), Trend/
-TrendSignal (§31), Search Console warehouse (§32), AI Visibility (§33),
-DataSource/Dataset (§20), CommunitySignal (§21), Role/Market as dedicated
-first-class tables beyond generic `entities` rows (§14–15), Hub/Spoke/
-Cluster (§37), Webhook delivery (§41), domain-events/outbox (§43–44, see
-ADR-004), TenantDomain (§57, see ADR-010).
+CommunitySignal (§21 — no real community-source integration exists),
+Hub/Spoke/Cluster (§37), Webhook delivery (§41), domain-events/outbox
+(§43–44, see ADR-004), MetricSeries as a stored table (§19 — it is a real
+query over `metric_observations`, not a separate table; see ADR-024),
+a unified Evidence view spanning `entity_evidence` and the newer generic
+`evidence` table (see ADR-029, risks.md R-32).

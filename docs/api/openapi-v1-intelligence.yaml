@@ -1,0 +1,345 @@
+openapi: 3.0.3
+info:
+  title: WhiteHabbit Intelligence Layer API (Phase 5B)
+  version: "1.0.0"
+  description: >
+    Real, tenant-scoped Intelligence Layer endpoints introduced in Phase 5B
+    (§38, ADR-024). Every response reflects real, persisted data — a
+    resource with no real observations yet returns an empty list, never a
+    fabricated one. Authentication is a NextAuth session cookie; every
+    endpoint enforces org-scoped tenant isolation server-side
+    (requireSession()) — a resource belonging to another tenant returns
+    404, never 403, and never a cross-tenant value.
+servers:
+  - url: /api/v1
+security:
+  - sessionCookie: []
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: authjs.session-token
+  parameters:
+    projectId:
+      name: projectId
+      in: query
+      required: true
+      schema:
+        type: string
+  schemas:
+    Signal:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        projectId: { type: string }
+        type:
+          type: string
+          enum: [search_impression_spike, search_click_spike, ctr_anomaly, position_improvement, position_decline, query_emergence, query_decay, page_decay, query_page_mismatch, high_impression_low_ctr, high_ctr_low_position, stale_data, competitor_change, manual]
+        entityId: { type: string, nullable: true }
+        value: { type: object }
+        observedAt: { type: integer }
+        source: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+    Evidence:
+      type: object
+      properties:
+        id: { type: string }
+        subjectType: { type: string, enum: [opportunity, insight, page, answer, recommendation, fact] }
+        subjectId: { type: string }
+        source: { type: string }
+        sourceType: { type: string }
+        confidence: { type: number }
+        verificationStatus: { type: string, enum: [verified, unverified, conflicting, stale, deprecated] }
+    Trend:
+      type: object
+      properties:
+        id: { type: string }
+        label: { type: string }
+        state: { type: string, enum: [emerging, rising, stable, declining, breaking] }
+        velocity: { type: number }
+        momentum: { type: number }
+        confidence: { type: number }
+    Query:
+      type: object
+      properties:
+        id: { type: string }
+        text: { type: string }
+        intent:
+          type: string
+          nullable: true
+          enum: [informational, commercial, transactional, navigational, local, comparison, problem, how_to, definition, research, investment]
+        intentConfidence: { type: number, nullable: true }
+        entityId: { type: string, nullable: true }
+    Recommendation:
+      type: object
+      properties:
+        id: { type: string }
+        action: { type: string, enum: [refresh_page, create_market_page, add_evidence, build_calculator, merge_pages, add_entity_relationship, investigate_query, create_data_asset] }
+        reason: { type: string }
+        evidenceIds: { type: array, items: { type: string } }
+        expectedImpact: { type: string }
+        confidence: { type: number }
+        priority: { type: string, enum: [critical, high, normal, low] }
+        status: { type: string, enum: [open, accepted, dismissed, done] }
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+paths:
+  /signals:
+    get:
+      summary: List real signals for a project
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: type
+          in: query
+          schema: { type: string }
+        - name: entityId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signals: { type: array, items: { $ref: "#/components/schemas/Signal" } }
+        "400": { description: Bad request, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { description: Unauthenticated }
+    post:
+      summary: Record a manual signal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, type, confidence]
+              properties:
+                projectId: { type: string }
+                type: { type: string }
+                value: { type: object }
+                entityId: { type: string }
+                source: { type: string }
+                confidence: { type: number, minimum: 0, maximum: 1 }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { type: object, properties: { signal: { $ref: "#/components/schemas/Signal" } } } } }
+  /evidence:
+    get:
+      summary: List evidence for a subject
+      parameters:
+        - name: subjectType
+          in: query
+          required: true
+          schema: { type: string, enum: [opportunity, insight, page, answer, recommendation, fact] }
+        - name: subjectId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { evidence: { type: array, items: { $ref: "#/components/schemas/Evidence" } } } } } } }
+    post:
+      summary: Record evidence for a subject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, subjectType, subjectId, source, sourceType, confidence]
+              properties:
+                projectId: { type: string }
+                subjectType: { type: string }
+                subjectId: { type: string }
+                source: { type: string }
+                sourceType: { type: string }
+                sourceUrl: { type: string }
+                confidence: { type: number }
+      responses:
+        "201": { description: Created }
+  /trends:
+    get:
+      summary: List real trends for a project
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: state
+          in: query
+          schema: { type: string, enum: [emerging, rising, stable, declining, breaking] }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { trends: { type: array, items: { $ref: "#/components/schemas/Trend" } } } } } } }
+  /trends/scan:
+    post:
+      summary: Run the real trend detector over this project's Search Console data
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [projectId], properties: { projectId: { type: string } } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { trendsDetected: { type: integer }, opportunitiesCreated: { type: integer } } } } } }
+  /intents:
+    get:
+      summary: The real, closed intent taxonomy
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { intents: { type: array, items: { type: string } } } } } } }
+  /queries:
+    get:
+      summary: List real, classified queries for a project
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: intent
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { queries: { type: array, items: { $ref: "#/components/schemas/Query" } } } } } } }
+    post:
+      summary: Observe (and deterministically classify) a real query
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [projectId, text], properties: { projectId: { type: string }, text: { type: string } } } } }
+      responses:
+        "201": { description: Created }
+  /recommendations:
+    get:
+      summary: List real recommendations
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, accepted, dismissed, done] }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { recommendations: { type: array, items: { $ref: "#/components/schemas/Recommendation" } } } } } } }
+    post:
+      summary: Generate real recommendations from already-persisted data
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [projectId], properties: { projectId: { type: string } } } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { type: object, properties: { recommendations: { type: array, items: { $ref: "#/components/schemas/Recommendation" } } } } } } }
+  /recommendations/{id}:
+    patch:
+      summary: Accept/dismiss/complete a recommendation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [open, accepted, dismissed, done] } } } } }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }
+  /search-console/properties:
+    get:
+      summary: List real Search Console properties for a project
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Register a real Search Console property (unverified until a real check runs)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [projectId, siteUrl], properties: { projectId: { type: string }, siteUrl: { type: string } } } } }
+      responses:
+        "201": { description: Created }
+  /search-console/properties/{id}/import:
+    post:
+      summary: Manually import a real GSC data export (snapshots/queries/pages)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }
+  /search-console/properties/{id}/detect-signals:
+    post:
+      summary: Run the real deterministic anomaly detector over already-imported data
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { signalCount: { type: integer } } } } } }
+        "404": { description: Not found }
+  /ai-visibility/prompts:
+    get:
+      summary: List real, repeatable AI visibility prompts
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Create a real AI visibility prompt
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [projectId, label, text], properties: { projectId: { type: string }, label: { type: string }, text: { type: string } } } } }
+      responses:
+        "201": { description: Created }
+  /ai-visibility/prompts/{id}/run:
+    post:
+      summary: Run a real prompt against a real, configured LLM provider
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { brandNames: { type: array, items: { type: string } }, competitorNames: { type: array, items: { type: string } } } } } }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }
+        "503": { description: No LLM provider configured — never a fabricated answer }
+  /ai-visibility/prompts/{id}/answers:
+    get:
+      summary: Real observation history for a prompt — never one answer treated as definitive
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }
+  /research:
+    post:
+      summary: Run the real Deep Research Agent for an opportunity
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [opportunityId], properties: { opportunityId: { type: string } } } } }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }
+  /opportunities/{id}/explain:
+    get:
+      summary: The real, deterministic Opportunity Explanation, assembled from the Opportunity Graph
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }
+  /opportunities/{id}/information-gain:
+    get:
+      summary: Real Information Gain V2 score + gate decision (CREATE/MERGE/ENRICH/WAIT/RESEARCH/CREATE_DATA_ASSET)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }

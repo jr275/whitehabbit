@@ -111,11 +111,20 @@ build a real separate `apps/public-site` (ADR-000/ADR-007) is unchanged:
 real per-tenant domain binding or page volume that outgrows a single
 in-app route.
 
-## Phase 7 — Learning loop integrations
-Search Console warehouse (§32), Trend Engine (§31), AI Visibility (§33),
-Cannibalization/Content Decay engines (§69–70) — each feeds real values into
-the Opportunity score columns that are `NULL` today (ADR-006). Exit
-criterion: `final_score` is computed from ≥5 real components, not 3.
+## Phase 7 — Learning loop integrations — ✅ shipped (v1, Phase 5B)
+Search Console (ADR-025), Trend Engine (ADR-026), AI Visibility (ADR-028)
+all real and working: `lib/intelligence/*` — real schema, real deterministic
+detection/classification, a real manual-import path plus a real (if
+unexercised-in-this-environment) OAuth client for Search Console, real LLM
+calls for AI Visibility. `opportunities.trend_score` is now genuinely
+computed for trend-driven opportunities (previously `NULL`). Not yet
+done: Cannibalization/Content Decay engines (§69–70) — no real duplicate-
+content detector exists yet; `demandScore`/`competitionScore`/
+`authorityGapScore`/`citationPotentialScore`/`cannibalizationRiskScore`
+remain honestly `NULL` (each still needs its own real data source). Exit
+criterion partially met: `final_score` can now draw on `trendScore` as a
+5th real component for trend-driven opportunities specifically, not yet
+universally across every opportunity type.
 
 ## Phase 8 — Hardening & scale
 RLS (ADR-001 R-1), CSRF (ADR-011 R-9), OpenTelemetry (ADR-012, once Phase 4/6
@@ -123,6 +132,27 @@ create a second process), explicit cross-tenant-access test suite (R-3),
 sitemap/DB partitioning readiness review (§66) once real page volume exists.
 Exit criterion: every "Negative" line in the ADRs above is either resolved
 or has an owner and a trigger condition, re-reviewed at this phase.
+
+## Phase 9 — Intelligence domain model + engines — ✅ shipped (Phase 5B, ADR-024)
+Signal, Evidence (generic), Insight, Trend, Query/Intent, Role, Market/
+Metric, external Data Connectors + freshness, the Opportunity Graph +
+Explanation (§25-26), a real Deep Research Agent (§22, gap-focused, never
+writes content), Information Gain V2 + Gate (§23-24, additive — v1 stays
+the fast discovery-time default per ADR-027), and a real Recommendation
+Engine (ADR-030) all shipped with real, tenant-scoped persistence and
+tenant-isolation tests. A new `trend_analysis` WorkflowPipeline runs
+synchronously (fast, deterministic — never enqueued through the step-job
+queue). Not yet done: a dedicated UI (Mission Control V2, Opportunity Map
+V2, Intelligence Timeline, §34-37) — this phase was API-first,
+documented as PARTIAL below and in risks.md; wiring the Information Gain
+V2 gate into the actual page-generation blocking path (still v1 there,
+ADR-027); AI Visibility sentiment (always `null`, no real second signal
+exists yet); more Recommendation Engine rules (merge_pages, build_calculator
+need their own real trigger signals). Exit criterion met for the domain
+model itself: `tests/integration/intelligence-layer.test.ts` (24 tests)
+proves every stage of OBSERVE→UNDERSTAND→DISCOVER→SCORE→DECIDE works
+against real Postgres, end to end from a raw Signal through a real,
+explainable, graph-linked Opportunity.
 
 ## Explicitly out of scope until a phase above reaches it
 White-label multi-brand deployment, billing, community-signal ingestion,
