@@ -1,7 +1,13 @@
 # ADR-003: Agent orchestration stays in-process for now; durable-workflow migration is isolated to one module
 
 ## Status
-Accepted, with an explicit migration seam.
+Superseded by ADR-017 (2026-08). The Content Factory pipeline this ADR
+named as the trigger for a durable-workflow migration now exists
+(`lib/content-pipeline/orchestrator.ts`) and the migration happened —
+see ADR-017 for the decision (a real `WorkflowEngine` abstraction, still
+without Temporal — the "not until a real capability needs it" judgment
+call here turned out right: the trigger was resumability, not raw scale,
+and that didn't require a new cluster to solve). Kept for history.
 
 ## Context
 `lib/agent/runtime.ts#executeTask()` is an async generator that runs one

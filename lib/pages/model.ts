@@ -13,6 +13,7 @@ export interface Page {
   opportunityId: string
   pageBriefId: string
   pageTemplateId: string | null
+  routeTemplateId: string | null
   slug: string
   status: PageStatus
   title: string | null

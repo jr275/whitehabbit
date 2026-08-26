@@ -32,6 +32,17 @@ export class ValidationError extends Error {
   }
 }
 
+/** A real state conflict — e.g. an invalid workflow transition, or an
+ * action attempted on a resource in the wrong status. Distinct from
+ * ValidationError (bad input) — the input was fine, the resource's
+ * current state just doesn't allow this action right now. */
+export class ConflictError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "ConflictError"
+  }
+}
+
 export function withApiHandler(routeName: string, handler: (requestId: string) => Promise<NextResponse>): Promise<NextResponse> {
   const requestId = newRequestId()
   return handler(requestId).catch((err) => {
@@ -46,6 +57,9 @@ export function withApiHandler(routeName: string, handler: (requestId: string) =
     }
     if (err instanceof ValidationError) {
       return NextResponse.json({ error: err.message }, { status: 400 })
+    }
+    if (err instanceof ConflictError) {
+      return NextResponse.json({ error: err.message }, { status: 409 })
     }
     if (err instanceof RateLimitedError) {
       return NextResponse.json({ error: err.message }, { status: 429 })

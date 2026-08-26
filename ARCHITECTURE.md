@@ -50,17 +50,29 @@ pgvector yet. Structure:
 | Security | `lib/security/ssrf-guard.ts`, `lib/rate-limit.ts` (Postgres-backed), `recordAudit()` | SSRF protection (§46), rate limiting, audit log |
 | AI cost | `lib/agent/cost.ts`, `WorkerExecution.costUsd/inputTokens/outputTokens/model` | AI cost control (§49) |
 | AI provider abstraction | `lib/agent/tools/llm-providers/*` (Anthropic, Gemini, local dev fixture) | LLMProvider interface (§50) |
+| Durable workflow engine | **new in Revision 3** — `lib/workflow/*` (`agent_runs`/`agent_run_steps`, extended) — provider-independent `WorkflowEngine`, 10-state machine, checkpoint-resume, retry+backoff, idempotency | Durable AgentRun/AgentStep execution (§4–9) |
+| Job queue | **new in Revision 3** — `jobs` table; `lib/workflow/queue.ts` (`FOR UPDATE SKIP LOCKED`, tenant concurrency limits, priority) | JobQueue + tenant fairness (§7–9) |
+| Budgets & capabilities | **new in Revision 3** — `lib/workflow/budget.ts`, `lib/workflow/permissions.ts` | Agent budgets + capability-based permissions (§10–11) |
+| Human approval & autonomy | **new in Revision 3** — `approvals` table; `lib/workflow/approval.ts`, `lib/workflow/autonomy.ts` | Durable human-in-the-loop + AutonomyPolicy LEVEL_0–4 (§12–13) |
+| Domains | **new in Revision 3** — `domains`/`domain_verifications` tables; `lib/domains/*` — real DNS TXT/CNAME verification, server-side host→tenant resolution (`proxy.ts`) | Domain/subdomain management (§15–17, ADR-018) |
+| Route templates | **new in Revision 3** — `route_templates` table; `lib/route-templates/*` — vertical-agnostic classification matcher | RouteTemplate registry (§19, classification-only — see risks.md R-24) |
+| Real-time events | **new in Revision 3** — Postgres `LISTEN`/`NOTIFY` triggers (`migrations/0005_workflow_notify.sql`); `GET /api/v1/workflows/:id/events` | Real-time execution events (§27) |
 
-What does **not** exist yet, honestly: Content Factory as a *multi-agent
-pipeline* (today one Skill = one LLM call, evaluated once — not
-Research→Entity→Data→Outline→Writer→SEO→GEO→Schema→Link→FactCheck→Quality→
-Publish); a Page/PageVersion model or any public-site rendering engine;
-a crawler; Search Console/AI-visibility integrations; a durable workflow
-engine (Temporal or equivalent) — `executeTask()` is an in-process async
-generator, explicitly documented as a placeholder for one; an event outbox;
-pgvector/embeddings; RLS at the database level (isolation today is
-100% application-layer, enforced by `requireSession()` re-verifying
-membership on every request — see ADR-001); a monorepo/package split.
+What does **not** exist yet, honestly: Temporal (or an equivalent managed
+durable-execution product) — `lib/workflow/*` provides a real,
+provider-independent `WorkflowEngine` (ADR-017) that a Temporal-backed
+implementation could satisfy later without a domain-code rewrite, but no
+such implementation exists today; TLS/SSL provisioning for a tenant's
+verified custom domain (ADR-018 verifies DNS control, not certificates); a
+real Agent Control Center dashboard UI consuming the new `/api/v1/*`
+surface (the API itself is real and tenant-isolated; a dedicated
+multi-run/approvals/domains UI beyond the existing agent-run detail view
+is not built); an event outbox for external webhook delivery; pgvector/
+embeddings; RLS at the database level (isolation today is 100%
+application-layer, enforced by `requireSession()` re-verifying membership
+on every request — see ADR-001); a monorepo/package split. See
+`docs/architecture/risks.md` R-20 through R-25 for the complete, current
+list of named gaps.
 
 ## 2. Foundational decision: evolve, do not rewrite
 
@@ -84,9 +96,11 @@ triggers, not calendar dates — see `docs/architecture/roadmap.md`.
 
 ## 3. Document map
 
-- `docs/adr/ADR-000-evolve-in-place.md` … `ADR-015-*.md` — one architectural
+- `docs/adr/ADR-000-evolve-in-place.md` … `ADR-022-*.md` — one architectural
   decision each, per the brief's mandated list (§74), plus ADR-000 for the
-  monorepo-timing decision above.
+  monorepo-timing decision above. ADR-017 through ADR-022 (Revision 3) cover
+  the durable workflow platform; ADR-003 and ADR-010 are marked superseded
+  by them rather than deleted.
 - `docs/architecture/domain-model.md` — the full entity model: what's
   implemented today, its column-level shape, and the target model it's a
   step toward.
@@ -137,3 +151,30 @@ rather than waiting for ADR-007's separate `apps/public-site`.
 See `docs/architecture/vertical-slice.md` for the exact, step-by-step
 status of the full §76 chain, and `tests/e2e/vertical-slice.test.ts` for
 the automated proof that it actually works end to end.
+
+**Revision 3** makes the existing system durable rather than adding new
+product surface, per the Phase 4 brief's own framing. `lib/workflow/*`
+replaces `lib/agent-runs/*`'s synchronous, non-resumable execution with a
+real `WorkflowEngine` (ADR-017): a 10-state machine, database-driven
+checkpoint-resume (a killed/restarted process resumes past already-
+succeeded steps, proven by `tests/integration/durable-workflow.test.ts`),
+in-process retry with real backoff+jitter, database-enforced idempotency
+(a partial unique index, not just application logic), a Postgres-backed
+job queue with tenant-fair concurrency limits, per-run budget enforcement
+that stops execution rather than silently continuing, and formalized
+per-agent-type capability permissions. A durable human-approval workflow
+and a backend-only `AutonomyPolicy` (LEVEL_0–4) replace Revision 2's
+immediate-publish-on-quality-pass behavior (ADR-020). Real DNS-verified
+domain management (ADR-018) and server-side host→tenant resolution
+(`proxy.ts`, made possible because this fork's Proxy defaults to the
+Node.js runtime as of Next v16) supersede ADR-010's original deferral.
+Real-time execution events use Postgres `LISTEN`/`NOTIFY` (ADR-021), not
+polling. A new `/api/v1/*` Agent Control Center API surface (workflows,
+approvals, domains, route templates) is real and tenant-isolated, tested
+adversarially in `tests/security/phase4-tenant-isolation.test.ts`.
+Six new ADRs (**ADR-017 through ADR-022**) record these decisions; ADR-003
+and ADR-010 are marked superseded rather than deleted, so the earlier
+"why not yet" reasoning stays legible. No new infrastructure vendor was
+introduced — Temporal was deliberately not adopted (ADR-017); the
+durability guarantees come from Postgres, the platform's existing sole
+datastore.

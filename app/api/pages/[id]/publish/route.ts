@@ -15,7 +15,7 @@ import { requireSession } from "@/lib/session"
 
 type Params = { params: Promise<{ id: string }> }
 
-export async function POST(req: Request, { params }: Params) {
+export async function POST(_req: Request, { params }: Params) {
   return withApiHandler("pages.publish", async () => {
     const { organizationId, userId } = await requireSession()
     await enforceRateLimit("page_publish", organizationId)
@@ -25,8 +25,7 @@ export async function POST(req: Request, { params }: Params) {
     if (!existing) throw new NotFoundError()
 
     try {
-      const baseUrl = new URL(req.url).origin
-      const { page, canonicalUrl } = await publishPageAction(id, organizationId, baseUrl)
+      const { page, canonicalUrl } = await publishPageAction(id, organizationId)
       await recordAudit({ orgId: organizationId, userId, action: "page.publish", resourceType: "page", resourceId: id, metadata: { canonicalUrl } })
       return NextResponse.json({ page })
     } catch (err) {

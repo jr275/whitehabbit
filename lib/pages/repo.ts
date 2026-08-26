@@ -18,6 +18,7 @@ interface PageSqlRow {
   opportunity_id: string
   page_brief_id: string
   page_template_id: string | null
+  route_template_id: string | null
   slug: string
   status: PageStatus
   title: string | null
@@ -42,6 +43,7 @@ function rowToPage(r: PageSqlRow): Page {
     opportunityId: r.opportunity_id,
     pageBriefId: r.page_brief_id,
     pageTemplateId: r.page_template_id,
+    routeTemplateId: r.route_template_id,
     slug: r.slug,
     status: r.status,
     title: r.title,
@@ -91,13 +93,14 @@ export async function createPage(input: {
   slug: string
   title: string
   metaDescription: string | null
+  routeTemplateId?: string | null
 }): Promise<Page> {
   const id = `page_${randomUUID()}`
   const now = Date.now()
   await query(
-    `INSERT INTO pages (id, org_id, project_id, opportunity_id, page_brief_id, slug, status, title, meta_description, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, 'draft', $7, $8, $9, $9)`,
-    [id, input.orgId, input.projectId, input.opportunityId, input.pageBriefId, input.slug, input.title, input.metaDescription, now],
+    `INSERT INTO pages (id, org_id, project_id, opportunity_id, page_brief_id, slug, status, title, meta_description, route_template_id, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 'draft', $7, $8, $9, $10, $10)`,
+    [id, input.orgId, input.projectId, input.opportunityId, input.pageBriefId, input.slug, input.title, input.metaDescription, input.routeTemplateId ?? null, now],
   )
   return {
     id,
@@ -106,6 +109,7 @@ export async function createPage(input: {
     opportunityId: input.opportunityId,
     pageBriefId: input.pageBriefId,
     pageTemplateId: null,
+    routeTemplateId: input.routeTemplateId ?? null,
     slug: input.slug,
     status: "draft",
     title: input.title,

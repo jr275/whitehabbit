@@ -6,6 +6,7 @@
  * ================================================================== */
 
 import type { PageBrief } from "@/lib/pagebrief/model"
+import type { FactCheckArtifact } from "./fact-check"
 import type { DraftArtifact, GeoArtifact, QualityArtifact, QualityGateResult, ResearchArtifact, SeoArtifact } from "./model"
 
 export interface QualityThresholds {
@@ -50,6 +51,7 @@ export function runQualityGate(
   seo: SeoArtifact,
   geo: GeoArtifact,
   informationGainScore: number | null,
+  factCheck: FactCheckArtifact,
   thresholds: QualityThresholds = DEFAULT_QUALITY_THRESHOLDS,
 ): QualityArtifact {
   const gates: QualityGateResult[] = []
@@ -76,6 +78,18 @@ export function runQualityGate(
 
   const aeoGeoAverage = Math.round((geo.aeoScore + geo.geoScore) / 2)
   gates.push({ name: "AEO/GEO quality", passed: aeoGeoAverage >= thresholds.aeoGeoQuality, value: aeoGeoAverage, threshold: thresholds.aeoGeoQuality })
+
+  // §24: a real FactCheckAgent gate — a conflicting or unverified cited
+  // claim fails the page, distinct from (and stricter than) the coverage
+  // gates above, which only measure how MUCH was cited, not whether what
+  // was cited actually checks out.
+  const factsPassed = factCheck.results.length === 0 || factCheck.allCitedVerified
+  gates.push({
+    name: "Fact verification",
+    passed: factsPassed,
+    value: factCheck.results.length ? factCheck.results.filter((r) => r.state === "VERIFIED" || r.state === "PARTIALLY_VERIFIED").length : null,
+    threshold: factCheck.results.length || null,
+  })
 
   const passed = gates.every((g) => g.passed)
   const reasons = gates.filter((g) => !g.passed).map((g) => `${g.name}: ${g.value ?? "n/a"} did not meet threshold ${g.threshold ?? "n/a"}`)

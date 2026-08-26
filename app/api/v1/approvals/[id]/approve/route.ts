@@ -1,0 +1,62 @@
+import "server-only"
+
+/* POST /api/v1/approvals/:id/approve — the one real path a human
+ * takes to unblock a WAITING_APPROVAL workflow (§12, §13: "never let
+ * an LLM decide its own permission" — this route is the only writer
+ * of an 'approved' decision, and it always runs as the authenticated
+ * reviewer, never the requesting agent). Resumes the workflow and
+ * re-invokes the real orchestrator so the approval is actually acted
+ * on (e.g. publication continues), exactly like a manual resume. */
+
+import { NextResponse } from "next/server"
+import { NotFoundError, ValidationError, withApiHandler } from "@/lib/api-error"
+import { recordAudit } from "@/lib/db/repo"
+import { runWebsiteDiscovery } from "@/lib/website-discovery/orchestrator"
+import { getWebsite } from "@/lib/websites/repo"
+import { runContentGeneration } from "@/lib/content-pipeline/orchestrator"
+import { getOpportunity } from "@/lib/opportunity/repo"
+import { buildPageBriefFromOpportunity } from "@/lib/pagebrief/build"
+import { getPageBriefByOpportunity } from "@/lib/pagebrief/repo"
+import { decideApproval, getApproval } from "@/lib/workflow/approval"
+import { workflowEngine } from "@/lib/workflow/engine"
+import { requireSession } from "@/lib/session"
+
+type Params = { params: Promise<{ id: string }> }
+
+export async function POST(req: Request, { params }: Params) {
+  return withApiHandler("v1.approvals.approve", async () => {
+    const { organizationId, userId } = await requireSession()
+    const { id } = await params
+    const existing = await getApproval(id, organizationId)
+    if (!existing) throw new NotFoundError()
+    if (existing.status !== "pending") throw new ValidationError(`This approval is already ${existing.status} and can't be decided again.`)
+
+    let reason: string | undefined
+    try {
+      const body = (await req.json()) as { reason?: string }
+      reason = body?.reason
+    } catch {
+      // no body — a reason is optional
+    }
+
+    const decided = await decideApproval(id, organizationId, "approved", userId, reason)
+    if (!decided) throw new ValidationError("This approval could not be decided — it may have already been resolved.")
+    await recordAudit({ orgId: organizationId, userId, action: "approval.approve", resourceType: "approval", resourceId: id })
+
+    const run = await workflowEngine.getStatus(existing.workflowRunId, organizationId)
+    if (run) {
+      if (run.pipeline === "website_discovery") {
+        const website = await getWebsite(run.subjectId, organizationId)
+        if (website) await runWebsiteDiscovery(website)
+      } else if (run.pipeline === "content_generation") {
+        const opportunity = await getOpportunity(run.subjectId, organizationId)
+        if (opportunity) {
+          const brief = (await getPageBriefByOpportunity(opportunity.id, organizationId)) ?? (await buildPageBriefFromOpportunity(opportunity))
+          await runContentGeneration(opportunity, brief)
+        }
+      }
+    }
+
+    return NextResponse.json({ approval: decided })
+  })
+}

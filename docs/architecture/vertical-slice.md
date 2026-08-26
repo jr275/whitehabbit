@@ -33,10 +33,11 @@ of scope, named below.
 | Score Opportunities | ✅ real, explainable, Known/Estimated/Unavailable | `lib/opportunity/scoring.ts`, `lib/opportunity/information-gain.ts` |
 | Approve Opportunity | ✅ real, audited | `PATCH /api/opportunities/:id` (previous revision) |
 | PageBrief | ✅ real, derived from actual Knowledge Graph state | `lib/pagebrief/build.ts` |
-| Generate Page (Research→Outline→Draft→SEO→GEO→Quality) | ✅ real, each step a persisted artifact + agent_run_step | `lib/content-pipeline/*` |
-| QA (Quality Gate) | ✅ real, can reject with explicit reasons | `lib/content-pipeline/quality.ts` |
-| Page + PageVersion | ✅ real, immutable versions | `lib/pages/*` |
-| Publish | ✅ real, explicit human action | `POST /api/pages/:id/publish`, `lib/pages/publish.ts` |
+| Generate Page (Research→Outline→Draft→SEO→GEO→FactCheck→Quality) | ✅ real, checkpointed `WorkflowRun`, each step a persisted artifact + resumable step | `lib/content-pipeline/*`, `lib/workflow/*` |
+| QA (Quality Gate) | ✅ real, can reject with explicit reasons, now including a real fact-verification gate | `lib/content-pipeline/quality.ts`, `lib/content-pipeline/fact-check.ts` |
+| Page + PageVersion | ✅ real, immutable versions, classified against a `RouteTemplate` when one matches | `lib/pages/*`, `lib/route-templates/*` |
+| Approval / Autonomy gate | ✅ real, backend-only decision — LEVEL_0/1 always pauses for a human; LEVEL_2–4 may auto-publish only under named, testable conditions | `lib/workflow/approval.ts`, `lib/workflow/autonomy.ts` |
+| Publish | ✅ real — either an explicit human action (`POST /api/pages/:id/publish`) or an autonomy-gated auto-publish from the resumed workflow | `lib/pages/publish.ts` |
 | Render Next.js page | ✅ real, minimal in-app route (ADR-016) | `app/sites/[projectId]/[slug]/page.tsx` |
 | Generate Schema (JSON-LD) | ✅ real, validated before publish | `lib/pages/json-ld.ts` |
 | Add Internal Links | ✅ real, relationship-based, capped at 5/page | `lib/internal-links/*` |
@@ -45,14 +46,20 @@ of scope, named below.
 
 ## What's still honestly partial
 
-- **Synchronous, in-process execution** (ADR-003/ADR-016): both the
-  discovery pipeline and the content-generation pipeline run inside one
-  HTTP request. Fine for this slice's bounded limits (≤25 pages, one
-  Writer LLM call); real durability/resumability still needs the Phase 4
-  workflow-engine migration.
-- **No public domain binding** (ADR-010 still deferred): a published page
-  is reachable at `/sites/:projectId/:slug` inside this app, not the
-  tenant's own domain.
+- **A single orchestrator call still runs synchronously within one HTTP
+  request** (`docs/architecture/risks.md` R-16): Phase 4 (ADR-017) made
+  both pipelines checkpointed and resumable *between* steps — a crashed or
+  killed process resumes past already-succeeded work rather than
+  restarting — but a step itself is not yet dispatched as its own
+  independently-scheduled job, so an unusually slow single step can still
+  approach a serverless function's real timeout within one call.
+- **Domain binding is now real** (ADR-018 supersedes ADR-010): a tenant can
+  register and DNS-verify a real domain (`lib/domains/*`), and
+  `proxy.ts` resolves a verified host to the right tenant server-side. A
+  page's canonical URL prefers a verified domain and falls back to
+  `/sites/:projectId/:slug` only while none is verified yet. TLS/SSL
+  provisioning for the custom domain itself is not implemented (risks.md
+  R-20).
 - **The Draft step's LLM call** is the one place real content quality
   depends on a configured LLM credential; `LLM_DEV_MODE=true` produces a
   deterministic, clearly-labeled fixture (now content-aware — it echoes

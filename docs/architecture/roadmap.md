@@ -34,14 +34,30 @@ met: a tenant provides a URL and gets a real, persisted
 `WebsiteKnowledgeProfile` plus entities seeded from real crawled structured
 data and text, not just one skill's LLM-inferred topics.
 
-## Phase 4 — Durable workflow migration (unblocks a truly resumable Content Factory)
-Not yet done — both the website-discovery and content-generation pipelines
-still run synchronously in-process (ADR-003/ADR-016, `docs/architecture/
-risks.md` R-16), bounded by conservative limits so this is safe at current
-scale. Adopt Temporal (or equivalent) per ADR-003's trigger once a step
-genuinely needs to survive a process crash mid-execution. Exit criterion:
-a workflow step can crash and resume without re-running completed steps or
-losing durable state.
+## Phase 4 — Durable workflow platform — ✅ shipped
+`lib/workflow/*` implements a provider-independent `WorkflowEngine`
+(ADR-017) with a real 10-state machine, checkpoint-resume, backoff+jitter
+retry, budget enforcement (ADR-019), formalized capability permissions
+(ADR-019), a durable human-approval workflow + backend-only autonomy policy
+(ADR-020), a Postgres-backed job queue with tenant concurrency limits
+(ADR-022), real DNS-verified domains + server-side host resolution
+(ADR-018), and real-time execution events via Postgres LISTEN/NOTIFY
+(ADR-021). `lib/website-discovery/orchestrator.ts` and
+`lib/content-pipeline/orchestrator.ts` were migrated onto this engine in
+place (R-16 resolved) — no parallel pipeline, no big-bang rewrite. Exit
+criterion met: `tests/integration/durable-workflow.test.ts` proves a step
+already succeeded is never re-executed on a simulated resume, a manual
+retry moves a FAILED run through RETRYING back to RUNNING, a budget breach
+stops execution with `BudgetExceededError` rather than continuing, and the
+full request→pause→approve→resume cycle works against real Postgres. Not
+yet done: Temporal/managed-durable-execution adoption (still not justified
+per ADR-017 — the resumability requirement was met without it), TLS
+provisioning for custom domains (ADR-018), scheduled re-verification of
+already-verified domains, a real Agent Control Center dashboard UI (the
+API surface — `/api/v1/workflows`, `/api/v1/approvals`, `/api/v1/domains`,
+`/api/v1/route-templates` — is real and tenant-isolated; a dedicated UI
+consuming it beyond the existing agent-run detail view is the next
+increment).
 
 ## Phase 5 — Content Factory multi-agent pipeline (§22) — ✅ shipped (v1)
 `lib/content-pipeline/*` implements Research→Outline→Draft→SEO→GEO→Quality
@@ -62,9 +78,15 @@ human-publishable draft Page end-to-end.
 sitemap, and a minimal public render route
 (`app/sites/[projectId]/[slug]/page.tsx`) all shipped — deliberately inside
 this app rather than a separate `apps/public-site` (ADR-016 amends
-ADR-007's timing). Not yet done: a generalized `RouteTemplate` engine,
-per-tenant domain binding (ADR-010), sitemap sharding (not needed at
-current page volume). Exit criterion met: an approved, QA'd page renders
+ADR-007's timing). Phase 4 added real per-tenant domain binding (ADR-018)
+and a `RouteTemplate` registry (§19) — but template binding today is
+classification-only (`pages.route_template_id` records which template an
+opportunity matched, via the same vertical-agnostic `resolveRouteTemplate`
+regardless of project vertical); public URL resolution still goes through
+the simpler `(projectId, slug)` path, not a template's own `pattern` — see
+ADR-016. Not yet done: rendering a page's URL FROM its bound template's
+pattern, sitemap sharding (not needed at current page volume). Exit
+criterion met: an approved, QA'd page renders
 live at a real URL with valid, validated JSON-LD and appears in the
 sitemap — proven by `tests/e2e/vertical-slice.test.ts`. The trigger to
 build a real separate `apps/public-site` (ADR-000/ADR-007) is unchanged:

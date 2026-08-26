@@ -14,16 +14,22 @@ import "server-only"
  * Graph and Opportunity Engine have a real project_id to scope to
  * without forcing every existing caller to pass one that doesn't
  * exist yet.
+ *
+ * autonomyLevel (Phase 4, §13) is the real, backend-evaluated policy
+ * lib/workflow/autonomy.ts's evaluatePublishAutonomy() reads — never
+ * set or overridden by an agent/LLM.
  * ================================================================== */
 
 import { randomUUID } from "node:crypto"
 import { query, queryOne, withTransaction } from "@/lib/db/client"
+import type { AutonomyLevel } from "@/lib/workflow/autonomy"
 
 export interface ProjectRow {
   id: string
   orgId: string
   name: string
   primaryDomain: string | null
+  autonomyLevel: AutonomyLevel
   createdAt: number
   createdBy: string | null
 }
@@ -33,6 +39,7 @@ interface ProjectSqlRow {
   org_id: string
   name: string
   primary_domain: string | null
+  autonomy_level: AutonomyLevel
   created_at: string
   created_by: string | null
 }
@@ -43,6 +50,7 @@ function rowToProject(r: ProjectSqlRow): ProjectRow {
     orgId: r.org_id,
     name: r.name,
     primaryDomain: r.primary_domain,
+    autonomyLevel: r.autonomy_level,
     createdAt: Number(r.created_at),
     createdBy: r.created_by,
   }
@@ -71,7 +79,7 @@ export async function createProject(orgId: string, name: string, opts: { primary
     now,
     opts.createdBy ?? null,
   ])
-  return { id, orgId, name, primaryDomain: opts.primaryDomain ?? null, createdAt: now, createdBy: opts.createdBy ?? null }
+  return { id, orgId, name, primaryDomain: opts.primaryDomain ?? null, autonomyLevel: "LEVEL_1", createdAt: now, createdBy: opts.createdBy ?? null }
 }
 
 /** The one Project every org has today, created on first use. Race-safe:
@@ -96,6 +104,12 @@ export async function getOrCreateDefaultProject(orgId: string): Promise<ProjectR
       "Default Project",
       now,
     ])
-    return { id, orgId, name: "Default Project", primaryDomain: null, createdAt: now, createdBy: null }
+    return { id, orgId, name: "Default Project", primaryDomain: null, autonomyLevel: "LEVEL_1" as AutonomyLevel, createdAt: now, createdBy: null }
   })
+}
+
+/** The only way autonomyLevel changes — an explicit tenant/admin
+ * action, never something an agent sets on itself (§13). */
+export async function setAutonomyLevel(id: string, orgId: string, autonomyLevel: AutonomyLevel): Promise<void> {
+  await query("UPDATE projects SET autonomy_level = $1 WHERE id = $2 AND org_id = $3", [autonomyLevel, id, orgId])
 }
