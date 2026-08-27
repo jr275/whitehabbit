@@ -4,6 +4,12 @@
 required checkpoint before any schema change or deletion: what exists, what it's used by,
 what's duplicate, what's kept, what it merges into, and what migration each choice implies.
 
+> **Phase D update:** the Worker/Skill/Execution/Metric rows in the table below marked "Keep —
+> canonical" are the ones Phase D actually extended (DataProvenance, EconomicState, a `finance`
+> SkillCategory, four real financial Skills). See `docs/financial-domain.md` for what changed
+> and why. Opportunity, Decision, and Approval-as-entity are unchanged by Phase D — still not
+> built, still Phase G, exactly as this document said before.
+
 Nothing in this document is guessed. Every "used by" claim below was verified with a
 repo-wide import search (not just a read of the file's own header comment) before it was
 written down — several files that *look* live from their own doc-comments turned out to have
