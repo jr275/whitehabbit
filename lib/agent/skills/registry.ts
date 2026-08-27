@@ -1,5 +1,6 @@
 import "server-only"
 
+import { applyMarketingRecommendationSkill } from "./apply-marketing-recommendation"
 import { contentIntelligenceSkill } from "./content-intelligence"
 import { creativeTerritoryGenerationSkill } from "./creative-territory-generation"
 import { culturalIntelligenceSkill } from "./cultural-intelligence"
@@ -8,6 +9,7 @@ import { engagementAnalysisSkill } from "./engagement-analysis"
 import { leadQualificationSkill } from "./lead-qualification"
 import { runtimeProofSkill } from "./runtime-proof"
 import { salesforceLeadPipelineSkill } from "./salesforce-lead-pipeline"
+import { searchWasteDetectionSkill } from "./search-waste-detection"
 import { seoOpportunitySkill } from "./seo-opportunity"
 import { trendResearchSkill } from "./trend-research"
 import type { SkillDefinition } from "@/lib/agent/types"
@@ -35,6 +37,8 @@ export const SKILL_REGISTRY: SkillDefinition[] = [
   culturalIntelligenceSkill,
   creativeTerritoryGenerationSkill,
   salesforceLeadPipelineSkill,
+  searchWasteDetectionSkill,
+  applyMarketingRecommendationSkill,
   runtimeProofSkill,
 ]
 

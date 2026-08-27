@@ -129,6 +129,31 @@ export const SKILL_CATALOG: SkillTemplate[] = [
       { key: "requestedActions", label: "Requested actions — comma-separated (optional)", type: "text", required: false, placeholder: "update_lead, notify_slack" },
     ],
   },
+  {
+    id: "skill_search_waste_detection",
+    name: "Search Waste Detection",
+    category: "marketing",
+    description: "Classifies real paid-search term performance to find spend producing no return, and generates negative-keyword/targeting recommendations — deterministic analysis, LLM only for rationale.",
+    outputType: "search_waste_report",
+    taskTitle: "Detect paid-search waste",
+    requiredTools: ["tool_marketing_actions", "tool_llm"],
+    inputs: [{ key: "brandTerms", label: "Brand terms (comma-separated) — never recommended as negative keywords", type: "text", required: false, placeholder: "acme, acme software" }],
+  },
+  {
+    id: "skill_apply_marketing_recommendation",
+    name: "Apply Marketing Recommendation",
+    category: "marketing",
+    description: "Applies exactly one marketing recommendation (negative keyword, budget, pause, targeting) — always requires human approval before it runs.",
+    outputType: "marketing_recommendation_result",
+    taskTitle: "Apply a marketing recommendation",
+    requiredTools: ["tool_marketing_actions"],
+    inputs: [
+      { key: "applyActionId", label: "Action (add_negative_keyword | review_targeting | adjust_budget | pause_campaign | change_targeting)", type: "text", required: true, placeholder: "add_negative_keyword" },
+      { key: "opportunityId", label: "Opportunity id (from the Search Waste Optimization Report)", type: "text", required: false },
+      { key: "matchedTerms", label: "Matched search terms — comma-separated (optional)", type: "text", required: false },
+      { key: "suggestedNegativeKeywords", label: "Suggested negative keywords — comma-separated (optional)", type: "text", required: false },
+    ],
+  },
 ]
 
 export interface ToolTemplate {
@@ -151,6 +176,7 @@ export const TOOL_CATALOG: ToolTemplate[] = [
   { id: "tool_news", name: "News", provider: "Not connected", description: "Searches real, current news coverage as a cultural/market intelligence source.", risk: "low", permission: "read" },
   { id: "tool_google_trends", name: "Google Trends", provider: "Not connected", description: "Reads real search-interest trend data as a cultural/market intelligence source.", risk: "low", permission: "read" },
   { id: "tool_social_signals", name: "Social Signals", provider: "Not connected", description: "Reads real social conversation volume and sentiment as a cultural/market intelligence source.", risk: "low", permission: "read" },
+  { id: "tool_marketing_actions", name: "Marketing Actions", provider: "WhiteHabbit", description: "Applies a marketing recommendation (negative keyword, budget, pause, targeting) — always requires human approval.", risk: "high", permission: "write" },
 ]
 
 /* ---- channels ---- */
