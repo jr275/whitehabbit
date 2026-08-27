@@ -7,6 +7,19 @@
 @theme inline {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  /* Reference tokens (see the --ref-* definitions in :root) as real
+   * Tailwind utilities — bg-ref-paper, text-ref-ink, border-ref-hairline,
+   * etc. — instead of arbitrary-value classes at every call site. */
+  --color-ref-paper: var(--ref-paper);
+  --color-ref-ink: var(--ref-ink);
+  --color-ref-ink-muted: var(--ref-ink-muted);
+  --color-ref-hairline: var(--ref-hairline);
+  --color-ref-accent: var(--ref-accent);
+  --color-ref-accent-soft: var(--ref-accent-soft);
+  --color-ref-warn: var(--ref-warn);
+  --color-ref-warn-soft: var(--ref-warn-soft);
+  --color-ref-critical: var(--ref-critical);
+  --color-ref-critical-soft: var(--ref-critical-soft);
   --color-alive: var(--alive);
   --color-alive-foreground: var(--alive-foreground);
   --color-grow: var(--grow);
@@ -92,6 +105,32 @@
   --sidebar-accent-foreground: oklch(0.96 0.004 260);
   --sidebar-border: oklch(1 0 0 / 9%);
   --sidebar-ring: oklch(0.55 0.235 264);
+
+  /* ---------------------------------------------------------------- *
+   * REFERENCE TOKENS — the first real tokens read off the Cursor
+   * reference (docs/ux-reference-analysis.md), introduced for the
+   * Skill Card only (Phase UX-1). Named generically, not
+   * "--skill-card-*", so later components can adopt them instead of
+   * re-deriving their own approximation — but nothing else in the app
+   * uses them yet, and the surrounding dark "control room" chrome is
+   * left exactly as it is on purpose: this is one component
+   * establishing the language, not a global reskin. Values are read
+   * carefully off one reference screenshot, not a design file — treat
+   * as REFERENCE-DEPENDENT until real design assets replace them.
+   * Deliberately not theme-reactive (no dark: variant): the reference
+   * itself is a light, editorial surface with no dark mode shown, and
+   * inventing one now would be guessing, not reading the reference.
+   * ---------------------------------------------------------------- */
+  --ref-paper: oklch(0.96 0.012 85);
+  --ref-ink: oklch(0.22 0.012 85);
+  --ref-ink-muted: oklch(0.56 0.015 85);
+  --ref-hairline: oklch(0.22 0.012 85 / 14%);
+  --ref-accent: oklch(0.55 0.06 145);
+  --ref-accent-soft: oklch(0.55 0.06 145 / 12%);
+  --ref-warn: oklch(0.62 0.13 70);
+  --ref-warn-soft: oklch(0.62 0.13 70 / 12%);
+  --ref-critical: oklch(0.55 0.15 25);
+  --ref-critical-soft: oklch(0.55 0.15 25 / 12%);
 }
 
 .dark {

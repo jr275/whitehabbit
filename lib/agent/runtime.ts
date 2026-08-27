@@ -149,6 +149,7 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         objectives: run.worker.objectives.filter((o) => !o.done).map((o) => o.text),
         behaviors: run.worker.behaviors.map((b) => ({ condition: b.condition, action: b.action })),
         knowledge: run.worker.knowledge.map((k) => ({ id: k.id, name: k.name, type: k.type, content: k.content })),
+        autonomy: run.worker.autonomy,
       }
       const result: SkillExecutionResult = await skill.execute({
         workerId: run.worker.id,
@@ -179,6 +180,19 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
       await repo.insertOutput(output, run.orgId)
       emit("output_created", { outputId: output.id, title: output.title, qualityScore: evaluation.qualityScore })
 
+      // Financial Intelligence Engine output (lib/finance/*) — real for
+      // exactly one skill today (cash_working_capital_intelligence),
+      // undefined/empty for every other skill. Persisted the same way
+      // Output/MetricEmission already are: this is not a second
+      // execution engine, just two more row kinds the existing one
+      // knows how to write (§22).
+      for (const opportunity of result.opportunities ?? []) {
+        await repo.insertOpportunity({ ...opportunity, executionId: execution.id }, run.orgId)
+      }
+      for (const decision of result.decisions ?? []) {
+        await repo.insertDecision({ ...decision, executionId: execution.id }, run.orgId)
+      }
+
       const emissions = skill.metrics(result, evaluation)
       const metricRecords: MetricRecord[] = emissions.map((m) => ({
         id: `met_${randomUUID()}`,
@@ -189,6 +203,12 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         value: m.value,
         unit: m.unit,
         recordedAt: Date.now(),
+        // A business metric with no explicit state is "estimated" —
+        // nothing in this codebase yet has a real approve/execute/
+        // reconcile path, so no metric may silently imply more than
+        // that. Non-business metrics never carry an economic state.
+        economicState: m.kind === "business" ? (m.economicState ?? "estimated") : undefined,
+        valueCategory: m.kind === "business" ? m.valueCategory : undefined,
       }))
       for (const m of metricRecords) {
         await repo.insertMetric(m, run.orgId)
@@ -206,6 +226,7 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         outputTokens: result.outputTokens,
         model: result.model,
         executionMode: result.executionMode,
+        dataProvenance: result.dataProvenance,
       })
       await repo.updateTaskStatus(task.id, "completed")
       emit("task_completed", { outputId: output.id, durationMs })
@@ -271,6 +292,16 @@ function titleFor(outputType: string, input: Record<string, string>): string {
       return "Content performance analysis"
     case "engagement_analysis":
       return "Engagement analysis"
+    case "cash_position_summary":
+      return "Cash position summary"
+    case "cash_forecast":
+      return "Cash forecast"
+    case "working_capital_opportunities":
+      return "Working capital opportunities"
+    case "receivables_risk_analysis":
+      return "Receivables risk analysis"
+    case "financial_intelligence_run":
+      return "Cash & working capital intelligence run"
     default:
       return "Result"
   }

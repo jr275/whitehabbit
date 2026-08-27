@@ -12,6 +12,7 @@ import "server-only"
 
 import { randomUUID } from "node:crypto"
 import { query, queryOne, withTransaction } from "./client"
+import type { Decision, Opportunity } from "@/lib/finance/types"
 import type {
   BusinessEvent,
   MetricRecord,
@@ -353,8 +354,8 @@ export async function updateTaskStatus(id: string, status: WorkerTask["status"])
 /* ---- executions ------------------------------------------------------ */
 export async function insertExecution(exec: WorkerExecution, orgId: string): Promise<void> {
   await query(
-    `INSERT INTO executions (id, org_id, worker_id, worker_version_id, task_id, status, reason_code, blocked_reason, started_at, completed_at, duration_ms, cost_usd, input_tokens, output_tokens, model, execution_mode)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+    `INSERT INTO executions (id, org_id, worker_id, worker_version_id, task_id, status, reason_code, blocked_reason, started_at, completed_at, duration_ms, cost_usd, input_tokens, output_tokens, model, execution_mode, data_provenance)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
     [
       exec.id,
       orgId,
@@ -366,6 +367,7 @@ export async function insertExecution(exec: WorkerExecution, orgId: string): Pro
       exec.blockedReason ?? null,
       exec.startedAt,
       exec.completedAt ?? null,
+      null,
       null,
       null,
       null,
@@ -393,10 +395,11 @@ export async function finalizeExecution(
     outputTokens?: number
     model?: string
     executionMode?: WorkerExecution["executionMode"]
+    dataProvenance?: WorkerExecution["dataProvenance"]
   },
 ): Promise<void> {
   await query(
-    `UPDATE executions SET status = $1, reason_code = $2, blocked_reason = $3, completed_at = $4, duration_ms = $5, cost_usd = $6, input_tokens = $7, output_tokens = $8, model = $9, execution_mode = $10 WHERE id = $11`,
+    `UPDATE executions SET status = $1, reason_code = $2, blocked_reason = $3, completed_at = $4, duration_ms = $5, cost_usd = $6, input_tokens = $7, output_tokens = $8, model = $9, execution_mode = $10, data_provenance = $11 WHERE id = $12`,
     [
       patch.status,
       patch.reasonCode ?? null,
@@ -408,6 +411,7 @@ export async function finalizeExecution(
       patch.outputTokens ?? null,
       patch.model ?? null,
       patch.executionMode ?? null,
+      patch.dataProvenance ?? null,
       id,
     ],
   )
@@ -430,6 +434,7 @@ interface ExecutionRow {
   output_tokens: number | null
   model: string | null
   execution_mode: string | null
+  data_provenance: string | null
 }
 
 function rowToExecution(r: ExecutionRow): WorkerExecution {
@@ -449,6 +454,7 @@ function rowToExecution(r: ExecutionRow): WorkerExecution {
     outputTokens: r.output_tokens ?? undefined,
     model: r.model ?? undefined,
     executionMode: (r.execution_mode as WorkerExecution["executionMode"]) ?? undefined,
+    dataProvenance: (r.data_provenance as WorkerExecution["dataProvenance"]) ?? undefined,
   }
 }
 
@@ -524,9 +530,159 @@ export async function insertBusinessEvent(be: BusinessEvent, orgId: string): Pro
 
 export async function insertMetric(metric: MetricRecord, orgId: string): Promise<void> {
   await query(
-    "INSERT INTO metrics (id, org_id, worker_id, execution_id, business_event_id, key, kind, value, unit, recorded_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-    [metric.id, orgId, metric.workerId, metric.executionId ?? null, metric.businessEventId ?? null, metric.key, metric.kind, metric.value, metric.unit ?? null, metric.recordedAt],
+    "INSERT INTO metrics (id, org_id, worker_id, execution_id, business_event_id, key, kind, value, unit, recorded_at, economic_state, value_category) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+    [
+      metric.id,
+      orgId,
+      metric.workerId,
+      metric.executionId ?? null,
+      metric.businessEventId ?? null,
+      metric.key,
+      metric.kind,
+      metric.value,
+      metric.unit ?? null,
+      metric.recordedAt,
+      metric.economicState ?? null,
+      metric.valueCategory ?? null,
+    ],
   )
+}
+
+/* ================================================================== *
+ * OPPORTUNITIES / DECISIONS — the Financial Intelligence Engine's
+ * output (lib/finance/*). Org-scoped like everything else. The rich
+ * shape is still stored in full as JSONB (`data`) — evidence/
+ * assumptions/economics/scenario/action stay nested there, since
+ * nothing queries into those sub-shapes directly — but every field a
+ * caller actually filters, sorts, or joins on (entity, skill, status,
+ * created_at, expected value, execution, provenance/economic state)
+ * is ALSO a real column (migrations 0003/0004), per Phase 4 §3/§4:
+ * "Do NOT store everything as opaque JSON if structured querying is
+ * needed." `data` remains the single source of truth on read — the
+ * real columns exist for indexed WHERE/ORDER BY, not as a second copy
+ * a caller might read instead and drift from it.
+ * ================================================================== */
+
+interface OpportunityRow {
+  id: string
+  worker_id: string
+  execution_id: string | null
+  data: Opportunity
+}
+
+export async function insertOpportunity(o: Opportunity, orgId: string): Promise<void> {
+  await query(
+    `INSERT INTO opportunities (id, org_id, worker_id, execution_id, entity_id, skill_id, category, status, expected_value, priority_value, currency, data_provenance, economic_state, data, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+    [
+      o.id,
+      orgId,
+      o.workerId,
+      o.executionId ?? null,
+      o.entityId,
+      o.skillId,
+      o.category,
+      o.status,
+      o.expectedValue,
+      o.economics.priorityValue,
+      o.currency,
+      o.dataProvenance,
+      o.economicState,
+      JSON.stringify(o),
+      o.createdAt,
+      o.updatedAt ?? o.createdAt,
+    ],
+  )
+}
+
+export async function listOpportunities(orgId: string): Promise<Opportunity[]> {
+  const rows = await query<OpportunityRow>("SELECT id, worker_id, execution_id, data FROM opportunities WHERE org_id = $1 ORDER BY priority_value DESC LIMIT 200", [orgId])
+  return rows.map((r) => r.data)
+}
+
+export async function getOpportunity(id: string, orgId: string): Promise<Opportunity | null> {
+  const row = await queryOne<OpportunityRow>("SELECT id, worker_id, execution_id, data FROM opportunities WHERE id = $1 AND org_id = $2", [id, orgId])
+  return row ? row.data : null
+}
+
+/** Updates an Opportunity's status (e.g. READY -> ACCEPTED/REJECTED/
+ * EXECUTED/VERIFIED) — the one real status transition this repo
+ * layer exposes; every other field is immutable once detected. Org-
+ * scoped like every other write; a no-op (silently) if the id/org
+ * pair doesn't match any row, same as every other org-scoped update
+ * in this file. Keeps `data`'s own `status`/`updatedAt` in sync via a
+ * targeted jsonb_set rather than a full read-modify-write, the same
+ * pattern appendWorkerMemory() already uses. */
+export async function updateOpportunityStatus(id: string, orgId: string, status: Opportunity["status"]): Promise<Opportunity | null> {
+  const now = Date.now()
+  const row = await queryOne<OpportunityRow>(
+    `UPDATE opportunities
+     SET status = $1, updated_at = $2, data = jsonb_set(jsonb_set(data, '{status}', to_jsonb($1::text)), '{updatedAt}', to_jsonb($2::bigint))
+     WHERE id = $3 AND org_id = $4
+     RETURNING id, worker_id, execution_id, data`,
+    [status, now, id, orgId],
+  )
+  return row ? row.data : null
+}
+
+interface DecisionRow {
+  id: string
+  worker_id: string
+  execution_id: string | null
+  data: Decision
+}
+
+export async function insertDecision(d: Decision, orgId: string): Promise<void> {
+  await query(
+    `INSERT INTO decisions (id, org_id, worker_id, execution_id, opportunity_id, entity_id, skill_id, status, policy_status, approval_status, execution_status, annual_benefit, currency, data_provenance, economic_state, data, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+    [
+      d.id,
+      orgId,
+      d.workerId,
+      d.executionId ?? null,
+      d.opportunityId,
+      d.entityId,
+      d.skillId,
+      d.status,
+      d.policyStatus,
+      d.approvalStatus,
+      d.executionStatus,
+      d.economicImpact.annualBenefit,
+      d.economicImpact.currency,
+      d.dataProvenance,
+      d.economicState,
+      JSON.stringify(d),
+      d.createdAt,
+      d.updatedAt ?? d.createdAt,
+    ],
+  )
+}
+
+export async function listDecisions(orgId: string): Promise<Decision[]> {
+  const rows = await query<DecisionRow>("SELECT id, worker_id, execution_id, data FROM decisions WHERE org_id = $1 ORDER BY created_at DESC LIMIT 200", [orgId])
+  return rows.map((r) => r.data)
+}
+
+export async function getDecision(id: string, orgId: string): Promise<Decision | null> {
+  const row = await queryOne<DecisionRow>("SELECT id, worker_id, execution_id, data FROM decisions WHERE id = $1 AND org_id = $2", [id, orgId])
+  return row ? row.data : null
+}
+
+/** Updates a Decision's decisionStatus (`status`: DETECTED/READY/
+ * PREPARED) — same pattern and same scope as updateOpportunityStatus
+ * above. Approval/policy/execution status stay computed by the engine
+ * itself (evaluatePolicy/gateAction), never client-settable here. */
+export async function updateDecisionStatus(id: string, orgId: string, status: Decision["status"]): Promise<Decision | null> {
+  const now = Date.now()
+  const row = await queryOne<DecisionRow>(
+    `UPDATE decisions
+     SET status = $1, updated_at = $2, data = jsonb_set(jsonb_set(data, '{status}', to_jsonb($1::text)), '{updatedAt}', to_jsonb($2::bigint))
+     WHERE id = $3 AND org_id = $4
+     RETURNING id, worker_id, execution_id, data`,
+    [status, now, id, orgId],
+  )
+  return row ? row.data : null
 }
 
 /* ---- bootstrap read: everything the client needs in one shot --------- */
@@ -538,13 +694,15 @@ export interface BootstrapState {
   events: WorkerEvent[]
   metrics: MetricRecord[]
   businessEvents: BusinessEvent[]
+  opportunities: Opportunity[]
+  decisions: Decision[]
 }
 
 export async function getBootstrapState(orgId: string): Promise<BootstrapState> {
   const workers = await listWorkers(orgId)
   const workerIds = workers.map((w) => w.id)
   if (workerIds.length === 0) {
-    return { workers: [], tasks: [], executions: [], outputs: [], events: [], metrics: [], businessEvents: [] }
+    return { workers: [], tasks: [], executions: [], outputs: [], events: [], metrics: [], businessEvents: [], opportunities: [], decisions: [] }
   }
   const placeholders = workerIds.map((_, i) => `$${i + 2}`).join(",")
 
@@ -613,10 +771,19 @@ export async function getBootstrapState(orgId: string): Promise<BootstrapState> 
     sequence: r.sequence,
   }))
 
-  const metricRows = await query<{ id: string; worker_id: string; execution_id: string | null; business_event_id: string | null; key: string; kind: string; value: number; unit: string | null; recorded_at: string }>(
-    `SELECT * FROM metrics WHERE org_id = $1 AND worker_id IN (${placeholders}) ORDER BY recorded_at DESC LIMIT 1000`,
-    [orgId, ...workerIds],
-  )
+  const metricRows = await query<{
+    id: string
+    worker_id: string
+    execution_id: string | null
+    business_event_id: string | null
+    key: string
+    kind: string
+    value: number
+    unit: string | null
+    recorded_at: string
+    economic_state: string | null
+    value_category: string | null
+  }>(`SELECT * FROM metrics WHERE org_id = $1 AND worker_id IN (${placeholders}) ORDER BY recorded_at DESC LIMIT 1000`, [orgId, ...workerIds])
   const metrics: MetricRecord[] = metricRows.map((r) => ({
     id: r.id,
     workerId: r.worker_id,
@@ -627,6 +794,8 @@ export async function getBootstrapState(orgId: string): Promise<BootstrapState> 
     value: r.value,
     unit: r.unit ?? undefined,
     recordedAt: Number(r.recorded_at),
+    economicState: (r.economic_state as MetricRecord["economicState"]) ?? undefined,
+    valueCategory: (r.value_category as MetricRecord["valueCategory"]) ?? undefined,
   }))
 
   const beRows = await query<{ id: string; worker_id: string; output_id: string | null; type: string; payload: Record<string, unknown>; occurred_at: string }>(
@@ -642,7 +811,19 @@ export async function getBootstrapState(orgId: string): Promise<BootstrapState> 
     occurredAt: Number(r.occurred_at),
   }))
 
-  return { workers, tasks, executions, outputs, events, metrics, businessEvents }
+  const opportunityRows = await query<OpportunityRow>(
+    `SELECT id, worker_id, execution_id, data FROM opportunities WHERE org_id = $1 AND worker_id IN (${placeholders}) ORDER BY priority_value DESC LIMIT 200`,
+    [orgId, ...workerIds],
+  )
+  const opportunities: Opportunity[] = opportunityRows.map((r) => r.data)
+
+  const decisionRows = await query<DecisionRow>(
+    `SELECT id, worker_id, execution_id, data FROM decisions WHERE org_id = $1 AND worker_id IN (${placeholders}) ORDER BY created_at DESC LIMIT 200`,
+    [orgId, ...workerIds],
+  )
+  const decisions: Decision[] = decisionRows.map((r) => r.data)
+
+  return { workers, tasks, executions, outputs, events, metrics, businessEvents, opportunities, decisions }
 }
 
 /* ================================================================== *

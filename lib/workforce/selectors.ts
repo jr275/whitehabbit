@@ -4,9 +4,10 @@
  * Execution / Output / Metric rows — never a hand-typed KPI.
  * ================================================================== */
 
-import { SKILL_CATALOG } from "./catalog"
-import type { MetricRecord, Worker, WorkerEvent, WorkerEventType, WorkerExecution, WorkerOutput, WorkerTask } from "./model"
-import { OUTPUT_TYPE_META } from "./model"
+import { SKILL_CATALOG, TOOL_CATALOG } from "./catalog"
+import { formatBusinessValue } from "./business-results"
+import type { DataProvenance, EconomicState, EconomicValueCategory, MetricRecord, Skill, Worker, WorkerEvent, WorkerEventType, WorkerExecution, WorkerOutput, WorkerTask } from "./model"
+import { ECONOMIC_VALUE_CATEGORY_LABEL, OUTPUT_TYPE_META } from "./model"
 import { getWorkerVisual } from "./visual-identity"
 
 /* ---- readiness (Studio) — real, and it names the real blocker ---- */
@@ -398,4 +399,88 @@ export function headerMetrics(tasks: WorkerTask[], executions: WorkerExecution[]
 /* ---- real operational totals, e.g. "sources analyzed" ---- */
 export function sumMetric(metrics: MetricRecord[], workerId: string, key: string): number {
   return metrics.filter((m) => m.workerId === workerId && m.key === key).reduce((s, m) => s + m.value, 0)
+}
+
+/* ================================================================== *
+ * SKILL CARD — the real projection behind components/skills/skill-
+ * card.tsx. Every field here is resolved from real data or explicitly
+ * left absent; nothing is invented to make a card look complete.
+ * "Business value" prefers a REAL, executed business metric (with its
+ * real economicState) over the skill's merely-declared valueCategories
+ * — a real $ number that actually ran outranks a semantic description
+ * of what the skill is designed to do, the moment one exists.
+ * ================================================================== */
+export type ConfidenceLabel = "High" | "Moderate" | "Low" | "Not yet evaluated"
+
+export interface SkillCardView {
+  id: string
+  name: string
+  description: string
+  status?: "active" | "beta" | "deprecated"
+  enabled: boolean
+  /** Real tool names this skill's own requiredTools resolve to —
+   * never a made-up list of "what it needs". */
+  needs: string[]
+  /** The real OUTPUT_TYPE_META label for what this skill actually
+   * produces when it runs. */
+  produces: string
+  /** Real, formatted business-metric lines if this skill has actually
+   * run and emitted one; otherwise the skill's declared (but not yet
+   * measured) value categories — visually distinguished by the caller
+   * using `hasRealValue`, never presented identically. */
+  businessValue: string[]
+  hasRealValue: boolean
+  riskLevel?: "low" | "medium" | "high" | "critical"
+  confidence: { label: ConfidenceLabel; score?: number }
+  /** Only present once this skill has actually completed a real run —
+   * see docs/financial-domain.md; never inferred for a skill that
+   * hasn't executed. */
+  provenance?: DataProvenance
+  economicState?: EconomicState
+}
+
+export function buildSkillCardView(
+  skill: Skill,
+  worker: Worker,
+  tasks: WorkerTask[],
+  executions: WorkerExecution[],
+  outputs: WorkerOutput[],
+  metrics: MetricRecord[],
+): SkillCardView {
+  const template = SKILL_CATALOG.find((t) => t.id === skill.id)
+  const needs = (template?.requiredTools ?? []).map((toolId) => TOOL_CATALOG.find((t) => t.id === toolId)?.name ?? toolId)
+  const outputType = template?.outputType ?? skill.outputType
+  const produces = OUTPUT_TYPE_META[outputType]?.label ?? outputType
+
+  const skillTaskIds = new Set(tasks.filter((t) => t.workerId === worker.id && t.skillId === skill.id).map((t) => t.id))
+  const skillExecutions = executions.filter((e) => e.workerId === worker.id && skillTaskIds.has(e.taskId))
+  const lastCompleted = skillExecutions.filter((e) => e.status === "completed").sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0))[0]
+  const lastOutput = lastCompleted ? outputs.find((o) => o.executionId === lastCompleted.id) : undefined
+  const businessMetrics = lastCompleted ? metrics.filter((m) => m.executionId === lastCompleted.id && m.kind === "business") : []
+
+  const confidence: { label: ConfidenceLabel; score?: number } =
+    lastOutput?.qualityScore == null
+      ? { label: "Not yet evaluated" }
+      : { label: lastOutput.qualityScore >= 80 ? "High" : lastOutput.qualityScore >= 50 ? "Moderate" : "Low", score: lastOutput.qualityScore }
+
+  const hasRealValue = businessMetrics.length > 0
+  const businessValue = hasRealValue
+    ? businessMetrics.map((m) => `${(m.valueCategory && ECONOMIC_VALUE_CATEGORY_LABEL[m.valueCategory]) ?? m.key}: ${formatBusinessValue(m.value, m.unit ?? "")}`)
+    : (template?.valueCategories ?? []).map((c) => ECONOMIC_VALUE_CATEGORY_LABEL[c])
+
+  return {
+    id: skill.id,
+    name: template?.name ?? skill.name,
+    description: template?.description ?? "",
+    status: template?.status,
+    enabled: skill.enabled,
+    needs,
+    produces,
+    businessValue,
+    hasRealValue,
+    riskLevel: template?.riskLevel,
+    confidence,
+    provenance: lastCompleted?.dataProvenance,
+    economicState: businessMetrics[0]?.economicState,
+  }
 }
