@@ -9,15 +9,20 @@
  * the client only ever displays what actually happened.
  * ================================================================== */
 
-export type SkillCategory = "research" | "content" | "communication" | "sales"
+export type SkillCategory = "research" | "content" | "communication" | "sales" | "marketing"
 
-export const SKILL_CATEGORIES: SkillCategory[] = ["research", "content", "communication", "sales"]
+export const SKILL_CATEGORIES: SkillCategory[] = ["research", "content", "communication", "sales", "marketing"]
 
 export const SKILL_CATEGORY_LABEL: Record<SkillCategory, string> = {
   research: "Research",
   content: "Content",
   communication: "Communication",
   sales: "Sales",
+  // Deliberately its own category, not folded into "content" or
+  // "sales" — Marketing Workforce V1's skills (lib/marketing/) are
+  // performance/analytics-driven (paid search, SEO diagnostics),
+  // a genuinely different capability shape than either.
+  marketing: "Marketing",
 }
 
 export interface Skill {
@@ -422,6 +427,8 @@ export type OutputKind =
   | "conversation_response"
   | "intelligence_report"
   | "creative_concepts"
+  | "search_waste_report"
+  | "marketing_recommendation_result"
 
 export type OutputStatus = "completed" | "failed"
 

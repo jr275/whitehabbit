@@ -101,6 +101,7 @@ const TRAINING: Record<SkillCategory, string> = {
   content: "Content Analysis Depth",
   communication: "Engagement Pattern Recognition",
   sales: "Pipeline Attribution Accuracy",
+  marketing: "Waste-Detection Precision Calibration",
 }
 
 const MIN_SAMPLE_SIZE = 5
