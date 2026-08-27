@@ -25,14 +25,15 @@ import { AlertTriangle, BookOpen, Check, KeyRound, Layers, ListChecks, Loader2, 
 import { useEffect, useState } from "react"
 import type { StepKey } from "@/components/studio/build-panel"
 import { ExecutionTimeline } from "@/components/outputs/output-drawer"
+import { SkillCard } from "@/components/skills/skill-card"
 import { WorkerAvatar } from "@/components/workforce/worker-avatar"
 import { getProduct } from "@/lib/products/catalog"
 import { profileForWorker } from "@/lib/workforce/business-results"
-import { SKILL_CATALOG } from "@/lib/workforce/catalog"
 import { toolExecutionBoundary, TOOL_BOUNDARY_META, type Worker, type WorkerEvent, type WorkerExecution, type WorkerOutput, type WorkerTask } from "@/lib/workforce/model"
 import {
   activeWork,
   buildExecutionStages,
+  buildSkillCardView,
   computeReadiness,
   computeWorkerState,
   credentialBlockers,
@@ -96,7 +97,7 @@ export function WorkerCanvas({
   activeStep: StepKey
   onNavigateToStep: (step: StepKey) => void
 }) {
-  const { lastSaved } = useWorkforce()
+  const { lastSaved, metrics } = useWorkforce()
   const product = worker.productId ? getProduct(worker.productId) : undefined
   const profile = profileForWorker(worker)
   const readiness = computeReadiness(worker)
@@ -124,6 +125,11 @@ export function WorkerCanvas({
       : null
 
   const liveStages = runningExecution ? buildExecutionStages(runningExecution, events) : null
+  // which real skill (if any) the currently-running execution belongs
+  // to — used only to light up that exact Skill Card, never a blanket
+  // "something is happening" highlight across skills that aren't running.
+  const runningSkillId = runningExecution ? tasks.find((t) => t.id === runningExecution.taskId)?.skillId : undefined
+  const enabledSkills = worker.skills.filter((s) => s.enabled)
 
   // real recent history for this worker — shown only once idle, never
   // fabricated, and only when there's actually something to show.
@@ -166,17 +172,30 @@ export function WorkerCanvas({
             <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{worker.identity.role || "No role set"}</p>
             {worker.mission.trim() && <p className="mt-2 line-clamp-3 text-[11.5px] leading-relaxed text-muted-foreground">{worker.mission}</p>}
           </div>
-          <CapabilityCard
-            className="lg:col-start-2 lg:row-start-1"
-            icon={Layers}
-            label="Skills"
-            items={worker.skills.filter((s) => s.enabled).map((s) => SKILL_CATALOG.find((t) => t.id === s.id)?.name ?? s.name)}
-            empty="No skills enabled — click to configure"
-            executing={active.length > 0}
-            selected={activeStep === "skills"}
-            flash={flashCategory === STEP_SAVE_CATEGORY.skills}
-            onClick={() => onNavigateToStep("skills")}
-          />
+          <div className="flex flex-col gap-2.5 lg:col-start-2 lg:row-start-1">
+            {enabledSkills.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => onNavigateToStep("skills")}
+                className={`w-full rounded-xl border bg-card p-3.5 text-left transition-colors ${cardToneClass(activeStep === "skills", flashCategory === STEP_SAVE_CATEGORY.skills, false)}`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-muted-foreground">Skills</span>
+                </div>
+                <p className="mt-2 text-[11px] italic text-muted-foreground/70">No skills enabled — click to configure</p>
+              </button>
+            ) : (
+              enabledSkills.map((skill) => (
+                <SkillCard
+                  key={skill.id}
+                  skill={buildSkillCardView(skill, worker, tasks, executions, outputs, metrics)}
+                  executing={skill.id === runningSkillId}
+                  onConfigure={() => onNavigateToStep("skills")}
+                />
+              ))
+            )}
+          </div>
           <ToolsCapabilityCard
             className="lg:col-start-1 lg:row-start-2"
             worker={worker}

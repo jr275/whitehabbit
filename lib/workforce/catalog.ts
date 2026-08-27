@@ -14,7 +14,7 @@
  * is no metadata for a skill or tool that doesn't actually exist.
  * ================================================================== */
 
-import type { ChannelId, SkillCategory, ToolPermission, ToolRisk } from "./model"
+import type { ChannelId, EconomicValueCategory, SkillCategory, ToolPermission, ToolRisk } from "./model"
 
 export interface SkillTemplate {
   id: string
@@ -25,6 +25,26 @@ export interface SkillTemplate {
   taskTitle: string
   requiredTools: string[]
   inputs: { key: string; label: string; type: "text" | "textarea"; required: boolean; placeholder?: string }[]
+  /** Mirrors the real SkillDefinition.riskLevel (lib/agent/types.ts) —
+   * optional for the same reason as there: only the four financial
+   * skills carry it today, copied by hand from each skill's own file
+   * rather than computed, so it can never silently drift from the
+   * value the server actually enforces. */
+  riskLevel?: "low" | "medium" | "high" | "critical"
+  /** Which real EconomicValueCategory this skill's own metrics()
+   * function can actually emit (via economicImpactMetric() in
+   * lib/agent/skills/finance-shared.ts) — a declared fact copied from
+   * that code, not a marketing description. A skill Card renders this
+   * as its "Business Value" when no execution has happened yet to
+   * produce a real number. Omitted entirely for a skill that, like
+   * Cash Forecast, deliberately emits no business metric yet. */
+  valueCategories?: EconomicValueCategory[]
+  /** Mirrors the real SkillDefinition.status — same reasoning as
+   * riskLevel above. A Skill Card shows this so a real "beta" fact
+   * (still maturing, only exercised against demo data so far) is
+   * visible where the decision to trust it gets made, not buried in
+   * code. */
+  status?: "active" | "beta" | "deprecated"
 }
 
 export const SKILL_CATALOG: SkillTemplate[] = [
@@ -97,6 +117,9 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     taskTitle: "Monitor cash position",
     requiredTools: ["tool_financial_data", "tool_llm"],
     inputs: [],
+    riskLevel: "low",
+    valueCategories: ["risk_exposure_reduced"],
+    status: "beta",
   },
   {
     id: "skill_cash_forecast",
@@ -107,6 +130,12 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     taskTitle: "Forecast cash position",
     requiredTools: ["tool_financial_data", "tool_llm"],
     inputs: [],
+    riskLevel: "low",
+    // Deliberately no valueCategories — forecast accuracy is only ever
+    // measurable in hindsight (see cash-forecast.ts), and this skill
+    // does not yet emit a business metric. No category to show here
+    // is the honest state, not an oversight.
+    status: "beta",
   },
   {
     id: "skill_working_capital_opportunity",
@@ -117,6 +146,9 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     taskTitle: "Detect working capital opportunities",
     requiredTools: ["tool_financial_data", "tool_llm"],
     inputs: [],
+    riskLevel: "medium",
+    valueCategories: ["working_capital_released"],
+    status: "beta",
   },
   {
     id: "skill_receivables_risk",
@@ -127,6 +159,9 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     taskTitle: "Detect receivables risk",
     requiredTools: ["tool_financial_data", "tool_llm"],
     inputs: [],
+    riskLevel: "low",
+    valueCategories: ["risk_exposure_reduced"],
+    status: "beta",
   },
 ]
 
