@@ -97,20 +97,20 @@ two are not, because they're the only ones a real user can click into today:
    around is a bigger liability than benefit once this product is positioned as a financial
    system of record.
 
-My recommendation: **delete `/insights`** now (low risk, already orphaned from nav), and for
-`/library`, **option (b)** — pull "Skills" from primary nav for now rather than deleting the
-code outright, since the underlying card component (`components/library/worker-card.tsx`) is
-genuinely the best-designed "Skill Card" in the repo and is worth reusing once it's pointed at
-real data (see the audit's §12, Skill Experience Assessment). I'll hold off deleting/hiding
-either until you confirm.
+**Resolved (confirmed by product owner):** `/insights` deleted outright — page, both consumer
+components, both fixture data files, and its unused `public/insights/*.png` assets. `/library`
+kept but unlinked from the top nav's Build group — its Skill Card component
+(`components/library/worker-card.tsx`) is genuinely the best-designed "Skill Card" in the repo
+(see the audit's §12) and is worth reusing once it's pointed at a real financial Worker; the
+route stays reachable by direct URL only until then.
 
 ## 6. Screens and APIs affected by this phase
 
-**Deleted, no replacement needed (zero live screens):** none — see §3, nothing user-facing
-changes when the dead cluster is removed.
+**Deleted:** `/insights` (route, both consumer components, both fixture data files, unused
+image assets).
 
-**Changed pending §5's answer:** `/library`, `/library/[id]`, `/insights`, and the "Skills"
-entry in `components/studio/top-nav.tsx`.
+**Changed:** `components/studio/top-nav.tsx` — "Skills" removed from the Build group.
+`/library` and `/library/[id]` are otherwise untouched; still fully functional, just unlinked.
 
 **Unaffected:** `/`, `/workforce`, `/workforce/[id]`, `/studio`, `/outputs`, `/approvals`,
 `/observatory`, `/outcomes`, `/evolve`, `/factory`, `/products`, `/products/[slug]/onboard`,
