@@ -12,6 +12,7 @@ import "server-only"
 
 import { randomUUID } from "node:crypto"
 import { query, queryOne, withTransaction } from "./client"
+import type { Decision, Opportunity } from "@/lib/finance/types"
 import type {
   BusinessEvent,
   MetricRecord,
@@ -547,6 +548,64 @@ export async function insertMetric(metric: MetricRecord, orgId: string): Promise
   )
 }
 
+/* ================================================================== *
+ * OPPORTUNITIES / DECISIONS — the Financial Intelligence Engine's
+ * output (lib/finance/*). Org-scoped like everything else; the rich
+ * shape is stored as JSONB (`data`) with a few real columns (status,
+ * category, expected/priority value) pulled out for filtering/sorting
+ * without deserializing every row.
+ * ================================================================== */
+
+interface OpportunityRow {
+  id: string
+  worker_id: string
+  execution_id: string | null
+  data: Opportunity
+}
+
+export async function insertOpportunity(o: Opportunity, orgId: string): Promise<void> {
+  await query(
+    `INSERT INTO opportunities (id, org_id, worker_id, execution_id, category, status, expected_value, priority_value, currency, data, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [o.id, orgId, o.workerId, o.executionId ?? null, o.category, o.status, o.expectedValue, o.economics.priorityValue, o.currency, JSON.stringify(o), o.createdAt],
+  )
+}
+
+export async function listOpportunities(orgId: string): Promise<Opportunity[]> {
+  const rows = await query<OpportunityRow>("SELECT id, worker_id, execution_id, data FROM opportunities WHERE org_id = $1 ORDER BY priority_value DESC LIMIT 200", [orgId])
+  return rows.map((r) => r.data)
+}
+
+export async function getOpportunity(id: string, orgId: string): Promise<Opportunity | null> {
+  const row = await queryOne<OpportunityRow>("SELECT id, worker_id, execution_id, data FROM opportunities WHERE id = $1 AND org_id = $2", [id, orgId])
+  return row ? row.data : null
+}
+
+interface DecisionRow {
+  id: string
+  worker_id: string
+  execution_id: string | null
+  data: Decision
+}
+
+export async function insertDecision(d: Decision, orgId: string): Promise<void> {
+  await query(
+    `INSERT INTO decisions (id, org_id, worker_id, execution_id, opportunity_id, status, policy_status, approval_status, annual_benefit, currency, data, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    [d.id, orgId, d.workerId, d.executionId ?? null, d.opportunityId, d.status, d.policyStatus, d.approvalStatus, d.economicImpact.annualBenefit, d.economicImpact.currency, JSON.stringify(d), d.createdAt],
+  )
+}
+
+export async function listDecisions(orgId: string): Promise<Decision[]> {
+  const rows = await query<DecisionRow>("SELECT id, worker_id, execution_id, data FROM decisions WHERE org_id = $1 ORDER BY created_at DESC LIMIT 200", [orgId])
+  return rows.map((r) => r.data)
+}
+
+export async function getDecision(id: string, orgId: string): Promise<Decision | null> {
+  const row = await queryOne<DecisionRow>("SELECT id, worker_id, execution_id, data FROM decisions WHERE id = $1 AND org_id = $2", [id, orgId])
+  return row ? row.data : null
+}
+
 /* ---- bootstrap read: everything the client needs in one shot --------- */
 export interface BootstrapState {
   workers: Worker[]
@@ -556,13 +615,15 @@ export interface BootstrapState {
   events: WorkerEvent[]
   metrics: MetricRecord[]
   businessEvents: BusinessEvent[]
+  opportunities: Opportunity[]
+  decisions: Decision[]
 }
 
 export async function getBootstrapState(orgId: string): Promise<BootstrapState> {
   const workers = await listWorkers(orgId)
   const workerIds = workers.map((w) => w.id)
   if (workerIds.length === 0) {
-    return { workers: [], tasks: [], executions: [], outputs: [], events: [], metrics: [], businessEvents: [] }
+    return { workers: [], tasks: [], executions: [], outputs: [], events: [], metrics: [], businessEvents: [], opportunities: [], decisions: [] }
   }
   const placeholders = workerIds.map((_, i) => `$${i + 2}`).join(",")
 
@@ -671,7 +732,19 @@ export async function getBootstrapState(orgId: string): Promise<BootstrapState> 
     occurredAt: Number(r.occurred_at),
   }))
 
-  return { workers, tasks, executions, outputs, events, metrics, businessEvents }
+  const opportunityRows = await query<OpportunityRow>(
+    `SELECT id, worker_id, execution_id, data FROM opportunities WHERE org_id = $1 AND worker_id IN (${placeholders}) ORDER BY priority_value DESC LIMIT 200`,
+    [orgId, ...workerIds],
+  )
+  const opportunities: Opportunity[] = opportunityRows.map((r) => r.data)
+
+  const decisionRows = await query<DecisionRow>(
+    `SELECT id, worker_id, execution_id, data FROM decisions WHERE org_id = $1 AND worker_id IN (${placeholders}) ORDER BY created_at DESC LIMIT 200`,
+    [orgId, ...workerIds],
+  )
+  const decisions: Decision[] = decisionRows.map((r) => r.data)
+
+  return { workers, tasks, executions, outputs, events, metrics, businessEvents, opportunities, decisions }
 }
 
 /* ================================================================== *

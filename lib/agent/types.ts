@@ -15,7 +15,8 @@
  * a tool and does not depend on any client code.
  * ================================================================== */
 
-import type { DataProvenance, EconomicState, EconomicValueCategory, SkillCategory } from "@/lib/workforce/model"
+import type { Decision, Opportunity } from "@/lib/finance/types"
+import type { Autonomy, DataProvenance, EconomicState, EconomicValueCategory, SkillCategory } from "@/lib/workforce/model"
 
 /* ---- the real slice of a Worker's definition a skill actually needs
  * to reason with — mission/objectives/behaviors/knowledge, resolved
@@ -28,6 +29,11 @@ export interface WorkerContext {
   objectives: string[]
   behaviors: { condition: string; action: string }[]
   knowledge: { id: string; name: string; type: string; content?: string }[]
+  /** The real, stored Worker.autonomy ("low"|"medium"|"high") — added
+   * for the Financial Intelligence Engine's autonomy gating (§19).
+   * Every other skill is free to ignore it, same as any other
+   * WorkerContext field it doesn't use. */
+  autonomy: Autonomy
 }
 
 /* ---- permission / risk vocabulary (section 16) ---- */
@@ -129,6 +135,14 @@ export interface SkillExecutionResult {
    * different from that, e.g. a financial skill reasoning over a demo
    * ledger while still making a real LLM call. */
   dataProvenance?: Exclude<DataProvenance, "not_connected">
+  /** Real Opportunity/Decision objects this execution's Financial
+   * Intelligence pipeline produced (lib/finance/*) — undefined/empty
+   * for every non-financial-intelligence skill. Persisted by the SAME
+   * runtime that persists Output/MetricEmission (lib/agent/runtime.ts)
+   * — this is deliberately not a second execution engine, just two
+   * more kinds of row the existing one knows how to write (§22). */
+  opportunities?: Opportunity[]
+  decisions?: Decision[]
 }
 
 export interface SkillEvaluation {

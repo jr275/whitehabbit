@@ -2,6 +2,7 @@ import "server-only"
 
 import { cashForecastSkill } from "./cash-forecast"
 import { cashPositionMonitorSkill } from "./cash-position-monitor"
+import { cashWorkingCapitalIntelligenceSkill } from "./cash-working-capital-intelligence"
 import { contentIntelligenceSkill } from "./content-intelligence"
 import { customerConversationSkill } from "./customer-conversation"
 import { engagementAnalysisSkill } from "./engagement-analysis"
@@ -30,6 +31,7 @@ export const SKILL_REGISTRY: SkillDefinition[] = [
   cashForecastSkill,
   workingCapitalOpportunitySkill,
   receivablesRiskSkill,
+  cashWorkingCapitalIntelligenceSkill,
 ]
 
 export function getSkill(id: string): SkillDefinition | undefined {

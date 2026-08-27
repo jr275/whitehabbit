@@ -31,6 +31,7 @@ import type {
   WorkerOutput,
   WorkerTask,
 } from "./model"
+import type { Decision, Opportunity } from "@/lib/finance/types"
 
 /** Which Build category a just-completed real save belongs to — lets the
  * canvas briefly acknowledge the matching capability card. Set only
@@ -46,6 +47,8 @@ export interface WorkforceState {
   events: WorkerEvent[]
   metrics: MetricRecord[]
   businessEvents: BusinessEvent[]
+  opportunities: Opportunity[]
+  decisions: Decision[]
   runningWorkerIds: string[]
   activeWorkerId: string | null
   testingWorkerId: string | null
@@ -65,6 +68,8 @@ const INITIAL: WorkforceState = {
   events: [],
   metrics: [],
   businessEvents: [],
+  opportunities: [],
+  decisions: [],
   runningWorkerIds: [],
   activeWorkerId: null,
   testingWorkerId: null,
@@ -139,7 +144,17 @@ class WorkforceStore {
     if (this.hydratePromise) return this.hydratePromise
     this.hydratePromise = (async () => {
       try {
-        const data = await api<{ workers: Worker[]; tasks: WorkerTask[]; executions: WorkerExecution[]; outputs: WorkerOutput[]; events: WorkerEvent[]; metrics: MetricRecord[]; businessEvents: BusinessEvent[] }>("/api/state")
+        const data = await api<{
+          workers: Worker[]
+          tasks: WorkerTask[]
+          executions: WorkerExecution[]
+          outputs: WorkerOutput[]
+          events: WorkerEvent[]
+          metrics: MetricRecord[]
+          businessEvents: BusinessEvent[]
+          opportunities: Opportunity[]
+          decisions: Decision[]
+        }>("/api/state")
         this.set({
           hydrated: true,
           workers: data.workers,
@@ -149,6 +164,8 @@ class WorkforceStore {
           events: data.events,
           metrics: data.metrics,
           businessEvents: data.businessEvents,
+          opportunities: data.opportunities,
+          decisions: data.decisions,
           activeWorkerId: data.workers[0]?.id ?? null,
         })
         await this.reconcileActiveExecutions()

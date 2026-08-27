@@ -453,6 +453,7 @@ export const OUTPUT_TYPE_META: Record<string, { label: string; plural: string; f
   cash_forecast: { label: "Cash forecast", plural: "Cash forecasts", filter: "Finance" },
   working_capital_opportunities: { label: "Working capital opportunities", plural: "Working capital opportunities", filter: "Finance" },
   receivables_risk_analysis: { label: "Receivables risk analysis", plural: "Receivables risk analyses", filter: "Finance" },
+  financial_intelligence_run: { label: "Financial intelligence run", plural: "Financial intelligence runs", filter: "Finance" },
 }
 
 export const OUTPUT_STATUS_META: Record<OutputStatus, { label: string; tone: "good" | "info" | "warn" | "bad" | "muted" }> = {

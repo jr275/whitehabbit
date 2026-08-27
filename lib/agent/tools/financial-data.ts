@@ -28,6 +28,7 @@ import {
   totalReceivables,
 } from "@/lib/agent/data/demo-financial-ledger"
 import type { ToolActionResult, ToolDefinition } from "@/lib/agent/types"
+import { USA_ANNUAL_COGS, USA_ANNUAL_REVENUE, USA_CUSTOMERS, USA_FUNDING_FACILITIES, USA_INVENTORY_VALUE, USA_SUPPLIERS } from "@/lib/finance/demo-data"
 
 const PROVIDER_NAME = "Demo Financial Ledger (fictional data)"
 
@@ -89,16 +90,49 @@ async function getCashFlowHistory(): Promise<ToolActionResult> {
   }
 }
 
+/* ---- Phase 3 additions: the facts the Financial Intelligence Engine
+ * needs beyond the original four read actions above (suppliers,
+ * customers, funding facilities, and the annual revenue/COGS/inventory
+ * figures DSO/DPO/DIO/CCC require) — same tool, same demo provenance,
+ * no new Tool abstraction (§5, §23). */
+async function getSuppliers(): Promise<ToolActionResult> {
+  const started = Date.now()
+  return { ok: true, data: { ...demoEnvelope(), suppliers: USA_SUPPLIERS }, durationMs: Date.now() - started }
+}
+
+async function getCustomers(): Promise<ToolActionResult> {
+  const started = Date.now()
+  return { ok: true, data: { ...demoEnvelope(), customers: USA_CUSTOMERS }, durationMs: Date.now() - started }
+}
+
+async function getFundingFacilities(): Promise<ToolActionResult> {
+  const started = Date.now()
+  return { ok: true, data: { ...demoEnvelope(), facilities: USA_FUNDING_FACILITIES }, durationMs: Date.now() - started }
+}
+
+async function getAnnualFigures(): Promise<ToolActionResult> {
+  const started = Date.now()
+  return {
+    ok: true,
+    data: { ...demoEnvelope(), annualCreditSales: USA_ANNUAL_REVENUE, annualCOGS: USA_ANNUAL_COGS, inventoryValue: USA_INVENTORY_VALUE },
+    durationMs: Date.now() - started,
+  }
+}
+
 export const financialDataTool: ToolDefinition = {
   id: "tool_financial_data",
   name: "Financial Data",
   provider: PROVIDER_NAME,
-  description: "Provides a demo, clearly fictional financial dataset for one illustrative company (cash, receivables, payables, 13-week cash flow history) — never real bank or ERP data.",
+  description: "Provides a demo, clearly fictional financial dataset for one illustrative company (cash, receivables, payables, suppliers, customers, funding facilities, 13-week cash flow history) — never real bank or ERP data.",
   isConnected: () => true, // the demo capability itself genuinely always works
   actions: [
     { id: "getCashPosition", label: "Get cash position", permission: "read", riskLevel: "low", run: getCashPosition },
     { id: "getReceivables", label: "Get receivables", permission: "read", riskLevel: "low", run: getReceivables },
     { id: "getPayables", label: "Get payables", permission: "read", riskLevel: "low", run: getPayables },
     { id: "getCashFlowHistory", label: "Get cash flow history", permission: "read", riskLevel: "low", run: getCashFlowHistory },
+    { id: "getSuppliers", label: "Get suppliers", permission: "read", riskLevel: "low", run: getSuppliers },
+    { id: "getCustomers", label: "Get customers", permission: "read", riskLevel: "low", run: getCustomers },
+    { id: "getFundingFacilities", label: "Get funding facilities", permission: "read", riskLevel: "low", run: getFundingFacilities },
+    { id: "getAnnualFigures", label: "Get annual revenue/COGS/inventory", permission: "read", riskLevel: "low", run: getAnnualFigures },
   ],
 }

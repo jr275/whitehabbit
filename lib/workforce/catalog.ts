@@ -163,6 +163,19 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     valueCategories: ["risk_exposure_reduced"],
     status: "beta",
   },
+  {
+    id: "skill_cash_working_capital_intelligence",
+    name: "Cash & Working Capital Intelligence",
+    category: "finance",
+    description: "Runs a deterministic, auditable pipeline over real (demo) financial facts — cash position, 13-week liquidity projection, working capital ratios, opportunity detection, scenario simulation, policy evaluation — and produces real Opportunities, Decisions, and a Business Output. No LLM call; every number is a pure calculation.",
+    outputType: "financial_intelligence_run",
+    taskTitle: "Run financial intelligence",
+    requiredTools: ["tool_financial_data"],
+    inputs: [],
+    riskLevel: "medium",
+    valueCategories: ["working_capital_released", "cost_reduced"],
+    status: "beta",
+  },
 ]
 
 export interface ToolTemplate {
@@ -192,7 +205,7 @@ export const TOOL_CATALOG: ToolTemplate[] = [
   // (the demo ledger always works); "real" vs "demo" is a fact about
   // the DATA, carried separately on each execution's dataProvenance.
   // `provides` mirrors the tool's four real actions exactly.
-  { id: "tool_financial_data", name: "Financial Data", provider: "Demo Financial Ledger (fictional data)", description: "Provides a demo, clearly fictional financial dataset (cash, receivables, payables, cash flow history) for one illustrative company.", risk: "low", permission: "read", provides: ["Cash position", "Receivables", "Payables", "Cash flow history"] },
+  { id: "tool_financial_data", name: "Financial Data", provider: "Demo Financial Ledger (fictional data)", description: "Provides a demo, clearly fictional financial dataset (cash, receivables, payables, suppliers, customers, funding facilities, cash flow history) for one illustrative company.", risk: "low", permission: "read", provides: ["Cash position", "Receivables", "Payables", "Suppliers", "Customers", "Funding facilities", "Cash flow history"] },
 ]
 
 /** The three connector categories this Worker's mission implies but

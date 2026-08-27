@@ -15,6 +15,9 @@ node_modules
 .DS_Store
 *.tsbuildinfo
 
-# Local SQLite persistence
-data/
+# Local SQLite persistence (root-only — unanchored "data/" previously
+# also matched lib/agent/data/, silently excluding the demo financial
+# ledger every financial Skill depends on from every commit since it
+# was created; fixed here, and that file is now tracked for real)
+/data/
 *.sqlite3
