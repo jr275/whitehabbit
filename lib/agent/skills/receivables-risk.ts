@@ -10,11 +10,13 @@ import { DEMO_RECEIVABLES, receivablesConcentration, totalReceivables } from "@/
 import { retrieveRelevantKnowledge } from "@/lib/agent/knowledge"
 import {
   economicImpactMetric,
+  enforceAuthoritativeMetrics,
   evaluateFinancialFindings,
   FINANCIAL_FINDINGS_SCHEMA_PROMPT,
   financialOperationalMetrics,
   parseFinancialFindings,
   renderFinancialFindingsSummary,
+  type AuthoritativeMetric,
   type FinancialFindingsPayload,
 } from "@/lib/agent/skills/finance-shared"
 import { runToolAction } from "@/lib/agent/tool-runner"
@@ -78,7 +80,20 @@ export const receivablesRiskSkill: SkillDefinition = {
     const analyzeAction = llm.actions.find((a) => a.id === "analyze")!
     const knowledge = retrieveRelevantKnowledge(ctx.worker.knowledge, "receivables collections risk")
     const knowledgeBlock = knowledge.length ? `\n\nInternal knowledge provided by the operator:\n${knowledge.map((k) => `[${k.name}] ${k.snippet}`).join("\n\n")}` : ""
-    const prompt = `As of ${data.asOfDate}, here is the real receivables data:\n${JSON.stringify(data, null, 2)}${knowledgeBlock}\n\nIdentify genuine receivables risk findings from this data.`
+    // Phase 4 §21 — the LLM never invents these two figures; both are
+    // already real, deterministic calculations in demo-financial-
+    // ledger.ts, just enforced onto the response regardless of what
+    // number the model wrote.
+    const concentration = receivablesConcentration()
+    const topConcentrationPct = concentration[0]?.pct ?? 0
+    const overdueTotal = DEMO_RECEIVABLES.filter((r) => r.status === "overdue").reduce((s, r) => s + r.amount, 0)
+    const authoritative: AuthoritativeMetric[] = [
+      { match: /concentrat/i, value: topConcentrationPct, unit: "%" },
+      { match: /overdue/i, value: overdueTotal, unit: "$" },
+    ]
+    const authoritativeBlock = `\n\nAUTHORITATIVE COMPUTED FIGURES (do not recompute — cite exactly):\n- Largest single-customer receivables concentration: ${topConcentrationPct}% (${concentration[0]?.customer ?? "n/a"})\n- Total overdue receivables: ${overdueTotal}`
+
+    const prompt = `As of ${data.asOfDate}, here is the real receivables data:\n${JSON.stringify(data, null, 2)}${authoritativeBlock}${knowledgeBlock}\n\nIdentify genuine receivables risk findings from this data.`
     const llmResult = await runToolAction<{ text: string; model: string; inputTokens: number; outputTokens: number; provider: string; executionMode?: "development" }>(
       llm.id,
       llm.name,
@@ -94,8 +109,9 @@ export const receivablesRiskSkill: SkillDefinition = {
     const llmData = llmResult.data!
     ctx.emit("reasoning_completed", { durationMs: llmResult.durationMs, inputTokens: llmData.inputTokens, outputTokens: llmData.outputTokens, executionMode: llmData.executionMode })
 
-    const parsed = parseFinancialFindings(llmData.text)
-    if (!parsed) throw new Error("The LLM response was not valid structured findings data.")
+    const rawParsed = parseFinancialFindings(llmData.text)
+    if (!rawParsed) throw new Error("The LLM response was not valid structured findings data.")
+    const parsed = enforceAuthoritativeMetrics(rawParsed, authoritative)
 
     return {
       structured: parsed,

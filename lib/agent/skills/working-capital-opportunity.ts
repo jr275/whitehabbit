@@ -11,16 +11,20 @@ import { DEMO_BANK_ACCOUNTS, DEMO_PAYABLES, totalPayables } from "@/lib/agent/da
 import { retrieveRelevantKnowledge } from "@/lib/agent/knowledge"
 import {
   economicImpactMetric,
+  enforceAuthoritativeMetrics,
   evaluateFinancialFindings,
   FINANCIAL_FINDINGS_SCHEMA_PROMPT,
   financialOperationalMetrics,
   parseFinancialFindings,
   renderFinancialFindingsSummary,
+  type AuthoritativeMetric,
   type FinancialFindingsPayload,
 } from "@/lib/agent/skills/finance-shared"
 import { runToolAction } from "@/lib/agent/tool-runner"
 import type { SkillDefinition, SkillEvaluation, SkillExecutionResult, WorkerContext } from "@/lib/agent/types"
 import { InvalidCredentialError, ProviderError, SkillBlockedError } from "@/lib/agent/types"
+import { USA_BANK_ACCOUNTS, USA_PAYABLES } from "@/lib/finance/demo-data"
+import { calculateIdleCash } from "@/lib/finance/metrics"
 
 const SYSTEM_PROMPT = `You are a working-capital analyst. You are given REAL (demo) cash balances and payables data and must identify genuine opportunities to release or preserve cash — an early-payment discount not being captured, cash sitting idle in a low-yield account that could be better allocated, a payment-timing adjustment. Never invent a discount, balance, or supplier not given to you.
 
@@ -80,7 +84,22 @@ export const workingCapitalOpportunitySkill: SkillDefinition = {
     const analyzeAction = llm.actions.find((a) => a.id === "analyze")!
     const knowledge = retrieveRelevantKnowledge(ctx.worker.knowledge, "working capital cash")
     const knowledgeBlock = knowledge.length ? `\n\nInternal knowledge provided by the operator:\n${knowledge.map((k) => `[${k.name}] ${k.snippet}`).join("\n\n")}` : ""
-    const prompt = `As of ${cash.asOfDate}, here is the real cash position:\n${JSON.stringify(cash, null, 2)}\n\nAnd the real payables:\n${JSON.stringify(payables, null, 2)}${knowledgeBlock}\n\nIdentify genuine working-capital opportunities from this data.`
+    // Phase 4 §21 — the LLM never invents these two dollar figures;
+    // they are the same deterministic calculations the Financial
+    // Intelligence engine uses (lib/finance/opportunities.ts).
+    const discountable = USA_PAYABLES.filter((p) => p.earlyPayDiscountPct > 0)
+    const discountValue = discountable.reduce((s, p) => s + p.amount * (p.earlyPayDiscountPct / 100), 0)
+    const idle = calculateIdleCash(USA_BANK_ACCOUNTS)
+    const bestYield = Math.max(...USA_BANK_ACCOUNTS.map((a) => a.yieldPct), 0)
+    const avgIdleYield = idle.idleAccounts.length ? idle.idleAccounts.reduce((s, a) => s + a.yieldPct, 0) / idle.idleAccounts.length : 0
+    const idleValue = idle.totalIdle * ((bestYield - avgIdleYield) / 100)
+    const authoritative: AuthoritativeMetric[] = [
+      { match: /discount/i, value: Math.round(discountValue * 100) / 100, unit: "$" },
+      { match: /idle/i, value: Math.round(idleValue * 100) / 100, unit: "$" },
+    ]
+    const authoritativeBlock = `\n\nAUTHORITATIVE COMPUTED FIGURES (do not recompute — cite exactly):\n- Total uncaptured early-payment discount value: ${discountValue.toFixed(2)}\n- Total idle-cash reallocation value: ${idleValue.toFixed(2)}`
+
+    const prompt = `As of ${cash.asOfDate}, here is the real cash position:\n${JSON.stringify(cash, null, 2)}\n\nAnd the real payables:\n${JSON.stringify(payables, null, 2)}${authoritativeBlock}${knowledgeBlock}\n\nIdentify genuine working-capital opportunities from this data.`
     const llmResult = await runToolAction<{ text: string; model: string; inputTokens: number; outputTokens: number; provider: string; executionMode?: "development" }>(
       llm.id,
       llm.name,
@@ -96,8 +115,9 @@ export const workingCapitalOpportunitySkill: SkillDefinition = {
     const llmData = llmResult.data!
     ctx.emit("reasoning_completed", { durationMs: llmResult.durationMs, inputTokens: llmData.inputTokens, outputTokens: llmData.outputTokens, executionMode: llmData.executionMode })
 
-    const parsed = parseFinancialFindings(llmData.text)
-    if (!parsed) throw new Error("The LLM response was not valid structured findings data.")
+    const rawParsed = parseFinancialFindings(llmData.text)
+    if (!rawParsed) throw new Error("The LLM response was not valid structured findings data.")
+    const parsed = enforceAuthoritativeMetrics(rawParsed, authoritative)
 
     return {
       structured: parsed,

@@ -550,10 +550,17 @@ export async function insertMetric(metric: MetricRecord, orgId: string): Promise
 
 /* ================================================================== *
  * OPPORTUNITIES / DECISIONS — the Financial Intelligence Engine's
- * output (lib/finance/*). Org-scoped like everything else; the rich
- * shape is stored as JSONB (`data`) with a few real columns (status,
- * category, expected/priority value) pulled out for filtering/sorting
- * without deserializing every row.
+ * output (lib/finance/*). Org-scoped like everything else. The rich
+ * shape is still stored in full as JSONB (`data`) — evidence/
+ * assumptions/economics/scenario/action stay nested there, since
+ * nothing queries into those sub-shapes directly — but every field a
+ * caller actually filters, sorts, or joins on (entity, skill, status,
+ * created_at, expected value, execution, provenance/economic state)
+ * is ALSO a real column (migrations 0003/0004), per Phase 4 §3/§4:
+ * "Do NOT store everything as opaque JSON if structured querying is
+ * needed." `data` remains the single source of truth on read — the
+ * real columns exist for indexed WHERE/ORDER BY, not as a second copy
+ * a caller might read instead and drift from it.
  * ================================================================== */
 
 interface OpportunityRow {
@@ -565,9 +572,26 @@ interface OpportunityRow {
 
 export async function insertOpportunity(o: Opportunity, orgId: string): Promise<void> {
   await query(
-    `INSERT INTO opportunities (id, org_id, worker_id, execution_id, category, status, expected_value, priority_value, currency, data, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-    [o.id, orgId, o.workerId, o.executionId ?? null, o.category, o.status, o.expectedValue, o.economics.priorityValue, o.currency, JSON.stringify(o), o.createdAt],
+    `INSERT INTO opportunities (id, org_id, worker_id, execution_id, entity_id, skill_id, category, status, expected_value, priority_value, currency, data_provenance, economic_state, data, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+    [
+      o.id,
+      orgId,
+      o.workerId,
+      o.executionId ?? null,
+      o.entityId,
+      o.skillId,
+      o.category,
+      o.status,
+      o.expectedValue,
+      o.economics.priorityValue,
+      o.currency,
+      o.dataProvenance,
+      o.economicState,
+      JSON.stringify(o),
+      o.createdAt,
+      o.updatedAt ?? o.createdAt,
+    ],
   )
 }
 
@@ -581,6 +605,26 @@ export async function getOpportunity(id: string, orgId: string): Promise<Opportu
   return row ? row.data : null
 }
 
+/** Updates an Opportunity's status (e.g. READY -> ACCEPTED/REJECTED/
+ * EXECUTED/VERIFIED) — the one real status transition this repo
+ * layer exposes; every other field is immutable once detected. Org-
+ * scoped like every other write; a no-op (silently) if the id/org
+ * pair doesn't match any row, same as every other org-scoped update
+ * in this file. Keeps `data`'s own `status`/`updatedAt` in sync via a
+ * targeted jsonb_set rather than a full read-modify-write, the same
+ * pattern appendWorkerMemory() already uses. */
+export async function updateOpportunityStatus(id: string, orgId: string, status: Opportunity["status"]): Promise<Opportunity | null> {
+  const now = Date.now()
+  const row = await queryOne<OpportunityRow>(
+    `UPDATE opportunities
+     SET status = $1, updated_at = $2, data = jsonb_set(jsonb_set(data, '{status}', to_jsonb($1::text)), '{updatedAt}', to_jsonb($2::bigint))
+     WHERE id = $3 AND org_id = $4
+     RETURNING id, worker_id, execution_id, data`,
+    [status, now, id, orgId],
+  )
+  return row ? row.data : null
+}
+
 interface DecisionRow {
   id: string
   worker_id: string
@@ -590,9 +634,28 @@ interface DecisionRow {
 
 export async function insertDecision(d: Decision, orgId: string): Promise<void> {
   await query(
-    `INSERT INTO decisions (id, org_id, worker_id, execution_id, opportunity_id, status, policy_status, approval_status, annual_benefit, currency, data, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-    [d.id, orgId, d.workerId, d.executionId ?? null, d.opportunityId, d.status, d.policyStatus, d.approvalStatus, d.economicImpact.annualBenefit, d.economicImpact.currency, JSON.stringify(d), d.createdAt],
+    `INSERT INTO decisions (id, org_id, worker_id, execution_id, opportunity_id, entity_id, skill_id, status, policy_status, approval_status, execution_status, annual_benefit, currency, data_provenance, economic_state, data, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+    [
+      d.id,
+      orgId,
+      d.workerId,
+      d.executionId ?? null,
+      d.opportunityId,
+      d.entityId,
+      d.skillId,
+      d.status,
+      d.policyStatus,
+      d.approvalStatus,
+      d.executionStatus,
+      d.economicImpact.annualBenefit,
+      d.economicImpact.currency,
+      d.dataProvenance,
+      d.economicState,
+      JSON.stringify(d),
+      d.createdAt,
+      d.updatedAt ?? d.createdAt,
+    ],
   )
 }
 
@@ -603,6 +666,22 @@ export async function listDecisions(orgId: string): Promise<Decision[]> {
 
 export async function getDecision(id: string, orgId: string): Promise<Decision | null> {
   const row = await queryOne<DecisionRow>("SELECT id, worker_id, execution_id, data FROM decisions WHERE id = $1 AND org_id = $2", [id, orgId])
+  return row ? row.data : null
+}
+
+/** Updates a Decision's decisionStatus (`status`: DETECTED/READY/
+ * PREPARED) — same pattern and same scope as updateOpportunityStatus
+ * above. Approval/policy/execution status stay computed by the engine
+ * itself (evaluatePolicy/gateAction), never client-settable here. */
+export async function updateDecisionStatus(id: string, orgId: string, status: Decision["status"]): Promise<Decision | null> {
+  const now = Date.now()
+  const row = await queryOne<DecisionRow>(
+    `UPDATE decisions
+     SET status = $1, updated_at = $2, data = jsonb_set(jsonb_set(data, '{status}', to_jsonb($1::text)), '{updatedAt}', to_jsonb($2::bigint))
+     WHERE id = $3 AND org_id = $4
+     RETURNING id, worker_id, execution_id, data`,
+    [status, now, id, orgId],
+  )
   return row ? row.data : null
 }
 

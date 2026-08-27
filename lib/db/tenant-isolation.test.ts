@@ -1,12 +1,29 @@
 import { randomUUID } from "node:crypto"
 import { describe, expect, it } from "vitest"
-import { createOrganization, getOpportunity, getWorker, insertDecision, insertOpportunity, listDecisions, listOpportunities, listWorkers, upsertWorker, userBelongsToOrg, createUserWithOrganization } from "./repo"
+import {
+  createOrganization,
+  getDecision,
+  getOpportunity,
+  getWorker,
+  insertDecision,
+  insertOpportunity,
+  listDecisions,
+  listOpportunities,
+  listWorkers,
+  updateDecisionStatus,
+  updateOpportunityStatus,
+  upsertWorker,
+  userBelongsToOrg,
+  createUserWithOrganization,
+} from "./repo"
 import type { Decision, Opportunity } from "@/lib/finance/types"
 import { buildEmptyWorker } from "@/lib/workforce/seed"
 
 function testOpportunity(workerId: string): Opportunity {
   return {
     id: `opp_${randomUUID()}`,
+    entityId: "ent_usa",
+    skillId: "skill_cash_working_capital_intelligence",
     category: "idle_cash",
     title: "Test opportunity",
     description: "Test",
@@ -23,8 +40,11 @@ function testOpportunity(workerId: string): Opportunity {
     assumptions: [],
     recommendedAction: "Test",
     economics: { grossImpact: 1000, probability: 0.5, expectedValue: 500, riskAdjustment: 0, effortAdjustment: 0, priorityValue: 500 },
+    priorityScore: 500,
     status: "READY",
     createdAt: Date.now(),
+    dataProvenance: "demo",
+    economicState: "estimated",
     workerId,
   }
 }
@@ -32,6 +52,8 @@ function testOpportunity(workerId: string): Opportunity {
 function testDecision(workerId: string, opportunityId: string): Decision {
   return {
     id: `dec_${randomUUID()}`,
+    entityId: "ent_usa",
+    skillId: "skill_cash_working_capital_intelligence",
     title: "Test decision",
     problem: "Test",
     evidence: [],
@@ -39,14 +61,18 @@ function testDecision(workerId: string, opportunityId: string): Decision {
     alternatives: [],
     scenario: { label: "s", baseline: {}, scenario: {}, receivablesRelease: 0, payablesRelease: 0, cashImpact: 0, liquidityImpact: 0, economicImpact: 0, kind: "SIMULATION" },
     economicImpact: { cashRelease: 0, annualBenefit: 0, currency: "USD" },
+    downside: "Low.",
     risk: "low",
     recommendation: "Test",
     confidence: 80,
     policyStatus: "ALLOWED",
     approvalStatus: "NOT_REQUIRED",
-    action: { id: `act_${randomUUID()}`, type: "REALLOCATE_IDLE_CASH", target: "x", current: "x", proposed: "y", economicImpact: "x", risk: "low", amount: 1000, currency: "USD", isNewCounterparty: false, status: "READY", approval: "NOT_REQUIRED", execution: "NOT_EXECUTED" },
+    executionStatus: "REQUIRES_CONNECTOR",
+    action: { id: `act_${randomUUID()}`, type: "REALLOCATE_IDLE_CASH", target: "x", current: "x", proposed: "y", economicImpact: "x", risk: "low", amount: 1000, currency: "USD", isNewCounterparty: false, status: "READY", approval: "NOT_REQUIRED", execution: "REQUIRES_CONNECTOR" },
     status: "READY",
     createdAt: Date.now(),
+    dataProvenance: "demo",
+    economicState: "estimated",
     workerId,
     opportunityId,
   }
@@ -146,5 +172,43 @@ maybeDescribe("tenant isolation (real Postgres)", () => {
     const listB = await listDecisions(orgB.id)
     expect(listA.map((d) => d.id)).toContain(decA.id)
     expect(listB.map((d) => d.id)).not.toContain(decA.id)
+  })
+
+  it("updateOpportunityStatus persists a real status change for the owning org, and is a no-op for another org", async () => {
+    const orgA = await createOrganization(`Tenant Test A ${randomUUID()}`)
+    const orgB = await createOrganization(`Tenant Test B ${randomUUID()}`)
+    const workerA = buildEmptyWorker(`worker_${randomUUID()}`)
+    await upsertWorker(workerA, orgA.id)
+    const oppA = testOpportunity(workerA.id)
+    await insertOpportunity(oppA, orgA.id)
+
+    // org B can never mutate org A's opportunity by id — a no-op, not
+    // an error, and never confirms the row exists to the wrong org.
+    const fromOrgB = await updateOpportunityStatus(oppA.id, orgB.id, "ACCEPTED")
+    expect(fromOrgB).toBeNull()
+    expect((await getOpportunity(oppA.id, orgA.id))?.status).toBe("READY")
+
+    const updated = await updateOpportunityStatus(oppA.id, orgA.id, "ACCEPTED")
+    expect(updated?.status).toBe("ACCEPTED")
+    expect((await getOpportunity(oppA.id, orgA.id))?.status).toBe("ACCEPTED")
+  })
+
+  it("updateDecisionStatus persists a real status change for the owning org, and is a no-op for another org", async () => {
+    const orgA = await createOrganization(`Tenant Test A ${randomUUID()}`)
+    const orgB = await createOrganization(`Tenant Test B ${randomUUID()}`)
+    const workerA = buildEmptyWorker(`worker_${randomUUID()}`)
+    await upsertWorker(workerA, orgA.id)
+    const oppA = testOpportunity(workerA.id)
+    await insertOpportunity(oppA, orgA.id)
+    const decA = testDecision(workerA.id, oppA.id)
+    await insertDecision(decA, orgA.id)
+
+    const fromOrgB = await updateDecisionStatus(decA.id, orgB.id, "READY")
+    expect(fromOrgB).toBeNull()
+    expect((await getDecision(decA.id, orgA.id))?.status).toBe("READY") // unchanged from insert
+
+    const updated = await updateDecisionStatus(decA.id, orgA.id, "PREPARED")
+    expect(updated?.status).toBe("PREPARED")
+    expect((await getDecision(decA.id, orgA.id))?.status).toBe("PREPARED")
   })
 })

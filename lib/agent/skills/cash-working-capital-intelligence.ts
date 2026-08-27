@@ -25,7 +25,7 @@ import "server-only"
 import { gateAction } from "@/lib/finance/autonomy-gate"
 import { generateBusinessOutput } from "@/lib/finance/business-output"
 import { projectCashPosition13Weeks } from "@/lib/finance/cash-projection"
-import { generateDecision } from "@/lib/finance/decisions"
+import { evaluateDecisionReadiness, generateDecision } from "@/lib/finance/decisions"
 import {
   ENTITY_USA,
   USA_ANNUAL_COGS,
@@ -93,7 +93,7 @@ export const cashWorkingCapitalIntelligenceSkill: SkillDefinition = {
   instructions: "Load real (demo) financial facts, compute deterministic metrics, project liquidity, detect and quantify opportunities, simulate at least one scenario, generate decisions, and evaluate them against policy and autonomy.",
   constraints: [
     "Every metric must be computed from the data provided — never hardcoded.",
-    "Never claim a real financial action executed — every action stays PREPARED/READY, execution is always NOT_EXECUTED.",
+    "Never claim a real financial action executed — every action stays PREPARED/READY, execution always requires a real connector that does not exist yet (REQUIRES_CONNECTOR).",
     "Never bypass policy because of autonomy level.",
     "Never present a demo-ledger figure as real, connected financial data.",
   ],
@@ -164,6 +164,8 @@ export const cashWorkingCapitalIntelligenceSkill: SkillDefinition = {
     const step5Start = Date.now()
     const opportunities = buildOpportunities({
       workerId: ctx.workerId,
+      skillId: "skill_cash_working_capital_intelligence",
+      entityId: ENTITY_USA,
       executionId: ctx.executionId,
       bankAccounts,
       receivables,
@@ -221,7 +223,13 @@ export const cashWorkingCapitalIntelligenceSkill: SkillDefinition = {
         currency: opportunity.currency,
         isNewCounterparty: false,
       }
-      const policy = evaluatePolicy({ ...draft, status: "PREPARED", approval: "NOT_REQUIRED", execution: "NOT_EXECUTED" }, DEFAULT_FINANCIAL_POLICIES)
+      // A Decision is only ever generated once the opportunity clears
+      // the confidence bar (§9, §11) — evaluateDecisionReadiness()
+      // returns a real INSUFFICIENT_DATA policy result instead of the
+      // real evaluatePolicy() call when it doesn't, so an under-
+      // confident opportunity still gets a visible, honest Decision
+      // rather than being silently dropped.
+      const policy = evaluateDecisionReadiness(opportunity) ?? evaluatePolicy({ ...draft, status: "PREPARED", approval: "NOT_REQUIRED", execution: "REQUIRES_CONNECTOR" }, DEFAULT_FINANCIAL_POLICIES)
       const gate = gateAction(draft, autonomyLevel, policy)
       decisions.push(generateDecision(opportunity, scenario, policy, gate, ctx.workerId, ctx.executionId))
     }
@@ -380,7 +388,7 @@ function renderSummary(structured: StructuredResult): string {
     opportunities.length > 0
       ? `${opportunities.length} opportunit${opportunities.length === 1 ? "y" : "ies"} detected, estimated ${Math.round(businessOutput.cashReleasedPotential).toLocaleString()} in expected cash release (estimated, not yet approved, executed, or verified).`
       : "No opportunities were detected from the current (demo) data.",
-    `${decisions.length} decision${decisions.length === 1 ? "" : "s"} generated. No external financial action executed — every prepared action remains NOT_EXECUTED pending human approval.`,
+    `${decisions.length} decision${decisions.length === 1 ? "" : "s"} generated. No external financial action executed — every prepared action requires a real connector that does not exist yet (REQUIRES_CONNECTOR).`,
   ]
   return lines.join("\n")
 }

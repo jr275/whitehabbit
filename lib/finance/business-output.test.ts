@@ -5,6 +5,8 @@ import type { Decision, LiquiditySignal, Opportunity } from "./types"
 function opp(expectedValue: number): Opportunity {
   return {
     id: "opp_1",
+    entityId: "ent_usa",
+    skillId: "skill_cash_working_capital_intelligence",
     category: "idle_cash",
     title: "Test",
     description: "Test",
@@ -21,8 +23,11 @@ function opp(expectedValue: number): Opportunity {
     assumptions: [],
     recommendedAction: "Do it",
     economics: { grossImpact: expectedValue, probability: 1, expectedValue, riskAdjustment: 0, effortAdjustment: 0, priorityValue: expectedValue },
+    priorityScore: expectedValue,
     status: "READY",
     createdAt: Date.now(),
+    dataProvenance: "demo",
+    economicState: "estimated",
     workerId: "w1",
   }
 }
@@ -30,6 +35,8 @@ function opp(expectedValue: number): Opportunity {
 function decision(annualBenefit: number, status: Decision["action"]["status"]): Decision {
   return {
     id: "dec_1",
+    entityId: "ent_usa",
+    skillId: "skill_cash_working_capital_intelligence",
     title: "Test",
     problem: "Test",
     evidence: [],
@@ -37,14 +44,18 @@ function decision(annualBenefit: number, status: Decision["action"]["status"]): 
     alternatives: [],
     scenario: { label: "s", baseline: {}, scenario: {}, receivablesRelease: 0, payablesRelease: 0, cashImpact: 0, liquidityImpact: 0, economicImpact: annualBenefit, kind: "SIMULATION" },
     economicImpact: { cashRelease: 0, annualBenefit, currency: "USD" },
+    downside: "Low.",
     risk: "low",
     recommendation: "Do it",
     confidence: 90,
     policyStatus: "ALLOWED",
     approvalStatus: "NOT_REQUIRED",
-    action: { id: "a1", type: "REALLOCATE_IDLE_CASH", target: "x", current: "x", proposed: "y", economicImpact: "x", risk: "low", amount: 1000, currency: "USD", isNewCounterparty: false, status, approval: "NOT_REQUIRED", execution: "NOT_EXECUTED" },
+    executionStatus: "REQUIRES_CONNECTOR",
+    action: { id: "a1", type: "REALLOCATE_IDLE_CASH", target: "x", current: "x", proposed: "y", economicImpact: "x", risk: "low", amount: 1000, currency: "USD", isNewCounterparty: false, status, approval: "NOT_REQUIRED", execution: "REQUIRES_CONNECTOR" },
     status: "READY",
     createdAt: Date.now(),
+    dataProvenance: "demo",
+    economicState: "estimated",
     workerId: "w1",
     opportunityId: "opp_1",
   }

@@ -36,6 +36,15 @@ export function ProductHome() {
   const taskById = new Map(state.tasks.map((task) => [task.id, task]))
   const workerById = new Map(state.workers.map((worker) => [worker.id, worker]))
 
+  // Phase 4 §19 — Potential value (ESTIMATED, from real persisted
+  // Opportunities/Decisions) is kept visually and numerically separate
+  // from any notion of realized value, which doesn't exist yet (no
+  // execution connector exists anywhere in this codebase). Never
+  // combined into one misleading total.
+  const potentialEconomicValue = state.opportunities.reduce((s, o) => s + o.expectedValue, 0)
+  const cashReleasedPotential = state.decisions.reduce((s, d) => s + d.economicImpact.cashRelease, 0)
+  const approvalRequiredCount = state.decisions.filter((d) => d.approvalStatus === "REQUIRED").length
+
   return <div className="min-h-dvh bg-background text-foreground"><TopNav /><main id="main-content" className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
     <header className="flex flex-col gap-5 border-b border-border pb-6 lg:flex-row lg:items-end lg:justify-between">
       <div><p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">Workspace overview</p><h1 className="mt-2 text-balance text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">AI workforce operations</h1><p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">Monitor live work, resolve operating issues, and move from a business objective to a released Worker.</p></div>
@@ -43,6 +52,22 @@ export function ProductHome() {
     </header>
 
     {!state.hydrated ? <StatePanel icon={Clock3} title="Loading workspace" body="Reading Workers, runs, and outputs from the authenticated organization ledger." /> : state.notice ? <StatePanel icon={CircleAlert} title="Workspace unavailable" body={state.notice} /> : state.workers.length === 0 ? <FirstRun /> : <>
+      {/* Business/economic value before technical complexity (§19) — a
+          real Financial Intelligence result only appears once real
+          Opportunities/Decisions have been persisted; otherwise this
+          honestly says so instead of showing a fabricated $0. */}
+      {(state.opportunities.length > 0 || state.decisions.length > 0) && (
+        <Link href="/opportunities" className="mt-6 block rounded-xl border border-primary/25 bg-primary/5 p-6 transition-colors hover:border-primary/40">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">Financial Intelligence — potential economic value (ESTIMATED)</p>
+          <div className="mt-3 grid gap-6 sm:grid-cols-3">
+            <div><p className="font-mono text-3xl font-semibold tabular-nums text-foreground">${Math.round(potentialEconomicValue).toLocaleString()}</p><p className="mt-1 text-xs text-muted-foreground">Potential economic value · {state.opportunities.length} opportunit{state.opportunities.length === 1 ? "y" : "ies"}</p></div>
+            <div><p className="font-mono text-3xl font-semibold tabular-nums text-foreground">${Math.round(cashReleasedPotential).toLocaleString()}</p><p className="mt-1 text-xs text-muted-foreground">Cash released potential · {state.decisions.length} decision{state.decisions.length === 1 ? "" : "s"}</p></div>
+            <div><p className="font-mono text-3xl font-semibold tabular-nums text-foreground">{approvalRequiredCount}</p><p className="mt-1 text-xs text-muted-foreground">Awaiting approval</p></div>
+          </div>
+          <p className="mt-3 text-[11px] text-muted-foreground">Estimated from the current DEMO financial dataset — not realized, not executed. Realized value is not yet available: no real banking/ERP/payment connector exists.</p>
+        </Link>
+      )}
+
       <section aria-label="Workforce metrics" className="mt-6 grid overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-5 lg:gap-px">
         <Metric label="Workers" value={state.workers.length} detail={`${state.workers.filter((item) => item.status === "live").length} live`} />
         <Metric label="Active runs" value={activeRuns.length} detail="Queued, running, approval" />

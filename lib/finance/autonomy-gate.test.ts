@@ -21,7 +21,7 @@ describe("gateAction", () => {
     const policy = evaluatePolicy({ ...draft, status: "PREPARED", approval: "NOT_REQUIRED", execution: "NOT_EXECUTED" })
     const r = gateAction(draft, "observe", policy)
     expect(r.action.status).toBe("NOT_CONFIGURED")
-    expect(r.action.execution).toBe("NOT_EXECUTED")
+    expect(r.action.execution).toBe("REQUIRES_CONNECTOR")
   })
 
   it("never prepares an action at Level 1 (recommend)", () => {
@@ -35,7 +35,7 @@ describe("gateAction", () => {
     const r = gateAction(draft, "prepare", policy)
     expect(r.action.status).toBe("PREPARED")
     expect(r.action.approval).toBe("REQUIRED")
-    expect(r.action.execution).toBe("NOT_EXECUTED")
+    expect(r.action.execution).toBe("REQUIRES_CONNECTOR")
   })
 
   it("marks READY with no approval at Level 3 when policy allows", () => {
@@ -43,7 +43,7 @@ describe("gateAction", () => {
     const r = gateAction(draft, "execute_within_policy", policy)
     expect(r.action.status).toBe("READY")
     expect(r.action.approval).toBe("NOT_REQUIRED")
-    expect(r.action.execution).toBe("NOT_EXECUTED") // never a real execution, even when policy allows
+    expect(r.action.execution).toBe("REQUIRES_CONNECTOR") // never a real execution, even when policy allows
   })
 
   it("still requires approval at Level 3 when a policy matches APPROVAL_REQUIRED", () => {
@@ -60,6 +60,13 @@ describe("gateAction", () => {
     expect(policy.status).toBe("BLOCKED")
     const r = gateAction(riskyAction, "execute_within_policy", policy)
     expect(r.action.status).toBe("NOT_CONFIGURED")
-    expect(r.action.execution).toBe("NOT_EXECUTED")
+    expect(r.action.execution).toBe("REQUIRES_CONNECTOR")
+  })
+
+  it("never prepares an action when policy reports INSUFFICIENT_DATA, even at Level 3", () => {
+    const r = gateAction(draft, "execute_within_policy", { status: "INSUFFICIENT_DATA", matchedPolicies: [], reasons: [] })
+    expect(r.action.status).toBe("NOT_CONFIGURED")
+    expect(r.action.approval).toBe("REQUIRED")
+    expect(r.action.execution).toBe("REQUIRES_CONNECTOR")
   })
 })

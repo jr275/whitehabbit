@@ -50,7 +50,13 @@ export const DEFAULT_FINANCIAL_POLICIES: Policy[] = [
   },
 ]
 
-const STATUS_RANK: Record<PolicyDecisionStatus, number> = { ALLOWED: 0, APPROVAL_REQUIRED: 1, BLOCKED: 2 }
+// INSUFFICIENT_DATA is never produced by evaluatePolicy() itself — no
+// Policy.outcome can be "INSUFFICIENT_DATA" (see the Policy type) —
+// it is decisions.ts's own confidence gate that reports it, upstream
+// of policy evaluation. Ranked here only so this Record stays total
+// over PolicyDecisionStatus; ranked most-restrictive since "not enough
+// evidence" is never safely downgraded to a real verdict.
+const STATUS_RANK: Record<PolicyDecisionStatus, number> = { ALLOWED: 0, APPROVAL_REQUIRED: 1, BLOCKED: 2, INSUFFICIENT_DATA: 3 }
 
 /** Evaluates one proposed action against a list of policies. The most
  * restrictive matched outcome wins (BLOCKED > APPROVAL_REQUIRED >

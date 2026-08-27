@@ -19,16 +19,20 @@ import { DEMO_BANK_ACCOUNTS, totalCashPosition } from "@/lib/agent/data/demo-fin
 import { retrieveRelevantKnowledge } from "@/lib/agent/knowledge"
 import {
   economicImpactMetric,
+  enforceAuthoritativeMetrics,
   evaluateFinancialFindings,
   FINANCIAL_FINDINGS_SCHEMA_PROMPT,
   financialOperationalMetrics,
   parseFinancialFindings,
   renderFinancialFindingsSummary,
+  type AuthoritativeMetric,
   type FinancialFindingsPayload,
 } from "@/lib/agent/skills/finance-shared"
 import { runToolAction } from "@/lib/agent/tool-runner"
 import type { SkillDefinition, SkillEvaluation, SkillExecutionResult, WorkerContext } from "@/lib/agent/types"
 import { InvalidCredentialError, ProviderError, SkillBlockedError } from "@/lib/agent/types"
+import { USA_BANK_ACCOUNTS } from "@/lib/finance/demo-data"
+import { calculateCashConcentration, calculateIdleCash } from "@/lib/finance/metrics"
 
 const SYSTEM_PROMPT = `You are a treasury analyst monitoring a company's cash position. You are given REAL account balances and must identify genuine risks or observations visible in them — concentration in a single account or bank, idle cash sitting in a low-yield reserve, a balance that looks thin relative to near-term obligations. Never invent a balance, account, or number not given to you.
 
@@ -87,7 +91,26 @@ export const cashPositionMonitorSkill: SkillDefinition = {
     const analyzeAction = llm.actions.find((a) => a.id === "analyze")!
     const knowledge = retrieveRelevantKnowledge(ctx.worker.knowledge, "cash position")
     const knowledgeBlock = knowledge.length ? `\n\nInternal knowledge provided by the operator:\n${knowledge.map((k) => `[${k.name}] ${k.snippet}`).join("\n\n")}` : ""
-    const prompt = `As of ${data.asOfDate}, here is the real account data:\n${JSON.stringify(data, null, 2)}${knowledgeBlock}\n\nIdentify genuine cash-position findings from this data.`
+
+    // Phase 4 §21 — the LLM never invents these three numbers; they
+    // are computed here, stated as ground truth in the prompt, and
+    // enforced onto the response below regardless of what it wrote.
+    const concentration = calculateCashConcentration(USA_BANK_ACCOUNTS)
+    const idle = calculateIdleCash(USA_BANK_ACCOUNTS)
+    const authoritative: AuthoritativeMetric[] = [
+      { match: /total.*cash|cash.*position|total.*balance/i, value: data.totalCash, unit: "$" },
+      // Narrowly matched to ACCOUNT/bank concentration specifically —
+      // this skill's own deterministic figure is never authoritative
+      // over a customer/receivables-concentration finding (a different
+      // metric this skill doesn't compute; that's receivables-risk.ts's
+      // concern). A bare /concentrat/i would wrongly claim authority
+      // over that too whenever the two percentages happened to differ.
+      { match: /account.*concentrat|concentrat.*account|bank.*concentrat|concentrat.*bank/i, value: concentration.maxConcentrationPct, unit: "%" },
+      { match: /idle/i, value: idle.totalIdle, unit: "$" },
+    ]
+    const authoritativeBlock = `\n\nAUTHORITATIVE COMPUTED FIGURES (do not recompute — cite exactly):\n- Total cash position: ${data.totalCash}\n- Largest single-account cash concentration: ${concentration.maxConcentrationPct}%\n- Total idle reserve cash (below-yield): ${idle.totalIdle}`
+
+    const prompt = `As of ${data.asOfDate}, here is the real account data:\n${JSON.stringify(data, null, 2)}${authoritativeBlock}${knowledgeBlock}\n\nIdentify genuine cash-position findings from this data.`
     const llmResult = await runToolAction<{ text: string; model: string; inputTokens: number; outputTokens: number; provider: string; executionMode?: "development" }>(
       llm.id,
       llm.name,
@@ -103,8 +126,9 @@ export const cashPositionMonitorSkill: SkillDefinition = {
     const llmData = llmResult.data!
     ctx.emit("reasoning_completed", { durationMs: llmResult.durationMs, inputTokens: llmData.inputTokens, outputTokens: llmData.outputTokens, executionMode: llmData.executionMode })
 
-    const parsed = parseFinancialFindings(llmData.text)
-    if (!parsed) throw new Error("The LLM response was not valid structured findings data.")
+    const rawParsed = parseFinancialFindings(llmData.text)
+    if (!rawParsed) throw new Error("The LLM response was not valid structured findings data.")
+    const parsed = enforceAuthoritativeMetrics(rawParsed, authoritative)
 
     return {
       structured: parsed,

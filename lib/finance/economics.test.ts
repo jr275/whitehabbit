@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildOpportunityEconomics, calculateEconomicImpact, calculateEffortAdjustment, calculateExpectedValue, calculatePriority, calculateRiskAdjustment } from "./economics"
+import { buildOpportunityEconomics, calculateEconomicImpact, calculateEffortAdjustment, calculateExpectedValue, calculateOpportunityPriorityScore, calculatePriority, calculateRiskAdjustment } from "./economics"
 
 describe("calculateEconomicImpact", () => {
   it("passes through a rounded value", () => {
@@ -63,5 +63,39 @@ describe("buildOpportunityEconomics", () => {
   it("handles zero gross impact without error", () => {
     const e = buildOpportunityEconomics(0, 0.5, "low", "low")
     expect(e.priorityValue).toBe(0)
+  })
+})
+
+describe("calculateOpportunityPriorityScore", () => {
+  it("scores a high-urgency, low-effort, reversible, low-risk opportunity above the neutral baseline", () => {
+    const score = calculateOpportunityPriorityScore(100_000, 1, "high", "low", "reversible", "low")
+    // 1 * 1.15 * 1.15 * 1.1 * 1.0 = 1.45475 -> above raw impact
+    expect(score).toBeGreaterThan(100_000)
+  })
+
+  it("scores a low-urgency, high-effort, irreversible, critical-risk opportunity below the neutral baseline", () => {
+    const score = calculateOpportunityPriorityScore(100_000, 1, "low", "high", "irreversible", "critical")
+    expect(score).toBeLessThan(100_000)
+  })
+
+  it("is zero for zero probability", () => {
+    expect(calculateOpportunityPriorityScore(100_000, 0, "high", "low", "reversible", "low")).toBe(0)
+  })
+
+  it("is zero for zero or negative economic impact", () => {
+    expect(calculateOpportunityPriorityScore(0, 1, "high", "low", "reversible", "low")).toBe(0)
+    expect(calculateOpportunityPriorityScore(-500, 1, "high", "low", "reversible", "low")).toBe(0)
+  })
+
+  it("ranks a higher-confidence, lower-risk opportunity above an otherwise-identical higher-risk one", () => {
+    const safer = calculateOpportunityPriorityScore(100_000, 0.9, "medium", "medium", "hard_to_reverse", "low")
+    const riskier = calculateOpportunityPriorityScore(100_000, 0.9, "medium", "medium", "hard_to_reverse", "critical")
+    expect(safer).toBeGreaterThan(riskier)
+  })
+
+  it("clamps probability above 1", () => {
+    const atOne = calculateOpportunityPriorityScore(100_000, 1, "medium", "medium", "hard_to_reverse", "medium")
+    const above = calculateOpportunityPriorityScore(100_000, 5, "medium", "medium", "hard_to_reverse", "medium")
+    expect(above).toBe(atOne)
   })
 })

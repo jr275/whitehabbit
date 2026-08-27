@@ -56,7 +56,41 @@ export interface FinancialFindingsPayload {
 export const FINANCIAL_FINDINGS_SCHEMA_PROMPT = `Respond with ONLY a single valid JSON object, no markdown fences, no commentary, matching exactly this shape:
 {"findings":[{"finding": string (one sentence, plain language, what you found), "evidence": string (the specific numbers from the data provided that support it), "metric_label": string, "metric_value": number, "metric_unit": string ("$", "%", "days", or ""), "recommendation": string (one concrete action), "impact_value": number (the dollar or percentage impact IF this recommendation is followed — 0 if not meaningfully quantifiable), "impact_unit": string ("$", "%", or ""), "confidence": number (0-100), "risk": "low"|"medium"|"high"|"critical"}]}
 
-Every number you cite in "evidence", "metric_value", and "impact_value" MUST come directly from the data provided to you. Never invent a balance, an amount, a percentage, or a date that was not given to you. If the data does not support a real finding, return an empty findings array rather than inventing one. Identify between 2 and 5 findings.`
+Every number you cite in "evidence", "metric_value", and "impact_value" MUST come directly from the data provided to you. Never invent a balance, an amount, a percentage, or a date that was not given to you. If the data does not support a real finding, return an empty findings array rather than inventing one. Identify between 2 and 5 findings.
+
+If the data includes a section labeled "AUTHORITATIVE COMPUTED FIGURES", those exact numbers are the only correct values for the metrics they name — cite them precisely if your finding is about one of them. (Any number you write for a named metric will be replaced with the authoritative one regardless, so there is no benefit to estimating it yourself.)`
+
+/* ================================================================== *
+ * LLM BOUNDARY (Phase 4 §21) — the LLM never gets to be the source of
+ * truth for a number this engine can compute deterministically. Each
+ * skill below computes its own real figures (lib/finance/metrics.ts,
+ * lib/finance/cash-projection.ts, lib/finance/opportunities.ts) BEFORE
+ * calling the LLM, states them in the prompt as ground truth, and then
+ * enforceAuthoritativeMetrics() OVERWRITES metric_value/metric_unit
+ * for any finding whose own metric_label matches a known, computed
+ * metric — regardless of what number the model actually wrote. The
+ * LLM's prose (finding/evidence/recommendation text) is untouched; its
+ * arithmetic never is. This is the concrete fix for:
+ *   BAD:  LLM: "DSO appears to be approximately 41 days."
+ *   GOOD: Engine: DSO = 41.37 days. LLM: "DSO increased because..."
+ * ================================================================== */
+export interface AuthoritativeMetric {
+  /** Matched case-insensitively against a finding's own metric_label —
+   * e.g. /concentrat/i for a concentration-risk finding. */
+  match: RegExp
+  value: number
+  unit: string
+}
+
+export function enforceAuthoritativeMetrics(payload: FinancialFindingsPayload, authoritative: AuthoritativeMetric[]): FinancialFindingsPayload {
+  return {
+    findings: payload.findings.map((f) => {
+      const hit = authoritative.find((a) => a.match.test(f.metric_label))
+      if (!hit) return f
+      return { ...f, metric_value: hit.value, metric_unit: hit.unit }
+    }),
+  }
+}
 
 export function parseFinancialFindings(text: string): FinancialFindingsPayload | null {
   const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "")

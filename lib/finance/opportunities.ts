@@ -5,13 +5,15 @@
  * ================================================================== */
 
 import { randomUUID } from "node:crypto"
-import { buildOpportunityEconomics } from "./economics"
+import { buildOpportunityEconomics, calculateOpportunityPriorityScore } from "./economics"
 import { calculateDPO, calculateDSO, calculateIdleCash } from "./metrics"
 import { detectWorkingCapitalOpportunity } from "./signals"
 import type { BankAccountFact, FundingFacilityFact, Opportunity, PayableFact, ReceivableFact } from "./types"
 
 export interface OpportunityContext {
   workerId: string
+  skillId: string
+  entityId: string
   executionId?: string
   bankAccounts: BankAccountFact[]
   receivables: ReceivableFact[]
@@ -26,8 +28,15 @@ export interface OpportunityContext {
   minReserveYieldPct: number
 }
 
+/** Everything a push site below builds by hand; the fields every
+ * opportunity shares regardless of category (entityId/skillId/
+ * priorityScore/dataProvenance/economicState) are filled in once, at
+ * the end, so they can never drift out of sync between the five
+ * detection branches below. */
+type RawOpportunity = Omit<Opportunity, "entityId" | "skillId" | "priorityScore" | "dataProvenance" | "economicState">
+
 export function buildOpportunities(ctx: OpportunityContext): Opportunity[] {
-  const opportunities: Opportunity[] = []
+  const opportunities: RawOpportunity[] = []
 
   const receivablesTotal = ctx.receivables.filter((r) => r.status !== "paid").reduce((s, r) => s + r.amount, 0)
   const payablesTotal = ctx.payables.reduce((s, p) => s + p.amount, 0)
@@ -207,5 +216,14 @@ export function buildOpportunities(ctx: OpportunityContext): Opportunity[] {
     }
   }
 
-  return opportunities.sort((a, b) => b.economics.priorityValue - a.economics.priorityValue)
+  const finished: Opportunity[] = opportunities.map((o) => ({
+    ...o,
+    entityId: ctx.entityId,
+    skillId: ctx.skillId,
+    dataProvenance: "demo",
+    economicState: "estimated",
+    priorityScore: calculateOpportunityPriorityScore(o.economics.expectedValue, o.probability, o.urgency, o.effort, o.reversibility, o.risk),
+  }))
+
+  return finished.sort((a, b) => b.priorityScore - a.priorityScore)
 }

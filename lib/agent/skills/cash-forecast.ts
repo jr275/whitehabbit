@@ -17,16 +17,20 @@ import "server-only"
 import { DEMO_CASH_FLOW_HISTORY, totalPayables, totalReceivables } from "@/lib/agent/data/demo-financial-ledger"
 import { retrieveRelevantKnowledge } from "@/lib/agent/knowledge"
 import {
+  enforceAuthoritativeMetrics,
   evaluateFinancialFindings,
   FINANCIAL_FINDINGS_SCHEMA_PROMPT,
   financialOperationalMetrics,
   parseFinancialFindings,
   renderFinancialFindingsSummary,
+  type AuthoritativeMetric,
   type FinancialFindingsPayload,
 } from "@/lib/agent/skills/finance-shared"
 import { runToolAction } from "@/lib/agent/tool-runner"
 import type { MetricEmission, SkillDefinition, SkillEvaluation, SkillExecutionResult, WorkerContext } from "@/lib/agent/types"
 import { InvalidCredentialError, ProviderError, SkillBlockedError } from "@/lib/agent/types"
+import { projectCashPosition13Weeks } from "@/lib/finance/cash-projection"
+import { USA_CASH_FLOW_HISTORY, USA_PAYABLES, USA_RECEIVABLES } from "@/lib/finance/demo-data"
 
 const SYSTEM_PROMPT = `You are a treasury analyst building a short-term cash forecast. You are given REAL weekly cash-flow history, plus current receivables and payables, and must project genuine near-term liquidity risk or comfort visible in the trend — a possible shortfall week, a funding need, or a healthy buffer. Never invent a week, an amount, or a trend not supported by the data given to you.
 
@@ -79,7 +83,26 @@ export const cashForecastSkill: SkillDefinition = {
     const analyzeAction = llm.actions.find((a) => a.id === "analyze")!
     const knowledge = retrieveRelevantKnowledge(ctx.worker.knowledge, "cash forecast liquidity")
     const knowledgeBlock = knowledge.length ? `\n\nInternal knowledge provided by the operator:\n${knowledge.map((k) => `[${k.name}] ${k.snippet}`).join("\n\n")}` : ""
-    const prompt = `As of ${history.asOfDate}, here is the real 13-week cash flow history, plus current totals:\n${JSON.stringify(history.weeks, null, 2)}\n\nTotal open receivables: ${totalReceivables()}\nTotal open payables: ${totalPayables()}${knowledgeBlock}\n\nProject genuine near-term liquidity findings from this trend.`
+    // Phase 4 §21 — the real, deterministic 13-week projection
+    // (lib/finance/cash-projection.ts) is the authoritative source for
+    // any shortfall/available-cash figure; the LLM narrates it, never
+    // recomputes it. Opening cash is the last known real ending
+    // balance from the same history the LLM is given.
+    const openingCash = USA_CASH_FLOW_HISTORY.at(-1)?.endingBalance ?? 0
+    const projection = projectCashPosition13Weeks({
+      asOfDate: history.asOfDate,
+      openingCash,
+      history: USA_CASH_FLOW_HISTORY,
+      receivables: USA_RECEIVABLES.filter((r) => r.status !== "paid"),
+      payables: USA_PAYABLES,
+    })
+    const authoritative: AuthoritativeMetric[] = [
+      { match: /shortfall/i, value: projection.worstWeek?.potentialShortfall ?? 0, unit: "$" },
+      { match: /available cash|minimum cash/i, value: projection.worstWeek?.availableCash ?? openingCash, unit: "$" },
+    ]
+    const authoritativeBlock = `\n\nAUTHORITATIVE COMPUTED FIGURES (13-week baseline projection — do not recompute, cite exactly):\n- Worst-week potential shortfall: ${projection.worstWeek?.potentialShortfall ?? 0}\n- Worst-week available cash: ${projection.worstWeek?.availableCash ?? openingCash} (week ${projection.worstWeek?.weekNumber ?? "n/a"}, starting ${projection.worstWeek?.weekStart ?? "n/a"})`
+
+    const prompt = `As of ${history.asOfDate}, here is the real 13-week cash flow history, plus current totals:\n${JSON.stringify(history.weeks, null, 2)}\n\nTotal open receivables: ${totalReceivables()}\nTotal open payables: ${totalPayables()}${authoritativeBlock}${knowledgeBlock}\n\nProject genuine near-term liquidity findings from this trend.`
     const llmResult = await runToolAction<{ text: string; model: string; inputTokens: number; outputTokens: number; provider: string; executionMode?: "development" }>(
       llm.id,
       llm.name,
@@ -95,8 +118,9 @@ export const cashForecastSkill: SkillDefinition = {
     const llmData = llmResult.data!
     ctx.emit("reasoning_completed", { durationMs: llmResult.durationMs, inputTokens: llmData.inputTokens, outputTokens: llmData.outputTokens, executionMode: llmData.executionMode })
 
-    const parsed = parseFinancialFindings(llmData.text)
-    if (!parsed) throw new Error("The LLM response was not valid structured findings data.")
+    const rawParsed = parseFinancialFindings(llmData.text)
+    if (!rawParsed) throw new Error("The LLM response was not valid structured findings data.")
+    const parsed = enforceAuthoritativeMetrics(rawParsed, authoritative)
 
     return {
       structured: parsed,

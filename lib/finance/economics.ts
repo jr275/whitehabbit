@@ -55,6 +55,48 @@ export function buildOpportunityEconomics(grossImpact: number, probability: numb
   return { grossImpact: impact, probability: clamp01(probability), expectedValue, riskAdjustment, effortAdjustment, priorityValue }
 }
 
+/* ================================================================== *
+ * OPPORTUNITY PRIORITY SCORE (Phase 4 §8) — a separate, dimensionless
+ * RANKING number, deliberately distinct from `economics.priorityValue`
+ * (a real dollar figure). Conceptually:
+ *
+ *   Priority = Economic Impact × Probability × Urgency × Feasibility ×
+ *              Reversibility, adjusted by Risk
+ *
+ * "Feasibility" is not a separate stored field — it is effort's own
+ * inverse (low effort = high feasibility) — introducing a second field
+ * that always moves opposite to `effort` would be a duplicate concept,
+ * not a new one, so effort's inverse is used directly and is not also
+ * applied as a second "effort adjustment" here (that discount already
+ * lives in `economics.effortAdjustment`, which this score does not
+ * touch). Purely for SORT ORDER — never shown to the user as a dollar
+ * figure; the transparent economics chain above remains the number a
+ * person actually reads.
+ * ================================================================== */
+
+const URGENCY_FACTOR: Record<"low" | "medium" | "high", number> = { low: 0.85, medium: 1.0, high: 1.15 }
+const FEASIBILITY_FACTOR_BY_EFFORT: Record<"low" | "medium" | "high", number> = { low: 1.15, medium: 1.0, high: 0.8 }
+const REVERSIBILITY_FACTOR: Record<"reversible" | "hard_to_reverse" | "irreversible", number> = { reversible: 1.1, hard_to_reverse: 1.0, irreversible: 0.85 }
+const RISK_DAMPENING_FACTOR: Record<"low" | "medium" | "high" | "critical", number> = { low: 1.0, medium: 0.9, high: 0.75, critical: 0.55 }
+
+export function calculateOpportunityPriorityScore(
+  economicImpact: number,
+  probability: number,
+  urgency: "low" | "medium" | "high",
+  effort: "low" | "medium" | "high",
+  reversibility: "reversible" | "hard_to_reverse" | "irreversible",
+  risk: "low" | "medium" | "high" | "critical",
+): number {
+  const score =
+    Math.max(0, economicImpact) *
+    clamp01(probability) *
+    URGENCY_FACTOR[urgency] *
+    FEASIBILITY_FACTOR_BY_EFFORT[effort] *
+    REVERSIBILITY_FACTOR[reversibility] *
+    RISK_DAMPENING_FACTOR[risk]
+  return round2(score)
+}
+
 function clamp01(n: number): number {
   return Math.max(0, Math.min(1, n))
 }

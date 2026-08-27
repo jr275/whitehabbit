@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
 import {
   economicImpactMetric,
+  enforceAuthoritativeMetrics,
   evaluateFinancialFindings,
   parseFinancialFindings,
   renderFinancialFindingsSummary,
+  type AuthoritativeMetric,
   type FinancialFinding,
   type FinancialFindingsPayload,
 } from "./finance-shared"
@@ -96,6 +98,52 @@ describe("economicImpactMetric — CRITICAL: estimated value must never be confu
     }
     const metric = economicImpactMetric(payload, "savings", "working_capital_released", "$")
     expect(metric!.value).toBe(82_000)
+  })
+})
+
+describe("enforceAuthoritativeMetrics — LLM never overwrites deterministic arithmetic (§21)", () => {
+  const dsoMetric: AuthoritativeMetric = { match: /DSO/i, value: 41.37, unit: "days" }
+
+  it("overwrites metric_value/metric_unit when the finding's own label matches an authoritative metric", () => {
+    const payload: FinancialFindingsPayload = { findings: [finding({ metric_label: "DSO", metric_value: 47, metric_unit: "days" })] }
+    const enforced = enforceAuthoritativeMetrics(payload, [dsoMetric])
+    expect(enforced.findings[0].metric_value).toBe(41.37)
+    expect(enforced.findings[0].metric_unit).toBe("days")
+  })
+
+  it("matches case-insensitively and by substring, not exact equality", () => {
+    const payload: FinancialFindingsPayload = { findings: [finding({ metric_label: "Days Sales Outstanding (dso)", metric_value: 99 })] }
+    const enforced = enforceAuthoritativeMetrics(payload, [dsoMetric])
+    expect(enforced.findings[0].metric_value).toBe(41.37)
+  })
+
+  it("leaves a finding untouched when its label matches no authoritative metric", () => {
+    const payload: FinancialFindingsPayload = { findings: [finding({ metric_label: "Idle reserve balance", metric_value: 250_000 })] }
+    const enforced = enforceAuthoritativeMetrics(payload, [dsoMetric])
+    expect(enforced.findings[0].metric_value).toBe(250_000)
+  })
+
+  it("never touches finding/evidence/recommendation prose — only the number", () => {
+    const payload: FinancialFindingsPayload = { findings: [finding({ metric_label: "DSO", metric_value: 999, finding: "DSO is elevated.", recommendation: "Tighten collections." })] }
+    const enforced = enforceAuthoritativeMetrics(payload, [dsoMetric])
+    expect(enforced.findings[0].finding).toBe("DSO is elevated.")
+    expect(enforced.findings[0].recommendation).toBe("Tighten collections.")
+    expect(enforced.findings[0].metric_value).toBe(41.37)
+  })
+
+  it("applies independently across multiple findings and multiple authoritative metrics", () => {
+    const dpoMetric: AuthoritativeMetric = { match: /DPO/i, value: 30.98, unit: "days" }
+    const payload: FinancialFindingsPayload = {
+      findings: [finding({ metric_label: "DSO", metric_value: 1 }), finding({ metric_label: "DPO", metric_value: 2 }), finding({ metric_label: "Unrelated", metric_value: 3 })],
+    }
+    const enforced = enforceAuthoritativeMetrics(payload, [dsoMetric, dpoMetric])
+    expect(enforced.findings[0].metric_value).toBe(41.37)
+    expect(enforced.findings[1].metric_value).toBe(30.98)
+    expect(enforced.findings[2].metric_value).toBe(3)
+  })
+
+  it("handles an empty findings array without error", () => {
+    expect(enforceAuthoritativeMetrics({ findings: [] }, [dsoMetric]).findings).toEqual([])
   })
 })
 

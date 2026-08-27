@@ -5,6 +5,8 @@ import { buildOpportunities } from "./opportunities"
 describe("buildOpportunities", () => {
   const ctx = {
     workerId: "worker_test",
+    skillId: "skill_cash_working_capital_intelligence",
+    entityId: ENTITY_USA,
     bankAccounts: USA_BANK_ACCOUNTS,
     receivables: USA_RECEIVABLES,
     payables: USA_PAYABLES,
@@ -31,10 +33,10 @@ describe("buildOpportunities", () => {
     }
   })
 
-  it("sorts opportunities by priority value, descending", () => {
+  it("sorts opportunities by priorityScore, descending", () => {
     const opps = buildOpportunities(ctx)
     for (let i = 1; i < opps.length; i++) {
-      expect(opps[i - 1].economics.priorityValue).toBeGreaterThanOrEqual(opps[i].economics.priorityValue)
+      expect(opps[i - 1].priorityScore).toBeGreaterThanOrEqual(opps[i].priorityScore)
     }
   })
 
