@@ -48,6 +48,7 @@ export const cashForecastSkill: SkillDefinition = {
   taskTitle: "Forecast cash position",
   riskLevel: "low",
   version: "1.0",
+  status: "beta", // real, but reasoning only over demo data so far — no real financial system connected
   inputs: [],
   requiredTools: ["tool_financial_data", "tool_llm"],
   instructions: SYSTEM_PROMPT,

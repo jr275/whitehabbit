@@ -183,6 +183,13 @@ export interface SkillDefinition {
   /** Free-form semver-ish string ("1.0"), optional for the same reason
    * as riskLevel — only new skills are expected to carry it for now. */
   version?: string
+  /** The Skill Card's own declared maturity — another structural fact
+   * for the future UI, not a comment buried in code. "active" is the
+   * implied default for a skill that doesn't set this (the original
+   * six skills); a new skill reasoning only over demo/fictional data
+   * (no real system connected yet) should set "beta" so a future
+   * Skill Card can say so without inspecting its tools. */
+  status?: "active" | "beta" | "deprecated"
   /** the real work. Throws or returns a blocked execution — never fabricates a result. */
   execute: (ctx: SkillExecutionContext) => Promise<SkillExecutionResult>
   evaluate: (result: SkillExecutionResult) => SkillEvaluation

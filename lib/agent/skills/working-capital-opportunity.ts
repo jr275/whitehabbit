@@ -42,6 +42,7 @@ export const workingCapitalOpportunitySkill: SkillDefinition = {
   taskTitle: "Detect working capital opportunities",
   riskLevel: "medium", // its recommendations can touch payment timing, even though this skill itself never pays anything
   version: "1.0",
+  status: "beta", // real, but reasoning only over demo data so far — no real financial system connected
   inputs: [],
   requiredTools: ["tool_financial_data", "tool_llm"],
   instructions: SYSTEM_PROMPT,
