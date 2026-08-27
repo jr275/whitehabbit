@@ -353,8 +353,8 @@ export async function updateTaskStatus(id: string, status: WorkerTask["status"])
 /* ---- executions ------------------------------------------------------ */
 export async function insertExecution(exec: WorkerExecution, orgId: string): Promise<void> {
   await query(
-    `INSERT INTO executions (id, org_id, worker_id, worker_version_id, task_id, status, reason_code, blocked_reason, started_at, completed_at, duration_ms, cost_usd, input_tokens, output_tokens, model, execution_mode)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+    `INSERT INTO executions (id, org_id, worker_id, worker_version_id, task_id, status, reason_code, blocked_reason, started_at, completed_at, duration_ms, cost_usd, input_tokens, output_tokens, model, execution_mode, data_provenance)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
     [
       exec.id,
       orgId,
@@ -366,6 +366,7 @@ export async function insertExecution(exec: WorkerExecution, orgId: string): Pro
       exec.blockedReason ?? null,
       exec.startedAt,
       exec.completedAt ?? null,
+      null,
       null,
       null,
       null,
@@ -393,10 +394,11 @@ export async function finalizeExecution(
     outputTokens?: number
     model?: string
     executionMode?: WorkerExecution["executionMode"]
+    dataProvenance?: WorkerExecution["dataProvenance"]
   },
 ): Promise<void> {
   await query(
-    `UPDATE executions SET status = $1, reason_code = $2, blocked_reason = $3, completed_at = $4, duration_ms = $5, cost_usd = $6, input_tokens = $7, output_tokens = $8, model = $9, execution_mode = $10 WHERE id = $11`,
+    `UPDATE executions SET status = $1, reason_code = $2, blocked_reason = $3, completed_at = $4, duration_ms = $5, cost_usd = $6, input_tokens = $7, output_tokens = $8, model = $9, execution_mode = $10, data_provenance = $11 WHERE id = $12`,
     [
       patch.status,
       patch.reasonCode ?? null,
@@ -408,6 +410,7 @@ export async function finalizeExecution(
       patch.outputTokens ?? null,
       patch.model ?? null,
       patch.executionMode ?? null,
+      patch.dataProvenance ?? null,
       id,
     ],
   )
@@ -430,6 +433,7 @@ interface ExecutionRow {
   output_tokens: number | null
   model: string | null
   execution_mode: string | null
+  data_provenance: string | null
 }
 
 function rowToExecution(r: ExecutionRow): WorkerExecution {
@@ -449,6 +453,7 @@ function rowToExecution(r: ExecutionRow): WorkerExecution {
     outputTokens: r.output_tokens ?? undefined,
     model: r.model ?? undefined,
     executionMode: (r.execution_mode as WorkerExecution["executionMode"]) ?? undefined,
+    dataProvenance: (r.data_provenance as WorkerExecution["dataProvenance"]) ?? undefined,
   }
 }
 
@@ -524,8 +529,21 @@ export async function insertBusinessEvent(be: BusinessEvent, orgId: string): Pro
 
 export async function insertMetric(metric: MetricRecord, orgId: string): Promise<void> {
   await query(
-    "INSERT INTO metrics (id, org_id, worker_id, execution_id, business_event_id, key, kind, value, unit, recorded_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-    [metric.id, orgId, metric.workerId, metric.executionId ?? null, metric.businessEventId ?? null, metric.key, metric.kind, metric.value, metric.unit ?? null, metric.recordedAt],
+    "INSERT INTO metrics (id, org_id, worker_id, execution_id, business_event_id, key, kind, value, unit, recorded_at, economic_state, value_category) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+    [
+      metric.id,
+      orgId,
+      metric.workerId,
+      metric.executionId ?? null,
+      metric.businessEventId ?? null,
+      metric.key,
+      metric.kind,
+      metric.value,
+      metric.unit ?? null,
+      metric.recordedAt,
+      metric.economicState ?? null,
+      metric.valueCategory ?? null,
+    ],
   )
 }
 
@@ -613,10 +631,19 @@ export async function getBootstrapState(orgId: string): Promise<BootstrapState> 
     sequence: r.sequence,
   }))
 
-  const metricRows = await query<{ id: string; worker_id: string; execution_id: string | null; business_event_id: string | null; key: string; kind: string; value: number; unit: string | null; recorded_at: string }>(
-    `SELECT * FROM metrics WHERE org_id = $1 AND worker_id IN (${placeholders}) ORDER BY recorded_at DESC LIMIT 1000`,
-    [orgId, ...workerIds],
-  )
+  const metricRows = await query<{
+    id: string
+    worker_id: string
+    execution_id: string | null
+    business_event_id: string | null
+    key: string
+    kind: string
+    value: number
+    unit: string | null
+    recorded_at: string
+    economic_state: string | null
+    value_category: string | null
+  }>(`SELECT * FROM metrics WHERE org_id = $1 AND worker_id IN (${placeholders}) ORDER BY recorded_at DESC LIMIT 1000`, [orgId, ...workerIds])
   const metrics: MetricRecord[] = metricRows.map((r) => ({
     id: r.id,
     workerId: r.worker_id,
@@ -627,6 +654,8 @@ export async function getBootstrapState(orgId: string): Promise<BootstrapState> 
     value: r.value,
     unit: r.unit ?? undefined,
     recordedAt: Number(r.recorded_at),
+    economicState: (r.economic_state as MetricRecord["economicState"]) ?? undefined,
+    valueCategory: (r.value_category as MetricRecord["valueCategory"]) ?? undefined,
   }))
 
   const beRows = await query<{ id: string; worker_id: string; output_id: string | null; type: string; payload: Record<string, unknown>; occurred_at: string }>(

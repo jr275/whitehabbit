@@ -189,6 +189,12 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         value: m.value,
         unit: m.unit,
         recordedAt: Date.now(),
+        // A business metric with no explicit state is "estimated" —
+        // nothing in this codebase yet has a real approve/execute/
+        // reconcile path, so no metric may silently imply more than
+        // that. Non-business metrics never carry an economic state.
+        economicState: m.kind === "business" ? (m.economicState ?? "estimated") : undefined,
+        valueCategory: m.kind === "business" ? m.valueCategory : undefined,
       }))
       for (const m of metricRecords) {
         await repo.insertMetric(m, run.orgId)
@@ -206,6 +212,7 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         outputTokens: result.outputTokens,
         model: result.model,
         executionMode: result.executionMode,
+        dataProvenance: result.dataProvenance,
       })
       await repo.updateTaskStatus(task.id, "completed")
       emit("task_completed", { outputId: output.id, durationMs })
@@ -271,6 +278,14 @@ function titleFor(outputType: string, input: Record<string, string>): string {
       return "Content performance analysis"
     case "engagement_analysis":
       return "Engagement analysis"
+    case "cash_position_summary":
+      return "Cash position summary"
+    case "cash_forecast":
+      return "Cash forecast"
+    case "working_capital_opportunities":
+      return "Working capital opportunities"
+    case "receivables_risk_analysis":
+      return "Receivables risk analysis"
     default:
       return "Result"
   }

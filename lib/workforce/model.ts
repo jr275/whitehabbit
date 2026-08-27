@@ -9,15 +9,74 @@
  * the client only ever displays what actually happened.
  * ================================================================== */
 
-export type SkillCategory = "research" | "content" | "communication" | "sales"
+export type SkillCategory = "research" | "content" | "communication" | "sales" | "finance"
 
-export const SKILL_CATEGORIES: SkillCategory[] = ["research", "content", "communication", "sales"]
+export const SKILL_CATEGORIES: SkillCategory[] = ["research", "content", "communication", "sales", "finance"]
 
 export const SKILL_CATEGORY_LABEL: Record<SkillCategory, string> = {
   research: "Research",
   content: "Content",
   communication: "Communication",
   sales: "Sales",
+  finance: "Finance",
+}
+
+/* ================================================================== *
+ * TRUST MODEL — two orthogonal dimensions, never collapsed into one.
+ *
+ * DataProvenance answers "where did this number come from" (was a real
+ * execution involved, and was the underlying data real, connected, or
+ * demo/fictional). EconomicState answers a completely different
+ * question: "how far has this dollar figure actually travelled toward
+ * being real, reconciled cash" — a Worker's own hypothesis, a human-
+ * approved estimate, money that has actually moved, or a figure
+ * reconciled against a source of truth. A metric can be
+ * provenance=real (a genuine execution produced it) and still
+ * economicState=estimated (nobody has approved, executed, or
+ * reconciled it yet) — the two must never be merged into one enum, or
+ * the UI loses the ability to say "this is a real recommendation, not
+ * yet acted on" instead of implying money has already moved.
+ * ================================================================== */
+export type DataProvenance = "real" | "connected" | "demo" | "simulated" | "not_connected"
+
+export type EconomicState = "estimated" | "approved" | "executed" | "realized" | "verified"
+
+export const ECONOMIC_STATE_LABEL: Record<EconomicState, string> = {
+  estimated: "Estimated",
+  approved: "Approved",
+  executed: "Executed",
+  realized: "Realized",
+  verified: "Verified",
+}
+
+/** Named categories of economic value a business-impact metric can
+ * represent — lets a future Command Center group and sum dollar
+ * figures meaningfully instead of showing an undifferentiated metric
+ * key. Deliberately a closed, small set (see docs/financial-domain.md)
+ * rather than free-form text, so it stays summable and filterable. */
+export type EconomicValueCategory =
+  | "cash_preserved"
+  | "cash_released"
+  | "cost_avoided"
+  | "cost_reduced"
+  | "revenue_generated"
+  | "margin_increased"
+  | "working_capital_released"
+  | "financing_cost_reduced"
+  | "risk_exposure_reduced"
+  | "forecast_accuracy_improved"
+
+export const ECONOMIC_VALUE_CATEGORY_LABEL: Record<EconomicValueCategory, string> = {
+  cash_preserved: "Cash preserved",
+  cash_released: "Cash released",
+  cost_avoided: "Cost avoided",
+  cost_reduced: "Cost reduced",
+  revenue_generated: "Revenue generated",
+  margin_increased: "Margin increased",
+  working_capital_released: "Working capital released",
+  financing_cost_reduced: "Financing cost reduced",
+  risk_exposure_reduced: "Risk exposure reduced",
+  forecast_accuracy_improved: "Forecast accuracy improved",
 }
 
 export interface Skill {
@@ -254,6 +313,15 @@ export interface WorkerExecution {
    * a past development run can never be mistaken for a real one, even
    * after LLM_DEV_MODE is turned back off. */
   executionMode?: "development"
+  /** What the skill itself honestly reported its underlying DATA was —
+   * distinct from executionMode, which is only about the LLM call. A
+   * financial skill can make a real (non-development) LLM call while
+   * still operating on a "demo" fictional ledger; that must show up
+   * here, not be inferred from executionMode. Undefined for skills that
+   * never set it (the original six marketing skills) — callers fall
+   * back to the executionMode-based inference (see
+   * business-results.ts's provenanceForExecution()). */
+  dataProvenance?: DataProvenance
 }
 
 export interface SourceRecord {
@@ -339,6 +407,11 @@ export interface MetricRecord {
   value: number
   unit?: string
   recordedAt: number
+  /** Only meaningful when kind === "business" — see EconomicState above.
+   * Undefined for operational/quality/cost metrics, and for any
+   * business metric emitted before this concept existed. */
+  economicState?: EconomicState
+  valueCategory?: EconomicValueCategory
 }
 
 /* ---- output presentation metadata ---- */
@@ -349,6 +422,10 @@ export const OUTPUT_TYPE_META: Record<string, { label: string; plural: string; f
   lead_qualification: { label: "Lead qualification", plural: "Lead qualifications", filter: "Sales" },
   seo_opportunity_plan: { label: "SEO opportunity plan", plural: "SEO opportunity plans", filter: "Content" },
   conversation_response: { label: "Conversation response", plural: "Conversation responses", filter: "Communication" },
+  cash_position_summary: { label: "Cash position summary", plural: "Cash position summaries", filter: "Finance" },
+  cash_forecast: { label: "Cash forecast", plural: "Cash forecasts", filter: "Finance" },
+  working_capital_opportunities: { label: "Working capital opportunities", plural: "Working capital opportunities", filter: "Finance" },
+  receivables_risk_analysis: { label: "Receivables risk analysis", plural: "Receivables risk analyses", filter: "Finance" },
 }
 
 export const OUTPUT_STATUS_META: Record<OutputStatus, { label: string; tone: "good" | "info" | "warn" | "bad" | "muted" }> = {

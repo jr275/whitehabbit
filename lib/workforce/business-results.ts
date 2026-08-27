@@ -1,6 +1,12 @@
-import type { MetricRecord, Worker, WorkerExecution, WorkerOutput } from "@/lib/workforce/model"
+import { getWorkerCategory } from "@/lib/workforce/visual-identity"
+import type { DataProvenance, MetricRecord, SkillCategory, Worker, WorkerExecution, WorkerOutput } from "@/lib/workforce/model"
 
-export type ResultProvenance = "real" | "connected" | "demo" | "simulated" | "not_connected"
+// Kept as its own exported name for backward compatibility with every
+// existing import (ProvenanceBadge, etc.) — the underlying type is
+// canonically defined once, in lib/workforce/model.ts, so lib/agent/
+// types.ts (SkillExecutionResult.dataProvenance) and this file can
+// never quietly drift into two different provenance vocabularies.
+export type ResultProvenance = DataProvenance
 
 export interface BusinessMetricDefinition {
   key: string
@@ -33,7 +39,14 @@ export const SUPER_AGENT_PROFILES: SuperAgentProfile[] = [
   profile("marketing", "Marketing", "Create measurable demand with evidence-backed campaigns.", ["Research markets", "Build briefs", "Analyze engagement"], "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/green_marketing_agent-A2Jn9F0tIw00afsud0p6ZYvMLe7tDi.webp", [["qualified_leads", "Qualified leads", "", "CRM", "Connect CRM to activate"], ["campaign_reach", "Campaign reach", "", "Analytics", "Connect analytics to activate"]]),
   profile("customer-success", "Customer Success", "Improve retention by identifying and resolving customer risk.", ["Monitor health", "Prepare check-ins", "Recommend next actions"], "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/customer_success_agent_thumbs_up-mv8PtZpjOHi87VoDk0k0GyTCeBYAYu.webp", [["retention_rate", "Retention rate", "%", "Customer platform", "Connect customer data to activate"], ["health_score", "Customer health", "%", "Customer platform", "Connect customer data to activate"]]),
   profile("support", "Support", "Resolve customer issues quickly with reliable answers.", ["Triage tickets", "Draft responses", "Identify escalations"], "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/support_agent_console-dfjeF9Z8k3xXsTHHEDCyZwIALBHrFl.webp", [["resolution_rate", "Resolution rate", "%", "Help desk", "Connect help desk to activate"], ["csat", "Customer satisfaction", "%", "Help desk", "Connect help desk to activate"]]),
-  profile("finance", "Finance", "Protect margin with accurate analysis and controlled actions.", ["Review variance", "Analyze spend", "Prepare forecasts"], "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/finance_agent_console-buTl9SCNSMMGTAkEU2p0sAkJl9QZKQ.webp", [["savings", "Verified savings", "$", "Finance system", "Connect finance system to activate"], ["forecast_accuracy", "Forecast accuracy", "%", "Finance system", "Connect finance system to activate"]]),
+  // Labels are deliberately neutral about HOW REAL the number is
+  // ("identified"/"risk", never "verified" or "generated") — the
+  // metric's real economicState (estimated/approved/executed/realized/
+  // verified) is a separate field on the MetricRecord itself (see
+  // lib/workforce/model.ts) and must be rendered alongside the label
+  // wherever this is shown, never baked into the label as an assumed
+  // constant truth.
+  profile("finance", "Finance", "Protect margin and liquidity with accurate analysis and controlled actions.", ["Monitor cash position", "Forecast liquidity", "Detect working-capital opportunities", "Flag receivables risk"], "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/finance_agent_console-buTl9SCNSMMGTAkEU2p0sAkJl9QZKQ.webp", [["savings", "Cash value identified", "$", "Finance system", "Connect finance system to activate"], ["forecast_accuracy", "Forecast accuracy", "%", "Finance system", "Connect finance system to activate"], ["liquidity_risk_exposure", "Liquidity risk exposure", "$", "Finance system", "Connect finance system to activate"]]),
   profile("operations", "Operations", "Keep critical workflows reliable and remove bottlenecks.", ["Monitor workflows", "Investigate blockers", "Coordinate handoffs"], "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/red_ops_agent_control_room-rz1DNcMXzUkJRjUWiDsBiZGlqiKNou.webp", [["cycle_time", "Cycle time", "h", "Operations system", "Connect operations data to activate"], ["sla_attainment", "SLA attainment", "%", "Operations system", "Connect operations data to activate"]]),
   profile("hr", "HR", "Support a healthy workforce with consistent employee operations.", ["Prepare onboarding", "Coordinate check-ins", "Summarize feedback"], "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/hr_agent_console-DAgJlixGXFXWev9qcY1OeVFSdhfsT0.webp", [["employee_happiness", "Employee happiness", "%", "HRIS", "Connect HRIS to activate"], ["onboarding_completion", "Onboarding completion", "%", "HRIS", "Connect HRIS to activate"]]),
   profile("ecommerce", "E-commerce", "Improve fulfillment and conversion across commerce operations.", ["Monitor orders", "Find inventory risk", "Analyze conversion"], "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/ecommerce_agent_console-xdfo6T8F0QKoT9J0GQYExa0FhtOVai.webp", [["conversion_rate", "Conversion rate", "%", "Commerce platform", "Connect commerce data to activate"], ["fulfillment_rate", "Fulfillment rate", "%", "Commerce platform", "Connect commerce data to activate"]]),
@@ -44,14 +57,34 @@ function profile(id: string, label: string, objective: string, capabilities: str
   return { id, label, objective, capabilities, image, metrics: metrics.map(([key, metricLabel, unit, source, activation]) => ({ key, label: metricLabel, unit, source, activation })) }
 }
 
+// Real skill categories that correspond exactly to one SUPER_AGENT_PROFILES
+// entry — checked first, and precisely, before falling back to the
+// keyword heuristic below (which only ever worked by coincidence of
+// naming, e.g. Atlas's role happening to contain the word "marketing").
+const CATEGORY_PROFILE_ID: Partial<Record<SkillCategory, string>> = {
+  finance: "finance",
+  sales: "sales",
+}
+
 export function profileForWorker(worker?: Worker): SuperAgentProfile {
   if (!worker) return SUPER_AGENT_PROFILES[8]
+  const categoryProfileId = CATEGORY_PROFILE_ID[getWorkerCategory(worker)]
+  if (categoryProfileId) {
+    const byCategory = SUPER_AGENT_PROFILES.find((item) => item.id === categoryProfileId)
+    if (byCategory) return byCategory
+  }
   const haystack = `${worker.productId ?? ""} ${worker.identity.role} ${worker.identity.name} ${worker.mission}`.toLowerCase()
   return SUPER_AGENT_PROFILES.find((item) => haystack.includes(item.id) || haystack.includes(item.label.toLowerCase())) ?? SUPER_AGENT_PROFILES[8]
 }
 
 export function provenanceForExecution(execution?: WorkerExecution): ResultProvenance {
-  return execution?.executionMode === "development" ? "simulated" : execution ? "real" : "not_connected"
+  if (!execution) return "not_connected"
+  // A skill's own honest report of its data source always wins — e.g.
+  // a financial skill can make a real (non-development) LLM call while
+  // still reasoning over a "demo" fictional ledger; that must show up
+  // here, never be inferred from executionMode alone.
+  if (execution.dataProvenance) return execution.dataProvenance
+  return execution.executionMode === "development" ? "simulated" : "real"
 }
 
 export function businessResults(workers: Worker[], metrics: MetricRecord[], executions: WorkerExecution[], outputs: WorkerOutput[]): BusinessResultCard[] {

@@ -15,7 +15,7 @@
  * a tool and does not depend on any client code.
  * ================================================================== */
 
-import type { SkillCategory } from "@/lib/workforce/model"
+import type { DataProvenance, EconomicState, EconomicValueCategory, SkillCategory } from "@/lib/workforce/model"
 
 /* ---- the real slice of a Worker's definition a skill actually needs
  * to reason with — mission/objectives/behaviors/knowledge, resolved
@@ -118,6 +118,17 @@ export interface SkillExecutionResult {
    * through to WorkerExecution so a development run can never be
    * mistaken for a real one, even after LLM_DEV_MODE is turned back off. */
   executionMode?: "development"
+  /** What the underlying DATA this skill reasoned over actually was —
+   * orthogonal to executionMode (which is only about the LLM call).
+   * "not_connected" is deliberately excluded: a skill that completed
+   * successfully always had *some* data to work with. A skill that
+   * never sets this is understood to have used the same real-vs-
+   * simulated distinction executionMode already carries (see
+   * business-results.ts's provenanceForExecution()) — this field only
+   * needs to be set when a skill's data source is honestly narrower or
+   * different from that, e.g. a financial skill reasoning over a demo
+   * ledger while still making a real LLM call. */
+  dataProvenance?: Exclude<DataProvenance, "not_connected">
 }
 
 export interface SkillEvaluation {
@@ -131,6 +142,13 @@ export interface MetricEmission {
   kind: "operational" | "quality" | "cost" | "business"
   value: number
   unit?: string
+  /** Only meaningful when kind === "business" — see EconomicState in
+   * lib/workforce/model.ts. A skill that emits a business metric
+   * without setting this is understood to mean "estimated": nothing in
+   * this codebase yet has a real approve/execute/reconcile path (see
+   * docs/financial-domain.md), so no skill may claim more than that. */
+  economicState?: EconomicState
+  valueCategory?: EconomicValueCategory
 }
 
 export interface SkillExecutionContext {
@@ -157,6 +175,14 @@ export interface SkillDefinition {
   requiredTools: string[]
   instructions: string
   constraints: string[]
+  /** The Skill Card's own declared risk tier — a structural fact the
+   * future UI can render directly, never reconstructed from arbitrary
+   * JSON. Optional so the original six skills (audited, not re-graded
+   * in this phase) are unaffected; every new skill should set it. */
+  riskLevel?: RiskLevel
+  /** Free-form semver-ish string ("1.0"), optional for the same reason
+   * as riskLevel — only new skills are expected to carry it for now. */
+  version?: string
   /** the real work. Throws or returns a blocked execution — never fabricates a result. */
   execute: (ctx: SkillExecutionContext) => Promise<SkillExecutionResult>
   evaluate: (result: SkillExecutionResult) => SkillEvaluation
