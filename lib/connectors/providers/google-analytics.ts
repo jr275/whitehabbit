@@ -21,7 +21,7 @@ import "server-only"
  * ================================================================== */
 
 import type { ToolActionResult, ToolContext, ToolDefinition } from "@/lib/agent/types"
-import { getValidAccessToken } from "../token-store"
+import { resolveConnectionCredential } from "../credential-resolver"
 import { buildGoogleOAuthConfig, googleOAuthNotConfiguredReason, isGoogleOAuthConfigured } from "./google-oauth"
 import type { Connection, ConnectorAction, ConnectorDefinition, IntegrationHealthState } from "../types"
 
@@ -35,8 +35,8 @@ export function googleAnalyticsOAuthConfig(redirectUri: string) {
 
 async function resolveAccessToken(connection: Connection): Promise<string | null> {
   if (connection.status !== "connected") return null
-  const token = await getValidAccessToken(connection.id, connection.organizationId, googleAnalyticsOAuthConfig(""))
-  return token?.accessToken ?? null
+  const resolved = await resolveConnectionCredential(connection, { oauthConfig: googleAnalyticsOAuthConfig("") })
+  return resolved?.kind === "oauth2" ? resolved.accessToken : null
 }
 
 /** Carries the real HTTP status + a real, provider-supplied

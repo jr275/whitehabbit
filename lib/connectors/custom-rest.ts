@@ -18,10 +18,12 @@ import "server-only"
  *     hand-declared entry), each with its own real input schema.
  * ================================================================== */
 
-import { getCustomConnectorCredential } from "@/lib/db/repo"
+import { getConnectionByConnectorId } from "@/lib/db/repo"
 import type { ToolAction, ToolActionResult, ToolContext, ToolDefinition } from "@/lib/agent/types"
 import { readBoundedText, safeFetch } from "@/lib/security/safe-fetch"
 import { UnsafeUrlError } from "@/lib/security/ssrf-guard"
+import { customConnectorConnectorId } from "./custom-connector-id"
+import { resolveConnectionCredential } from "./credential-resolver"
 import type { ConnectorAction, CustomConnector, CustomConnectorRestConfig } from "./types"
 
 const DEFAULT_TIMEOUT_MS = 20_000
@@ -38,10 +40,22 @@ interface RestCallInput {
   body?: unknown
 }
 
+/** Resolves this connector's auth header through the one authoritative
+ * credential-resolution boundary (lib/connectors/credential-
+ * resolver.ts) — never a direct repo.ts credential-table read. Looks
+ * up the connector's mirrored Connection (the "custom_<id>" convention
+ * — lib/connectors/custom-connector-id.ts) first; a connector whose
+ * credential was never set has no Connection yet either (Phase 2A —
+ * ensureConnectionForCustomConnector runs at credential-set time), so
+ * "no Connection" and "no credential" both correctly resolve to no
+ * auth headers. */
 async function resolveAuthHeaders(row: CustomConnector): Promise<Record<string, string>> {
   if (!isRestConfig(row.config) || row.config.authType === "none") return {}
-  const credential = await getCustomConnectorCredential(row.id, row.organizationId)
-  if (!credential) return {}
+  const connection = await getConnectionByConnectorId(row.organizationId, customConnectorConnectorId(row.id))
+  if (!connection) return {}
+  const resolved = await resolveConnectionCredential(connection)
+  if (!resolved || resolved.kind !== "generic") return {}
+  const credential = resolved.credential
   if (credential.type === "api_key" && isRestConfig(row.config)) {
     return { [row.config.apiKeyHeader || "X-API-Key"]: credential.value }
   }

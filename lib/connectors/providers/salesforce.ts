@@ -15,7 +15,7 @@ import "server-only"
  * ================================================================== */
 
 import type { ToolActionResult, ToolContext, ToolDefinition } from "@/lib/agent/types"
-import { getValidAccessToken } from "../token-store"
+import { resolveConnectionCredential } from "../credential-resolver"
 import { isSalesforceOAuthConfigured, salesforceOAuthConfig, salesforceOAuthNotConfiguredReason } from "./salesforce-oauth"
 import type { Connection, ConnectorAction, ConnectorDefinition, ConnectorTrigger, IntegrationHealthState } from "../types"
 
@@ -25,11 +25,11 @@ function apiVersion(): string {
 
 async function resolveAccess(connection: Connection): Promise<{ accessToken: string; instanceUrl: string } | null> {
   if (connection.status !== "connected") return null
-  const token = await getValidAccessToken(connection.id, connection.organizationId, salesforceOAuthConfig(""), ["instance_url"])
-  if (!token) return null
-  const instanceUrl = (connection.metadata?.instanceUrl as string | undefined) ?? token.extra?.instance_url
+  const resolved = await resolveConnectionCredential(connection, { oauthConfig: salesforceOAuthConfig(""), oauthExtraFields: ["instance_url"] })
+  if (!resolved || resolved.kind !== "oauth2") return null
+  const instanceUrl = (connection.metadata?.instanceUrl as string | undefined) ?? resolved.extra?.instance_url
   if (!instanceUrl) return null
-  return { accessToken: token.accessToken, instanceUrl }
+  return { accessToken: resolved.accessToken, instanceUrl }
 }
 
 /** Carries the real HTTP status + a real, provider-supplied

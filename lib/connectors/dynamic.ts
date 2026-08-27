@@ -17,8 +17,9 @@ import "server-only"
  * already established.
  * ================================================================== */
 
-import { getCustomConnector, getCustomConnectorCredential, listCustomConnectors } from "@/lib/db/repo"
+import { getConnectionByConnectorId, getCustomConnector, listCustomConnectors } from "@/lib/db/repo"
 import { customConnectorConnectorId } from "./custom-connector-id"
+import { resolveConnectionCredential } from "./credential-resolver"
 import { buildCustomRestTools } from "./custom-rest"
 import { mcpCallTool, mcpInitialize, mcpListTools, McpClientError, type McpToolDescriptor } from "./mcp-client"
 import { emitConnectorExecutionCompleted, emitConnectorExecutionFailed, emitConnectorExecutionStarted, type ConnectorExecutionFields } from "./observability"
@@ -29,9 +30,15 @@ function isMcpConfig(config: CustomConnector["config"]): config is CustomConnect
   return "endpointUrl" in config
 }
 
+/** Resolves through the one authoritative credential-resolution
+ * boundary (lib/connectors/credential-resolver.ts) — see custom-
+ * rest.ts's resolveAuthHeaders for the identical reasoning applied to
+ * REST connectors. */
 async function resolveMcpHeaders(row: CustomConnector): Promise<Record<string, string>> {
-  const credential = await getCustomConnectorCredential(row.id, row.organizationId)
-  if (credential?.type === "mcp_bearer") return { authorization: `Bearer ${credential.token}` }
+  const connection = await getConnectionByConnectorId(row.organizationId, customConnectorConnectorId(row.id))
+  if (!connection) return {}
+  const resolved = await resolveConnectionCredential(connection)
+  if (resolved?.kind === "generic" && resolved.credential.type === "mcp_bearer") return { authorization: `Bearer ${resolved.credential.token}` }
   return {}
 }
 

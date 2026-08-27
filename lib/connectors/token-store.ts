@@ -28,8 +28,8 @@ export async function storeTokens(connectionId: string, tokens: OAuth2TokenRespo
   })
 }
 
-export async function clearTokens(connectionId: string): Promise<void> {
-  await deleteOAuthCredential(connectionId)
+export async function clearTokens(connectionId: string, orgId: string): Promise<void> {
+  await deleteOAuthCredential(connectionId, orgId)
 }
 
 /** Real, live access token for a Connection — decrypts the stored
@@ -40,7 +40,7 @@ export async function clearTokens(connectionId: string): Promise<void> {
  * callers report that as NOT_CONNECTED/REAUTH_REQUIRED, never
  * substitute a stale or fabricated token. */
 export async function getValidAccessToken(connectionId: string, orgId: string, oauthConfig: OAuth2Config, extraFields: string[] = []): Promise<{ accessToken: string; extra?: Record<string, string> } | null> {
-  const row = await getOAuthCredential(connectionId)
+  const row = await getOAuthCredential(connectionId, orgId)
   if (!row) return null
 
   const expiringSoon = row.expiresAt != null && row.expiresAt - REFRESH_SKEW_MS <= Date.now()

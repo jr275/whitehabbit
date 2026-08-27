@@ -46,6 +46,55 @@ const mcpConnector = buildMcpConnector({
  * adding one real ConnectorDefinition here; nothing else in this file,
  * the Tool Registry, or the Worker Runtime changes. */
 const PLACEHOLDER_CONNECTORS: ConnectorDefinition[] = [
+  /* ---------------------------------------------------------------- *
+   * Phase 2D architectural decision (documentation only — no Gmail/
+   * Sheets/Drive/Calendar API code exists yet, and none is added by
+   * this phase): connector_google below is deliberately ONE
+   * ConnectorDefinition — one OAuth2 Connection, one real Google OAuth
+   * grant — covering multiple Google capabilities/services, NOT
+   * separate connector_gmail / connector_sheets / connector_drive
+   * entries each with their own Connection.
+   *
+   * This is "Option A" (one connection, multiple capabilities) over
+   * "Option B" (independent per-service connectors sharing a
+   * credential abstraction), because:
+   *   - One OAuth consent screen, one grant. A user authorizes once;
+   *     incremental scopes (added later, e.g. Gmail today, Sheets
+   *     added in a future release) extend the SAME grant rather than
+   *     asking the user to connect "Google" a second and third time.
+   *   - No credential duplication. Phase 2A's oauth_credentials is
+   *     already 1:1 per Connection with a real `scope` column holding
+   *     a space-separated scope list — one row already fits "gmail.
+   *     readonly sheets.readonly drive.readonly" today, with zero
+   *     schema change. Splitting into per-service connectors would
+   *     mean either N separate OAuth grants for the same Google
+   *     account (duplicated consent, duplicated tokens, duplicated
+   *     refresh traffic) or artificially sharing one oauth_credentials
+   *     row across N Connection rows (breaking oauth_credentials'
+   *     real UNIQUE(connection_id) 1:1 invariant).
+   *   - Matches how Google's own consent screen already works: a user
+   *     grants a SET of scopes to one app in one flow, not once per
+   *     product.
+   *   - The one real cost — a single "Google" connector's buildTools()
+   *     must gate each service's tools on whether that service's
+   *     scope was actually granted (not every Google connection will
+   *     have Sheets scope, e.g.) — is a capability-by-capability
+   *     concern inside ONE adapter, not a reason to fragment the
+   *     Connection model; ConnectorCapability (types.ts) already
+   *     exists for exactly this "declared but not always granted"
+   *     shape.
+   *
+   * lib/connectors/credential-resolver.ts's resolveConnectionCredential
+   * already supports this without any Google-specific code: a
+   * connector_google Connection resolves through the identical oauth2
+   * branch every other OAuth2 connector uses.
+   *
+   * connector_google_analytics (registered separately, below, real and
+   * enabled) is NOT folded into this decision — GA4 predates it, is a
+   * distinct Google product with its own narrower scope
+   * (analytics.readonly) and its own existing real Connection today;
+   * reconciling it under one umbrella "Google" connector is a future
+   * decision, out of scope here. */
   {
     id: "connector_google",
     name: "Google",

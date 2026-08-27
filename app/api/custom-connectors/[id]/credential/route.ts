@@ -31,7 +31,7 @@ export async function POST(req: Request, { params }: Params) {
 
     try {
       const credential = assertValidCredentialForConnector(connector, body.credential)
-      await setCustomConnectorCredential(id, organizationId, credential)
+      await setCustomConnectorCredential(id, organizationId, credential, userId)
     } catch (err) {
       if (err instanceof CustomConnectorValidationError) throw new ValidationError(err.message)
       throw err

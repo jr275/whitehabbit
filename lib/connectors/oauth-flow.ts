@@ -130,7 +130,7 @@ export async function disconnectOAuthConnection(connectorId: string): Promise<Ne
   const existing = (await listConnections(organizationId)).find((c) => c.connectorId === connectorId)
   if (!existing) throw new NotFoundError()
 
-  await clearTokens(existing.id)
+  await clearTokens(existing.id, organizationId)
   const connection = await updateConnectionStatus(existing.id, organizationId, { status: "disconnected", userId })
   await recordAudit({ orgId: organizationId, userId, action: "connection_created", resourceType: "connection", resourceId: existing.id, metadata: { connectorId, action: "disconnected" } })
 

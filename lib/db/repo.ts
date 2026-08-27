@@ -12,6 +12,7 @@ import "server-only"
 
 import { randomUUID } from "node:crypto"
 import { decryptSecret, encryptSecret } from "@/lib/crypto/secret-box"
+import { customConnectorConnectorId } from "@/lib/connectors/custom-connector-id"
 import { slugify } from "@/lib/connectors/slug"
 import { query, queryOne, withTransaction } from "./client"
 import type { Connection, ConnectorAction, CustomConnector, CustomConnectorCredential } from "@/lib/connectors/types"
@@ -1304,15 +1305,26 @@ function rowToCustomConnector(r: CustomConnectorRow): CustomConnector {
   }
 }
 
+/** Phase 2B — connector platform hardening: an explicit column list,
+ * never `SELECT *`. custom_connectors has a credential_encrypted
+ * column (legacy, see migrations/0013_connection_credentials.sql);
+ * naming every OTHER column here means that secret literally never
+ * enters the JS row object in the first place, for every caller of
+ * this function — "redaction" isn't something a mapper has to
+ * remember to do downstream, because there is nothing left to redact.
+ * A future refactor that spreads `{...row}` into an API response
+ * cannot leak a field that was never fetched. */
+const CUSTOM_CONNECTOR_COLUMNS = "id, org_id, slug, kind, name, description, category, icon, config, discovered_tools, status, error_reason, created_at, updated_at"
+
 export async function listCustomConnectors(orgId: string): Promise<CustomConnector[]> {
-  const rows = await query<CustomConnectorRow>("SELECT * FROM custom_connectors WHERE org_id = $1 ORDER BY created_at ASC", [orgId])
+  const rows = await query<CustomConnectorRow>(`SELECT ${CUSTOM_CONNECTOR_COLUMNS} FROM custom_connectors WHERE org_id = $1 ORDER BY created_at ASC`, [orgId])
   return rows.map(rowToCustomConnector)
 }
 
 /** Org-scoped by construction: returns null (never another org's row)
  * if the custom connector doesn't belong to orgId. */
 export async function getCustomConnector(id: string, orgId: string): Promise<CustomConnector | null> {
-  const row = await queryOne<CustomConnectorRow>("SELECT * FROM custom_connectors WHERE id = $1 AND org_id = $2", [id, orgId])
+  const row = await queryOne<CustomConnectorRow>(`SELECT ${CUSTOM_CONNECTOR_COLUMNS} FROM custom_connectors WHERE id = $1 AND org_id = $2`, [id, orgId])
   return row ? rowToCustomConnector(row) : null
 }
 
@@ -1405,36 +1417,247 @@ export async function deleteCustomConnector(id: string, orgId: string): Promise<
   await query("DELETE FROM custom_connectors WHERE id = $1 AND org_id = $2", [id, orgId])
 }
 
-/** Encrypts and stores this custom connector's one credential blob —
- * same AES-256-GCM primitive (lib/crypto/secret-box.ts) every other
- * real credential in this system already uses. Org-scoped: the UPDATE
- * only matches a row this org actually owns. */
-export async function setCustomConnectorCredential(id: string, orgId: string, credential: CustomConnectorCredential): Promise<void> {
-  await query("UPDATE custom_connectors SET credential_encrypted = $1, updated_at = $2 WHERE id = $3 AND org_id = $4", [encryptSecret(JSON.stringify(credential)), Date.now(), id, orgId])
+/* ================================================================== *
+ * CONNECTION CREDENTIALS — Phase 2A architectural hardening: the ONE
+ * physical, connection-scoped, multi-credential store every connector
+ * family's non-OAuth secret lives in (migrations/
+ * 0013_connection_credentials.sql), generalized from the old
+ * custom_connector_id-scoped, never-wired 0012 table. OAuth2 token
+ * pairs stay in oauth_credentials, further below — a deliberately
+ * separate table for a deliberately different lifecycle (real,
+ * unencrypted, queryable expiry the runtime checks without decrypting
+ * anything on every call — see getValidAccessToken in
+ * lib/connectors/token-store.ts) — but BOTH are reached through
+ * exactly one code-level boundary, lib/connectors/credential-
+ * resolver.ts's resolveConnectionCredential(), never directly by an
+ * adapter. See migrations/0013_connection_credentials.sql's header
+ * for the full "why two tables, one boundary" reasoning.
+ *
+ * Three distinct shapes, never conflated:
+ *   CredentialRecord    — the raw DB row (credential_encrypted and
+ *                          all). Never leaves this file.
+ *   CredentialMetadata  — id/label/kind/isPrimary/timestamps. Fetched
+ *                          via an explicit column list that never
+ *                          includes credential_encrypted (Phase 2B —
+ *                          same discipline as CUSTOM_CONNECTOR_COLUMNS
+ *                          above), so this shape has no secret in it
+ *                          for a future refactor to leak. Safe for any
+ *                          API response or UI list.
+ *   DecryptedCredential — CustomConnectorCredential
+ *                          (lib/connectors/types.ts), the real secret
+ *                          value. Exists only inside the execution
+ *                          boundary: a server-only adapter resolving
+ *                          what to send on an actual outbound call.
+ *                          Never returned by a route, logged, or put
+ *                          in an event/observability payload.
+ *
+ * setCustomConnectorCredential/getCustomConnectorCredential/
+ * listCustomConnectorCredentials/createCustomConnectorCredential/
+ * getCustomConnectorCredentialValue/deleteCustomConnectorCredential
+ * (further below) are kept as backward-compatible convenience
+ * wrappers with their original names and signatures, addressed by a
+ * custom connector's own id — every existing caller (routes, tests)
+ * keeps working unchanged. Internally they now route through this
+ * connection-scoped store instead of the old custom_connectors.
+ * credential_encrypted 1:1 column (still present in the table, never
+ * read or written by application code after this phase — see that
+ * migration's header for why it's kept, not dropped).
+ * ================================================================== */
+
+export type CredentialKind = "api_key" | "bearer_token" | "basic_auth" | "mcp_bearer" | "legacy"
+
+/** Safe DTO — see the section header above for why this shape can
+ * never carry a secret. */
+export interface CredentialMetadata {
+  id: string
+  connectionId: string
+  label: string
+  kind: CredentialKind
+  isPrimary: boolean
+  createdAt: number
+  updatedAt: number
 }
 
-/** Real, decrypted credential for one custom connector — null when
- * genuinely none is stored (never a fabricated fallback). Never
- * returned by any API response; server-only callers (the REST/MCP
- * dynamic adapters) only. */
-export async function getCustomConnectorCredential(id: string, orgId: string): Promise<CustomConnectorCredential | null> {
-  const row = await queryOne<{ credential_encrypted: string | null }>("SELECT credential_encrypted FROM custom_connectors WHERE id = $1 AND org_id = $2", [id, orgId])
-  if (!row?.credential_encrypted) return null
+const CREDENTIAL_METADATA_COLUMNS = "id, connection_id, label, kind, is_primary, created_at, updated_at"
+
+interface CredentialMetadataRow {
+  id: string
+  connection_id: string
+  label: string
+  kind: string | null
+  is_primary: boolean
+  created_at: string
+  updated_at: string
+}
+
+function rowToCredentialMetadata(r: CredentialMetadataRow): CredentialMetadata {
+  return { id: r.id, connectionId: r.connection_id, label: r.label, kind: (r.kind as CredentialKind) ?? "legacy", isPrimary: r.is_primary, createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) }
+}
+
+/** Real metadata only for every credential on this Connection — never
+ * the encrypted or decrypted secret. Safe for any API response or UI
+ * list (a future rotation UI's "which credentials exist" view). */
+export async function listConnectionCredentials(connectionId: string, orgId: string): Promise<CredentialMetadata[]> {
+  const rows = await query<CredentialMetadataRow>(
+    `SELECT ${CREDENTIAL_METADATA_COLUMNS} FROM connection_credentials WHERE connection_id = $1 AND org_id = $2 ORDER BY created_at ASC`,
+    [connectionId, orgId],
+  )
+  return rows.map(rowToCredentialMetadata)
+}
+
+async function clearPrimaryCredential(client: import("pg").PoolClient, connectionId: string, orgId: string): Promise<void> {
+  await client.query("UPDATE connection_credentials SET is_primary = false WHERE connection_id = $1 AND org_id = $2", [connectionId, orgId])
+}
+
+async function countConnectionCredentials(client: import("pg").PoolClient, connectionId: string, orgId: string): Promise<number> {
+  const { rows } = await client.query<{ n: string }>("SELECT COUNT(*)::text AS n FROM connection_credentials WHERE connection_id = $1 AND org_id = $2", [connectionId, orgId])
+  return Number(rows[0]?.n ?? "0")
+}
+
+async function fetchCredentialMetadata(client: import("pg").PoolClient, connectionId: string, label: string): Promise<CredentialMetadata> {
+  const { rows } = await client.query<CredentialMetadataRow>(`SELECT ${CREDENTIAL_METADATA_COLUMNS} FROM connection_credentials WHERE connection_id = $1 AND label = $2`, [connectionId, label])
+  return rowToCredentialMetadata(rows[0])
+}
+
+/** Upserts the credential at (connectionId, label) — creates it if
+ * absent, overwrites the secret in place if present. This is UPSERT
+ * semantics on purpose: it backs the single default/primary
+ * credential slot (setCustomConnectorCredential below), where setting
+ * "the" credential again is expected to replace it, never to error.
+ * A caller that wants a genuinely NEW named credential to fail loudly
+ * on a duplicate label wants createConnectionCredential instead. The
+ * connection's FIRST-ever credential becomes primary automatically; a
+ * later upsert only changes primary status if makePrimary is
+ * explicitly passed — never an implicit promotion/demotion on an
+ * unrelated write. customConnectorId is threaded through only to
+ * preserve the existing ON DELETE CASCADE from custom_connectors for
+ * connector-originated credentials (see the migration's header) —
+ * never used for scoping; connection_id + org_id is the real,
+ * sufficient scope both here and on every read below. */
+export async function setConnectionCredential(input: {
+  connectionId: string
+  orgId: string
+  userId?: string
+  label?: string
+  kind: CredentialKind
+  credential: CustomConnectorCredential
+  makePrimary?: boolean
+  customConnectorId?: string
+}): Promise<CredentialMetadata> {
+  const label = input.label ?? "Default"
+  const encrypted = encryptSecret(JSON.stringify(input.credential))
+  const now = Date.now()
+  return withTransaction(async (client) => {
+    const isFirst = (await countConnectionCredentials(client, input.connectionId, input.orgId)) === 0
+    const primary = input.makePrimary ?? isFirst
+    if (primary) await clearPrimaryCredential(client, input.connectionId, input.orgId)
+    await client.query(
+      `INSERT INTO connection_credentials (id, org_id, connection_id, custom_connector_id, label, kind, credential_encrypted, is_primary, created_at, updated_at, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10)
+       ON CONFLICT (connection_id, label) DO UPDATE SET
+         kind = EXCLUDED.kind, credential_encrypted = EXCLUDED.credential_encrypted, is_primary = EXCLUDED.is_primary, updated_at = $9`,
+      [`ccred_${randomUUID()}`, input.orgId, input.connectionId, input.customConnectorId ?? null, label, input.kind, encrypted, primary, now, input.userId ?? null],
+    )
+    return fetchCredentialMetadata(client, input.connectionId, label)
+  })
+}
+
+/** Pure insert — a genuinely NEW labeled credential (rotation
+ * candidate, or a second real named credential like "Staging"
+ * alongside "Production"). Rejects, via the real unique index on
+ * (connection_id, label) — never a pre-check that could race — if the
+ * label already exists on this connection. */
+export async function createConnectionCredential(input: {
+  connectionId: string
+  orgId: string
+  userId?: string
+  label?: string
+  kind: CredentialKind
+  credential: CustomConnectorCredential
+  customConnectorId?: string
+}): Promise<CredentialMetadata> {
+  const label = input.label ?? "Default"
+  const encrypted = encryptSecret(JSON.stringify(input.credential))
+  const now = Date.now()
+  return withTransaction(async (client) => {
+    const isFirst = (await countConnectionCredentials(client, input.connectionId, input.orgId)) === 0
+    await client.query(
+      `INSERT INTO connection_credentials (id, org_id, connection_id, custom_connector_id, label, kind, credential_encrypted, is_primary, created_at, updated_at, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10)`,
+      [`ccred_${randomUUID()}`, input.orgId, input.connectionId, input.customConnectorId ?? null, label, input.kind, encrypted, isFirst, now, input.userId ?? null],
+    )
+    return fetchCredentialMetadata(client, input.connectionId, label)
+  })
+}
+
+/** Real, decrypted PRIMARY credential for a Connection — the one a
+ * connector adapter's execution path resolves by default. Null when
+ * genuinely none is stored. Server-only; never returned by an API
+ * response — see lib/connectors/credential-resolver.ts, the one
+ * caller every adapter goes through. */
+export async function getPrimaryConnectionCredential(connectionId: string, orgId: string): Promise<CustomConnectorCredential | null> {
+  const row = await queryOne<{ credential_encrypted: string }>(
+    "SELECT credential_encrypted FROM connection_credentials WHERE connection_id = $1 AND org_id = $2 AND is_primary",
+    [connectionId, orgId],
+  )
+  if (!row) return null
   return JSON.parse(decryptSecret(row.credential_encrypted)) as CustomConnectorCredential
 }
 
+/** Real, decrypted credential by id — for resolving a SPECIFIC named
+ * credential rather than just the primary (e.g. a future "run with
+ * the Staging credential" override). Triply scoped: id, connection_id,
+ * AND org_id must all agree. Server-only. */
+export async function getConnectionCredentialValue(id: string, connectionId: string, orgId: string): Promise<CustomConnectorCredential | null> {
+  const row = await queryOne<{ credential_encrypted: string }>(
+    "SELECT credential_encrypted FROM connection_credentials WHERE id = $1 AND connection_id = $2 AND org_id = $3",
+    [id, connectionId, orgId],
+  )
+  if (!row) return null
+  return JSON.parse(decryptSecret(row.credential_encrypted)) as CustomConnectorCredential
+}
+
+export async function deleteConnectionCredential(id: string, orgId: string): Promise<void> {
+  await query("DELETE FROM connection_credentials WHERE id = $1 AND org_id = $2", [id, orgId])
+}
+
+/** Org-scoped, indexed lookup — the one place connections.connector_id
+ * (a free TEXT column, never a DB foreign key — see
+ * lib/connectors/custom-connector-id.ts) is queried directly rather
+ * than scanned via listConnections().find(...). Returns the oldest
+ * matching row if more than one somehow exists, matching the
+ * pre-existing .find() behavior this replaces at every call site. */
+export async function getConnectionByConnectorId(orgId: string, connectorId: string): Promise<Connection | null> {
+  const row = await queryOne<ConnectionRow>("SELECT * FROM connections WHERE org_id = $1 AND connector_id = $2 ORDER BY created_at ASC LIMIT 1", [orgId, connectorId])
+  return row ? rowToConnection(row) : null
+}
+
+/** Idempotent — returns the existing mirrored Connection for this
+ * custom connector if one exists, else creates one fresh
+ * (status: "not_connected"). Never changes the status of an existing
+ * row — only a real check (POST .../test, via updateConnectionStatus)
+ * earns a status change. Lets credential-set create the Connection
+ * ahead of any successful test, so credential storage always has a
+ * connection_id to key off (Phase 2A) — closing the sequencing gap
+ * where "create -> set credential -> test" needs a Connection to exist
+ * before the first test ever runs. */
+export async function ensureConnectionForCustomConnector(orgId: string, userId: string | undefined, customConnectorId: string, displayName: string, authType: Connection["authType"] = "api_key"): Promise<Connection> {
+  const connectorId = customConnectorConnectorId(customConnectorId)
+  const existing = await getConnectionByConnectorId(orgId, connectorId)
+  if (existing) return existing
+  return createConnection({ orgId, userId, connectorId, authType, status: "not_connected", displayName })
+}
+
 /* ================================================================== *
- * CUSTOM CONNECTOR CREDENTIALS (plural) — connector platform audit,
- * Fase D2: a Custom Connector's DEFINITION (custom_connectors, above)
- * and its CREDENTIAL are now separable — an organization can hold
- * more than one labeled credential per Custom Connector, each its own
- * row in migrations/0012_custom_connector_credentials.sql. Additive:
- * the single credential_encrypted column on custom_connectors above
- * is untouched and remains what execution resolves in this phase —
- * see that migration's header comment for why. Every function here is
- * doubly scoped (org_id AND custom_connector_id) so a caller can never
- * reach a credential belonging to a connector — or an organization —
- * it doesn't own, even with a guessed id.
+ * CUSTOM CONNECTOR CREDENTIALS — backward-compatible convenience
+ * wrappers, addressed by the connector's own id rather than its
+ * mirrored connection's id (the shape every existing caller — the
+ * credential-set/test routes, every custom-connector test in this
+ * suite — already uses). Every function here is doubly scoped
+ * (org_id AND, transitively through the mirrored Connection,
+ * customConnectorId) so a caller can never reach a credential
+ * belonging to a connector — or an organization — it doesn't own,
+ * even with a guessed id.
  * ================================================================== */
 
 export interface CustomConnectorCredentialSummary {
@@ -1445,67 +1668,81 @@ export interface CustomConnectorCredentialSummary {
   updatedAt: number
 }
 
-interface CustomConnectorCredentialRow {
-  id: string
-  org_id: string
-  custom_connector_id: string
-  label: string
-  credential_encrypted: string
-  created_at: string
-  updated_at: string
+function toCustomConnectorCredentialSummary(meta: CredentialMetadata, customConnectorId: string): CustomConnectorCredentialSummary {
+  return { id: meta.id, customConnectorId, label: meta.label, createdAt: meta.createdAt, updatedAt: meta.updatedAt }
 }
 
-function rowToCredentialSummary(r: CustomConnectorCredentialRow): CustomConnectorCredentialSummary {
-  return { id: r.id, customConnectorId: r.custom_connector_id, label: r.label, createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) }
+function connectionAuthTypeFor(kind: CustomConnector["kind"]): Connection["authType"] {
+  return kind === "mcp" ? "mcp" : "api_key"
+}
+
+/** The custom connector's default credential — ensures its mirrored
+ * Connection exists, then upserts through setConnectionCredential.
+ * Silently a no-op (never throws) if customConnectorId doesn't belong
+ * to orgId — matches the original UPDATE...WHERE semantics this
+ * replaces. */
+export async function setCustomConnectorCredential(customConnectorId: string, orgId: string, credential: CustomConnectorCredential, userId?: string): Promise<void> {
+  const connector = await getCustomConnector(customConnectorId, orgId)
+  if (!connector) return
+  const connection = await ensureConnectionForCustomConnector(orgId, userId, customConnectorId, connector.name, connectionAuthTypeFor(connector.kind))
+  await setConnectionCredential({ connectionId: connection.id, orgId, userId, label: "Default", kind: credential.type, credential, makePrimary: true, customConnectorId })
+}
+
+/** The custom connector's PRIMARY credential, decrypted. Null (never
+ * a fabricated fallback) if the connector doesn't belong to orgId, or
+ * no Connection/credential has ever been set for it. */
+export async function getCustomConnectorCredential(customConnectorId: string, orgId: string): Promise<CustomConnectorCredential | null> {
+  const connector = await getCustomConnector(customConnectorId, orgId)
+  if (!connector) return null
+  const connection = await getConnectionByConnectorId(orgId, customConnectorConnectorId(customConnectorId))
+  if (!connection) return null
+  return getPrimaryConnectionCredential(connection.id, orgId)
 }
 
 /** Real metadata only — id/label/timestamps, never the decrypted (or
- * even encrypted) secret. This is the shape safe to hand to any API
- * response or UI list; see getCustomConnectorCredentialValue for the
- * separate, server-only path that actually decrypts one. */
+ * even encrypted) secret. Empty list (never an error) if no
+ * Connection has been created for this connector yet, i.e. no
+ * credential has ever been set. */
 export async function listCustomConnectorCredentials(customConnectorId: string, orgId: string): Promise<CustomConnectorCredentialSummary[]> {
-  const rows = await query<CustomConnectorCredentialRow>(
-    "SELECT * FROM custom_connector_credentials WHERE custom_connector_id = $1 AND org_id = $2 ORDER BY created_at ASC",
-    [customConnectorId, orgId],
-  )
-  return rows.map(rowToCredentialSummary)
+  const connection = await getConnectionByConnectorId(orgId, customConnectorConnectorId(customConnectorId))
+  if (!connection) return []
+  const metas = await listConnectionCredentials(connection.id, orgId)
+  return metas.map((m) => toCustomConnectorCredentialSummary(m, customConnectorId))
 }
 
-/** Creates one new labeled credential for a Custom Connector this org
- * owns. Verifies ownership of the parent connector first (rather than
- * relying on the FK alone) so the error is an honest "not found" —
- * never a raw constraint-violation leaking whether some other org's
- * connector id happens to exist. */
+/** Adds an ADDITIONAL named credential (e.g. "Production"/"Staging")
+ * to a custom connector's mirrored Connection — never the connector's
+ * implicit default unless label is omitted. Verifies ownership of the
+ * parent connector first (rather than relying on the FK alone) so the
+ * error is an honest "not found" — never a raw constraint-violation
+ * leaking whether some other org's connector id happens to exist. */
 export async function createCustomConnectorCredential(input: { customConnectorId: string; orgId: string; userId?: string; label?: string; credential: CustomConnectorCredential }): Promise<CustomConnectorCredentialSummary> {
   const parent = await getCustomConnector(input.customConnectorId, input.orgId)
   if (!parent) throw new Error("Custom connector not found.")
-  const id = `cconncred_${randomUUID()}`
-  const now = Date.now()
-  await query(
-    `INSERT INTO custom_connector_credentials (id, org_id, custom_connector_id, label, credential_encrypted, created_at, updated_at, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $6, $7)`,
-    [id, input.orgId, input.customConnectorId, input.label ?? "Default", encryptSecret(JSON.stringify(input.credential)), now, input.userId ?? null],
-  )
-  const row = await queryOne<CustomConnectorCredentialRow>("SELECT * FROM custom_connector_credentials WHERE id = $1 AND org_id = $2", [id, input.orgId])
-  return rowToCredentialSummary(row!)
+  const connection = await ensureConnectionForCustomConnector(input.orgId, input.userId, input.customConnectorId, parent.name, connectionAuthTypeFor(parent.kind))
+  const meta = await createConnectionCredential({
+    connectionId: connection.id,
+    orgId: input.orgId,
+    userId: input.userId,
+    label: input.label,
+    kind: input.credential.type,
+    credential: input.credential,
+    customConnectorId: input.customConnectorId,
+  })
+  return toCustomConnectorCredentialSummary(meta, input.customConnectorId)
 }
 
-/** Real, decrypted credential — server-only callers (a REST/MCP
- * adapter resolving a specific Connection's credential), never an API
- * response. Doubly scoped: id, custom_connector_id, AND org_id must
- * all agree, so a caller can't decrypt credential X by supplying the
- * right id but the wrong parent/org. */
+/** A specific labeled credential's real, decrypted value, addressed
+ * by the connector's own id. Triply scoped in effect: id, the
+ * connector's mirrored connection, AND org_id must all agree. */
 export async function getCustomConnectorCredentialValue(id: string, customConnectorId: string, orgId: string): Promise<CustomConnectorCredential | null> {
-  const row = await queryOne<{ credential_encrypted: string }>(
-    "SELECT credential_encrypted FROM custom_connector_credentials WHERE id = $1 AND custom_connector_id = $2 AND org_id = $3",
-    [id, customConnectorId, orgId],
-  )
-  if (!row) return null
-  return JSON.parse(decryptSecret(row.credential_encrypted)) as CustomConnectorCredential
+  const connection = await getConnectionByConnectorId(orgId, customConnectorConnectorId(customConnectorId))
+  if (!connection) return null
+  return getConnectionCredentialValue(id, connection.id, orgId)
 }
 
 export async function deleteCustomConnectorCredential(id: string, orgId: string): Promise<void> {
-  await query("DELETE FROM custom_connector_credentials WHERE id = $1 AND org_id = $2", [id, orgId])
+  await deleteConnectionCredential(id, orgId)
 }
 
 export async function listConnections(orgId: string): Promise<Connection[]> {
@@ -1635,7 +1872,27 @@ export async function upsertOAuthCredential(input: {
   )
 }
 
-export async function getOAuthCredential(connectionId: string): Promise<OAuthCredentialRow | null> {
+/** Phase 2C — OAuth credential isolation decision: oauth_credentials
+ * has no org_id column of its own (see migrations/
+ * 0004_oauth_and_approvals.sql) — a Connection's real ownership lives
+ * on `connections.org_id`, one hop away via connection_id. Rather than
+ * add a redundant, independently-writable org_id copy onto this table
+ * (a second source of truth that could in principle drift from the
+ * real owner on `connections`, for zero real benefit — a token row's
+ * org can never legitimately change without its Connection's also
+ * changing), the isolation invariant is made explicit and ENFORCED
+ * structurally here instead of relying on every caller to have
+ * already verified ownership before calling in: both this function
+ * and deleteOAuthCredential below now require orgId and verify it via
+ * a real JOIN against `connections` — a connectionId that doesn't
+ * belong to orgId returns null / deletes nothing, the same "id +
+ * org_id must both agree" discipline every other table in this file
+ * already follows, just expressed via a join instead of a column
+ * because THIS table's real owner is one hop away, not on the row
+ * itself. This closes the one gap the audit found: previously a
+ * caller could, in principle, read/delete another org's token by
+ * supplying its real connectionId with no org check at all. */
+export async function getOAuthCredential(connectionId: string, orgId: string): Promise<OAuthCredentialRow | null> {
   const row = await queryOne<{
     id: string
     connection_id: string
@@ -1644,7 +1901,13 @@ export async function getOAuthCredential(connectionId: string): Promise<OAuthCre
     token_type: string | null
     scope: string | null
     expires_at: string | null
-  }>("SELECT * FROM oauth_credentials WHERE connection_id = $1", [connectionId])
+  }>(
+    `SELECT oc.id, oc.connection_id, oc.access_token_encrypted, oc.refresh_token_encrypted, oc.token_type, oc.scope, oc.expires_at
+     FROM oauth_credentials oc
+     JOIN connections c ON c.id = oc.connection_id
+     WHERE oc.connection_id = $1 AND c.org_id = $2`,
+    [connectionId, orgId],
+  )
   if (!row) return null
   return {
     id: row.id,
@@ -1657,8 +1920,13 @@ export async function getOAuthCredential(connectionId: string): Promise<OAuthCre
   }
 }
 
-export async function deleteOAuthCredential(connectionId: string): Promise<void> {
-  await query("DELETE FROM oauth_credentials WHERE connection_id = $1", [connectionId])
+export async function deleteOAuthCredential(connectionId: string, orgId: string): Promise<void> {
+  await query(
+    `DELETE FROM oauth_credentials
+     WHERE connection_id = $1
+       AND EXISTS (SELECT 1 FROM connections c WHERE c.id = $1 AND c.org_id = $2)`,
+    [connectionId, orgId],
+  )
 }
 
 /* ================================================================== *

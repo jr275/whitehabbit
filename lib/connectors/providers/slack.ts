@@ -22,7 +22,7 @@ import "server-only"
  * ================================================================== */
 
 import type { ToolActionResult, ToolContext, ToolDefinition } from "@/lib/agent/types"
-import { getValidAccessToken } from "../token-store"
+import { resolveConnectionCredential } from "../credential-resolver"
 import { isSlackOAuthConfigured, slackOAuthConfig } from "./slack-oauth"
 import type { Connection, ConnectorAction, ConnectorDefinition, ConnectorTrigger, IntegrationHealthState } from "../types"
 
@@ -32,15 +32,16 @@ function isConfigured(): boolean {
   return isSlackOAuthConfigured() || !!process.env.SLACK_BOT_TOKEN
 }
 
-/** Real per-organization OAuth token first (encrypted, auto-refreshed
- * — the same lib/connectors/token-store.ts every OAuth2 connector
- * uses); SLACK_BOT_TOKEN only as a real, deployment-wide fallback when
- * this specific Connection has no OAuth credential of its own yet —
- * never silently preferred over a real per-org token when one exists. */
+/** Real per-organization OAuth token first (via the one authoritative
+ * credential-resolution boundary, lib/connectors/credential-resolver.ts
+ * — encrypted, auto-refreshed); SLACK_BOT_TOKEN only as a real,
+ * deployment-wide fallback when this specific Connection has no OAuth
+ * credential of its own yet — never silently preferred over a real
+ * per-org token when one exists. */
 async function resolveAccessToken(connection: Connection): Promise<string | null> {
   if (connection.status === "connected") {
-    const token = await getValidAccessToken(connection.id, connection.organizationId, slackOAuthConfig(""))
-    if (token) return token.accessToken
+    const resolved = await resolveConnectionCredential(connection, { oauthConfig: slackOAuthConfig("") })
+    if (resolved?.kind === "oauth2") return resolved.accessToken
   }
   return process.env.SLACK_BOT_TOKEN || null
 }
