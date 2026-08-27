@@ -19,14 +19,14 @@
  * other real surface reads — never a locally-guessed default.
  * ------------------------------------------------------------------ */
 
-import { ArrowRight, Compass, Layers, PenLine, Rocket, Settings, ShoppingCart, TrendingUp, Users, Wallet } from "lucide-react"
+import { ArrowRight, Compass, Layers, PenLine, Rocket, Search, Settings, ShoppingCart, TrendingUp, Users, Wallet } from "lucide-react"
 import Link from "next/link"
 import { useEffect } from "react"
 import { StudioShell } from "@/components/studio/studio-shell"
 import { PRODUCT_CATALOG, type ProductTemplate } from "@/lib/products/catalog"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
 
-const ICONS = { PenLine, Layers, Compass, TrendingUp, Wallet, Settings, Users, ShoppingCart, Rocket }
+const ICONS = { PenLine, Layers, Compass, TrendingUp, Wallet, Settings, Users, ShoppingCart, Rocket, Search }
 
 export function ProductsHub({ runtimeMode }: { runtimeMode?: "development" | "preview" | "production" }) {
   const { hydrated, workers } = useWorkforce()

@@ -60,6 +60,11 @@ export interface SearchWasteReport {
   approvalRequirements: string
   evidence: string[]
   nextSteps: string[]
+  /** Real count of classified search terms per SearchIntent —
+   * persisted so lib/marketing/evolution.ts can compute a real,
+   * historical "how much of the dataset the classifier actually
+   * covers" signal across executions, never a fabricated one. */
+  intentBreakdown: Record<string, number>
 }
 
 const SYSTEM_PROMPT = `You are a paid-search optimization analyst writing the rationale section of a Search Waste Optimization Report. You are given REAL, already-computed waste opportunities — real search terms, real spend figures, real click counts. Your ONLY job is to explain, in plain business language, why each opportunity matters and what the recommended action achieves. Never invent a number that isn't in the input. Never change the recommended action. Never claim a result that hasn't happened yet — these are RECOMMENDATIONS, not completed actions.
@@ -138,6 +143,8 @@ export const searchWasteDetectionSkill: SkillDefinition = {
     const classified = classifyDataset(dataset, brandTerms)
     const opportunities = detectWasteOpportunities(classified)
     ctx.emit("tool_completed", { tool: "marketing_heuristic", heuristic: SEARCH_WASTE_DETECTION_HEURISTIC.id, opportunitiesDetected: opportunities.length })
+    const intentBreakdown: Record<string, number> = {}
+    for (const t of classified) intentBreakdown[t.intent] = (intentBreakdown[t.intent] ?? 0) + 1
 
     // ---- 3. IMPACT ESTIMATION (deterministic) ----
     const impact = estimateImpact(opportunities, dataset.totals)
@@ -186,6 +193,7 @@ export const searchWasteDetectionSkill: SkillDefinition = {
       approvalRequirements: `${recommendations.length} recommendation${recommendations.length === 1 ? "" : "s"} would require approval if applied.`,
       evidence: opportunities.slice(0, 3).map((o) => `${o.matchedTerms.slice(0, 3).join(", ")} — $${o.wastedSpend} spend, ${o.clicks} clicks, 0 conversions`),
       nextSteps: recommendations.length > 0 ? ["Review the top recommendation's evidence.", "Apply a recommendation to trigger the real approval gate.", "Once applied and real post-action data exists, an Outcome will be recorded."] : ["No action needed — no real waste opportunity detected this period."],
+      intentBreakdown,
     }
 
     return {

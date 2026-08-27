@@ -68,6 +68,18 @@ interface ConversationPayload {
   action: "answered" | "escalated" | "flagged_for_review"
   reasoning_summary: string
 }
+/** Local, minimal duck-typed shape — matches TrendItem/LeadItem/
+ * SeoOpportunityItem's own pattern above: this file stays free of a
+ * "server-only" import (see header), so it never imports the real
+ * SearchWasteReport type from lib/agent/skills/search-waste-
+ * detection.ts (a server-only file) — only the fields actually read
+ * here. */
+interface SearchWasteReportShape {
+  dataAnalyzed: { source: "demo" | "connected"; searchTermCount: number; spend: number; conversions: number }
+  opportunitiesDetected: number
+  recommendations: { label: string; wastedSpend: number }[]
+  expectedImpact: { estimatedWastedSpendMonthly: number; potentialRecoverableSpendMonthly: number; cpaImprovementPercentRange: [number, number] }
+}
 
 function deriveTrendReport(structured: { trends: TrendItem[] }, sourcesCount: number): Omit<BusinessOutcome, "confidence" | "isDemo"> {
   const trends = structured.trends ?? []
@@ -143,6 +155,36 @@ function deriveConversation(structured: ConversationPayload): Omit<BusinessOutco
   }
 }
 
+/** Search Waste Detection's real, deterministic impact estimate is
+ * ALREADY computed (lib/marketing/heuristics.ts's estimateImpact) —
+ * this function only re-presents it in the shared BusinessOutcome
+ * shape, never recomputes or second-guesses it. Every impact number
+ * is real: an actual dollar figure would only ever appear here once
+ * real post-action data exists (section 11 of the Marketing brief) —
+ * until then, `real: true` marks the ESTIMATE as genuinely computed
+ * (not fabricated), while the label itself says "Estimated". */
+function deriveSearchWasteReport(structured: SearchWasteReportShape): Omit<BusinessOutcome, "confidence" | "isDemo"> {
+  const { dataAnalyzed, opportunitiesDetected, recommendations, expectedImpact } = structured
+  const sourceLabel = dataAnalyzed.source === "demo" ? " (DEMO DATA)" : ""
+  const top = [...recommendations].sort((a, b) => b.wastedSpend - a.wastedSpend)[0]
+  return {
+    headline:
+      opportunitiesDetected > 0
+        ? `Detected ${opportunitiesDetected} paid-search waste opportunit${opportunitiesDetected === 1 ? "y" : "ies"}${sourceLabel}.`
+        : `Analyzed ${dataAnalyzed.searchTermCount.toLocaleString()} search terms${sourceLabel} — no real waste opportunity met the heuristic's thresholds.`,
+    evidence: top ? [`${top.label} — $${top.wastedSpend.toLocaleString()} in real detected wasted spend.`] : [],
+    actionsPerformed: ["Classified real search-term intent", "Detected zero-conversion waste (deterministic)", "Estimated real recoverable spend", "Generated recommendations — none applied automatically"],
+    impact: [
+      { label: "Search terms analyzed", value: dataAnalyzed.searchTermCount.toLocaleString(), real: true },
+      { label: "Opportunities detected", value: String(opportunitiesDetected), real: true },
+      { label: "Estimated wasted spend", value: `$${expectedImpact.estimatedWastedSpendMonthly.toLocaleString()}`, real: true },
+      { label: "Potential recoverable spend", value: `$${expectedImpact.potentialRecoverableSpendMonthly.toLocaleString()}`, real: true },
+      { label: "Actual spend recovered", value: "—", real: false, connectHint: "Connect a real Google Ads account and apply a recommendation to measure actual recovered spend" },
+    ],
+    nextRecommendedAction: recommendations.length > 0 ? "Review and apply the top recommendation — applying requires human approval." : "No action needed this period.",
+  }
+}
+
 /** Returns null when there's genuinely nothing to show — a failed/
  * blocked execution has no real output to derive an outcome from,
  * and this function never invents one. */
@@ -164,6 +206,9 @@ export function deriveBusinessOutcome(output: WorkerOutput, execution?: WorkerEx
       break
     case "conversation_response":
       base = deriveConversation(output.structured as ConversationPayload)
+      break
+    case "search_waste_report":
+      base = deriveSearchWasteReport(output.structured as SearchWasteReportShape)
       break
     default:
       return null

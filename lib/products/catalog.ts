@@ -54,7 +54,7 @@ export interface BusinessOutcomeDef {
   connectHint?: string
 }
 
-export type ProductIcon = "PenLine" | "Layers" | "Compass" | "TrendingUp" | "Wallet" | "Settings" | "Users" | "ShoppingCart" | "Rocket"
+export type ProductIcon = "PenLine" | "Layers" | "Compass" | "TrendingUp" | "Wallet" | "Settings" | "Users" | "ShoppingCart" | "Rocket" | "Search"
 
 export interface ProductTemplate {
   id: string
@@ -284,6 +284,43 @@ export const PRODUCT_CATALOG: ProductTemplate[] = [
       "Real, LLM-grounded generation of 6 genuinely distinct creative territories per opportunity (Creative Territory Generation skill), with real structural brand-fit, audience-fit and novelty scoring — never the model's own self-rating",
     ],
     notYetConnected: ["Brazil Intel, Google Trends, X (additional real-time signal sources)", "A 3D/video production provider (e.g. Google Flow/Veo) to turn a concept into an actual video", "Distribution and ads platforms (impressions, CTR, ROAS, attributed revenue)"],
+    metricDomain: "marketing",
+  },
+  {
+    id: "product_paid_media_specialist",
+    slug: "paid-media-specialist",
+    name: "Paid Media Specialist",
+    tagline: "Find the paid-search spend producing no return.",
+    description: "AI paid-media workforce specialized in classifying real search-term-level performance to find wasted spend and generate concrete, approval-gated optimization recommendations.",
+    accent: "#16a34a",
+    icon: "Search",
+    status: "available",
+    whoItIs: "A performance-marketing specialist that finds real paid-search waste — never a generic marketing chatbot. Every recommendation traces back to real spend/click/conversion numbers.",
+    autonomousActions: ["Classify every search term's real intent", "Detect zero-conversion waste", "Estimate real recoverable spend", "Generate negative-keyword/targeting recommendations"],
+    businessOutcomes: [
+      { label: "Search terms analyzed", real: true },
+      { label: "Opportunities detected", real: true },
+      { label: "Analysis quality", real: true },
+      { label: "Estimated wasted spend", real: true },
+      { label: "Actual spend recovered", real: false, connectHint: "Connect a real Google Ads account and apply a recommendation to measure actual recovered spend" },
+    ],
+    deliverableLabel: "Search Waste Optimization Report — opportunities, recommendations, and expected impact, each with real evidence",
+    workerRoleLabel: "Paid Media Specialist",
+    primarySkillId: "skill_search_waste_detection",
+    secondarySkillIds: ["skill_apply_marketing_recommendation"],
+    onboarding: [
+      { key: "business", bucket: "business", label: "What does your business sell?", type: "textarea", required: true, placeholder: "We sell project-management software to mid-market agencies." },
+      { key: "audience", bucket: "audience", label: "Who are you targeting with paid search?", type: "textarea", required: true, placeholder: "Agency owners and operations leads actively comparing PM tools." },
+      { key: "data", bucket: "data", label: "Which brand terms should never be treated as waste?", type: "textarea", required: false, placeholder: "Acme, Acme PM, Acme software" },
+      { key: "process", bucket: "process", label: "How do you currently manage negative keywords and budget?", type: "textarea", required: false, placeholder: "A media buyer reviews the search terms report weekly." },
+      { key: "rules", bucket: "rules", label: "Anything that should always require human review before applying?", type: "textarea", required: false, placeholder: "Never pause the Brand campaign. Always review budget changes over $500." },
+    ],
+    realCapabilities: [
+      "Real, deterministic search-term intent classification and waste detection (Search Waste Detection skill) — no LLM in the numeric analysis",
+      "Real, deterministic impact estimation (wasted/recoverable spend, CPA improvement range) computed from the actual dataset",
+      "A real, always-enforced human approval gate before any recommendation is applied (Apply Marketing Recommendation skill)",
+    ],
+    notYetConnected: ["A real Google Ads/Meta Ads account (connector_google_ads is an honest, disabled placeholder — every run today uses clearly labeled DEMO DATA)", "Actually writing a negative keyword/budget change to a live ad account"],
     metricDomain: "marketing",
   },
   {
