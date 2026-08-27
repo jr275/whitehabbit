@@ -7,7 +7,6 @@ import {
   Circle,
   Factory,
   Gauge,
-  Layers3,
   LogOut,
   Menu,
   PackageOpen,
@@ -39,7 +38,12 @@ const GROUPS = [
     links: [
       { href: "/studio", label: "Worker Studio", icon: Workflow },
       { href: "/factory", label: "Factory", icon: Factory },
-      { href: "/library", label: "Skills", icon: Layers3 },
+      // "/library" (Skills marketplace) intentionally unlinked here — its 8
+      // worker archetypes (including "FIN") are fixture data with no real
+      // Skill behind them yet. Route stays reachable by direct URL; the
+      // component (components/library/worker-card.tsx) is worth reusing
+      // once real financial Workers exist to populate it with. See
+      // docs/domain-model.md §5.
     ],
   },
   {
