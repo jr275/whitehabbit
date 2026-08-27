@@ -216,6 +216,61 @@ export function buildEmptyWorker(id: string): Worker {
   }
 }
 
+/** The financial domain's foundation Worker (Phase D) — not auto-seeded
+ * into any organization by anything in this codebase (same "no auto-
+ * seed" principle as buildSeedWorker() below: an empty org must never
+ * be silently populated). This function exists so the four real
+ * financial skills have a real, immediately-runnable Worker to compose
+ * them, and so a future explicit action (a seed route, Factory, or
+ * Products onboarding — a decision for a later phase, see
+ * docs/product-experience-blueprint.md §8) can wire one up without
+ * having to invent the definition from scratch.
+ *
+ * Autonomy defaults to "low", not "medium" like buildSeedWorker()'s
+ * Atlas — a financial worker's recommendations may eventually touch
+ * real money; nothing in this domain should default to acting more
+ * independently than a marketing worker does today. */
+export function buildCashWorkingCapitalWorkerSeed(): Worker {
+  const now = Date.now()
+  const financeSkillIds = ["skill_cash_position_monitor", "skill_cash_forecast", "skill_working_capital_opportunity", "skill_receivables_risk"]
+  return {
+    id: "worker_ledger",
+    identity: {
+      name: "Ledger",
+      role: "Cash & Working Capital Worker",
+      description: "Monitors cash position, forecasts liquidity, and detects working-capital and receivables risk — every finding grounded in real (demo) financial data.",
+      persona: "A careful treasury analyst — cites the specific numbers behind every finding, never speculates, never claims a payment or transfer happened.",
+      tone: ["Analytical", "Concise", "Direct"],
+      accent: "#10b981",
+      initials: "LG",
+    },
+    mission: "Monitor cash position, forecast liquidity, and identify working-capital opportunities and receivables risk before they become a shortfall.",
+    objectives: [
+      { id: uid("obj"), text: "Monitor cash position across all connected accounts", done: true },
+      { id: uid("obj"), text: "Ground every finding in real financial data", done: true },
+      { id: uid("obj"), text: "Flag risk before it becomes a shortfall, never after", done: true },
+    ],
+    knowledge: knowledge([{ name: "Treasury policy", type: "playbook", documents: 1 }]),
+    skills: skills(financeSkillIds),
+    tools: tools(["tool_financial_data", "tool_llm"]),
+    behaviors: [
+      { id: uid("beh"), raw: "IF confidence < 70% → request human review", condition: "confidence < 70%", action: "request human review" },
+      { id: uid("beh"), raw: "IF a required tool is not connected → block and explain why", condition: "a required tool is not connected", action: "block and explain why" },
+    ],
+    channels: channels([]),
+    outcome: { primaryKPI: "Cash Preserved", secondaryKPIs: ["Liquidity Risk Exposure", "Working Capital Released"] },
+    autonomy: "low",
+    // "ready", not "live" — same reasoning as buildSeedWorker(): this
+    // function only ever returns data. Whatever calls it is responsible
+    // for a real Build + Release if it wants this worker live.
+    status: "ready",
+    tested: true,
+    createdAt: now,
+    releasedAt: null,
+    releasedVersionId: null,
+  }
+}
+
 export function buildSeedWorker(): Worker {
   const now = Date.now()
   return {

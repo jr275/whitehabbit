@@ -449,4 +449,5 @@ export const OUTCOME_PRESETS: { vertical: string; primaryKPI: string; secondaryK
   { vertical: "Sales", primaryKPI: "Pipeline Generated", secondaryKPIs: ["Meetings", "Qualified Opportunities", "Revenue"] },
   { vertical: "Customer Support", primaryKPI: "Resolution Rate", secondaryKPIs: ["CSAT", "Response Time", "Escalation Rate"] },
   { vertical: "Recruiting", primaryKPI: "Qualified Candidates", secondaryKPIs: ["Interview Completion", "Time to Hire", "Hiring Conversion"] },
+  { vertical: "Finance", primaryKPI: "Cash Preserved", secondaryKPIs: ["Liquidity Risk Exposure", "Working Capital Released", "Forecast Accuracy"] },
 ]

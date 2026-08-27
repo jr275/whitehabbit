@@ -1,11 +1,15 @@
 import "server-only"
 
+import { cashForecastSkill } from "./cash-forecast"
+import { cashPositionMonitorSkill } from "./cash-position-monitor"
 import { contentIntelligenceSkill } from "./content-intelligence"
 import { customerConversationSkill } from "./customer-conversation"
 import { engagementAnalysisSkill } from "./engagement-analysis"
 import { leadQualificationSkill } from "./lead-qualification"
+import { receivablesRiskSkill } from "./receivables-risk"
 import { seoOpportunitySkill } from "./seo-opportunity"
 import { trendResearchSkill } from "./trend-research"
+import { workingCapitalOpportunitySkill } from "./working-capital-opportunity"
 import type { SkillDefinition } from "@/lib/agent/types"
 
 /* The full real-skill catalog — the capability layer shared across
@@ -22,6 +26,10 @@ export const SKILL_REGISTRY: SkillDefinition[] = [
   leadQualificationSkill,
   seoOpportunitySkill,
   customerConversationSkill,
+  cashPositionMonitorSkill,
+  cashForecastSkill,
+  workingCapitalOpportunitySkill,
+  receivablesRiskSkill,
 ]
 
 export function getSkill(id: string): SkillDefinition | undefined {

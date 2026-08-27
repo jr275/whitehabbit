@@ -2,11 +2,12 @@ import "server-only"
 
 import { analyticsTool } from "./analytics"
 import { browserTool } from "./browser"
+import { financialDataTool } from "./financial-data"
 import { llmTool } from "./llm"
 import { webSearchTool } from "./web-search"
 import type { ToolDefinition } from "@/lib/agent/types"
 
-export const TOOL_REGISTRY: ToolDefinition[] = [webSearchTool, browserTool, analyticsTool, llmTool]
+export const TOOL_REGISTRY: ToolDefinition[] = [webSearchTool, browserTool, analyticsTool, llmTool, financialDataTool]
 
 export function getTool(id: string): ToolDefinition | undefined {
   return TOOL_REGISTRY.find((t) => t.id === id)

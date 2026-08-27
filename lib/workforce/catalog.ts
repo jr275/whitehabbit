@@ -88,6 +88,46 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     requiredTools: ["tool_llm"],
     inputs: [{ key: "query", label: "What is the customer asking or saying?", type: "textarea", required: true, placeholder: "Hi, I need to change my reservation to next weekend instead — is that possible?" }],
   },
+  {
+    id: "skill_cash_position_monitor",
+    name: "Cash Position Monitor",
+    category: "finance",
+    description: "Reviews real (demo) bank balances and uses an LLM to flag genuine concentration and idle-cash risk.",
+    outputType: "cash_position_summary",
+    taskTitle: "Monitor cash position",
+    requiredTools: ["tool_financial_data", "tool_llm"],
+    inputs: [],
+  },
+  {
+    id: "skill_cash_forecast",
+    name: "Cash Forecast",
+    category: "finance",
+    description: "Projects near-term liquidity from real (demo) cash-flow history, receivables and payables, using an LLM to identify genuine shortfall or funding-need risk.",
+    outputType: "cash_forecast",
+    taskTitle: "Forecast cash position",
+    requiredTools: ["tool_financial_data", "tool_llm"],
+    inputs: [],
+  },
+  {
+    id: "skill_working_capital_opportunity",
+    name: "Working Capital Opportunity Detection",
+    category: "finance",
+    description: "Reviews real (demo) cash and payables data and uses an LLM to identify genuine opportunities to release or preserve cash.",
+    outputType: "working_capital_opportunities",
+    taskTitle: "Detect working capital opportunities",
+    requiredTools: ["tool_financial_data", "tool_llm"],
+    inputs: [],
+  },
+  {
+    id: "skill_receivables_risk",
+    name: "Receivables Risk Detection",
+    category: "finance",
+    description: "Reviews real (demo) receivables data and uses an LLM to identify genuine concentration and overdue-payment risk.",
+    outputType: "receivables_risk_analysis",
+    taskTitle: "Detect receivables risk",
+    requiredTools: ["tool_financial_data", "tool_llm"],
+    inputs: [],
+  },
 ]
 
 export interface ToolTemplate {
@@ -107,6 +147,11 @@ export const TOOL_CATALOG: ToolTemplate[] = [
   // live on every read (lib/agent/hydrate.ts) with whichever LLM_PROVIDER
   // is actually configured (Anthropic or Gemini).
   { id: "tool_llm", name: "LLM", provider: "Anthropic", description: "Reasons over collected information to analyze, rank and explain.", risk: "low", permission: "read" },
+  // Genuinely a demo capability, not a real bank/ERP feed — see
+  // lib/agent/tools/financial-data.ts. isConnected() is honestly true
+  // (the demo ledger always works); "real" vs "demo" is a fact about
+  // the DATA, carried separately on each execution's dataProvenance.
+  { id: "tool_financial_data", name: "Financial Data", provider: "Demo Financial Ledger (fictional data)", description: "Provides a demo, clearly fictional financial dataset (cash, receivables, payables, cash flow history) for one illustrative company.", risk: "low", permission: "read" },
 ]
 
 /* ---- channels ---- */

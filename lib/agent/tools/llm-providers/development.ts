@@ -111,6 +111,44 @@ function developmentSeoOpportunityFixture(): string {
   })
 }
 
+/** The matching fixture for finance-shared.ts's parseFinancialFindings()
+ * — shared by all four financial skills, which all emit the same
+ * "findings" JSON shape (see finance-shared.ts's own header comment for
+ * why). Values are deliberately plausible relative to the real demo
+ * ledger (lib/agent/data/demo-financial-ledger.ts) so the evaluator's
+ * "historical consistency" check has something real to match against
+ * even in dev mode, but every finding is explicitly labeled [DEV]. */
+function developmentFinancialFindingsFixture(): string {
+  return JSON.stringify({
+    findings: [
+      {
+        finding: "[DEV] Local pipeline exercise — receivables concentration",
+        evidence: "This is a deterministic development fixture, not a real model response — LLM_DEV_MODE is enabled, so no external provider was called.",
+        metric_label: "Top-2 customer concentration",
+        metric_value: 50,
+        metric_unit: "%",
+        recommendation: "[DEV] Fixture recommendation — review payment terms for the top two customers.",
+        impact_value: 82000,
+        impact_unit: "$",
+        confidence: 78,
+        risk: "medium",
+      },
+      {
+        finding: "[DEV] Local pipeline exercise — idle reserve cash",
+        evidence: "Second development fixture entry, included so the evaluator's grounding/consistency checks have more than one item to score — still not a real model response.",
+        metric_label: "Idle reserve balance",
+        metric_value: 1250000,
+        metric_unit: "$",
+        recommendation: "[DEV] Fixture recommendation — evaluate a higher-yield placement for reserve cash.",
+        impact_value: 0,
+        impact_unit: "",
+        confidence: 62,
+        risk: "low",
+      },
+    ],
+  })
+}
+
 /** The matching fixture for customer-conversation.ts's parseConversation(). */
 function developmentConversationFixture(): string {
   return JSON.stringify({
@@ -135,6 +173,7 @@ function developmentFixtureFor(input: LlmCallInput): string {
   if (input.system.includes('"leads":[')) return developmentLeadsFixture()
   if (input.system.includes('"opportunities":[')) return developmentSeoOpportunityFixture()
   if (input.system.includes('"reasoning_summary"')) return developmentConversationFixture()
+  if (input.system.includes('"findings":[')) return developmentFinancialFindingsFixture()
   return developmentTrendsFixture()
 }
 
