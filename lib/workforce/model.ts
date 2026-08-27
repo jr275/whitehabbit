@@ -192,6 +192,30 @@ export interface OutcomeDefinition {
   secondaryKPIs: string[]
 }
 
+/** What real economic result is this Worker pursuing — distinct from
+ * OutcomeDefinition (an operational KPI, e.g. "Qualified Leads") the
+ * same way a financial mission is distinct from an activity target.
+ * Optional and additive: undefined for any Worker created before this
+ * field existed, or one whose operator hasn't set it — never inferred,
+ * never defaulted to a plausible-looking value. Phase UX-2 creates
+ * this contract; it does not implement optimization against it (see
+ * docs/product-experience-blueprint.md's Phase C-J roadmap). */
+export interface EconomicObjective {
+  /** e.g. "Maximize free cash flow" — the real, operator-authored goal. */
+  objective: string
+  /** e.g. "Free cash flow" — what's actually being measured. */
+  targetMetric: string
+  /** e.g. "Reduce avoidable financing cost by 15%" — optional because a
+   * real numeric target may not exist yet; never a placeholder number. */
+  targetValue?: string
+  /** e.g. "Quarterly" — optional for the same reason. */
+  targetPeriod?: string
+  /** e.g. "Maintain minimum liquidity threshold" — real, operator-
+   * authored guardrails, not a generated list. */
+  constraints: string[]
+  riskTolerance: "low" | "moderate" | "high"
+}
+
 export type Autonomy = "low" | "medium" | "high"
 
 /** Explicit lifecycle — draft (editable) -> building (Build in
@@ -224,6 +248,8 @@ export interface Worker {
   behaviors: BehaviorRule[]
   channels: WorkerChannel[]
   outcome: OutcomeDefinition
+  /** Optional — see EconomicObjective's own doc comment. */
+  economicObjective?: EconomicObjective
   autonomy: Autonomy
   status: WorkerStatus
   tested: boolean
@@ -267,6 +293,7 @@ export interface WorkerDefinitionSnapshot {
   behaviors: BehaviorRule[]
   channels: WorkerChannel[]
   outcome: OutcomeDefinition
+  economicObjective?: EconomicObjective
   autonomy: Autonomy
 }
 

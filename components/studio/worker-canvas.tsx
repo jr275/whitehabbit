@@ -1,46 +1,53 @@
 "use client"
 
-/* ------------------------------------------------------------------ *
- * WORKER CANVAS (center zone) — the visual center of WhiteHabbit.
+/* ================================================================== *
+ * WORKER CANVAS (center zone) — Phase UX-2 rebuild.
  *
- * Answers two questions immediately, from real data only:
- *   "What is this Worker capable of?"  -> the capability cross
- *   "What is this Worker doing?"       -> the execution zone
+ * Was a dark "capability cross" (Skills/Tools/Knowledge/Behavior
+ * arranged spatially around a Worker avatar). Now a two-column
+ * document on the --ref-* tokens Phase UX-1's Skill Card established
+ * (app/globals.css, components/skills/skill-card.tsx) — the explicit
+ * goal of this rebuild is to remove the seam between that card and
+ * the surface it sat on. See docs/ux-reference-analysis.md for the
+ * reference this follows and docs/ux-design-constitution.md for the
+ * information hierarchy it's held to.
  *
- * The capability cross is a spatial arrangement (Skills/Tools/
- * Knowledge/Behavior around a Worker Core), not a node graph — there
- * are no edges, no decorative connectors, nothing that isn't real
- * worker data. It's also a real navigation surface: each card opens
- * the matching Build step (see onNavigateToStep) — "I see what this
- * Worker can do -> I click it -> I configure it."
+ * PRIMARY column: Mission (+ Economic Objective) -> Skills -> Tools
+ * -> Policies — the real worker-construction surface.
+ * SECONDARY column: Readiness -> Autonomy -> Data Readiness -> Recent
+ * Activity — persistent context, deliberately never visually dominant
+ * over the primary column.
  *
- * The execution zone reuses the exact same real event-derived stage
- * list (buildExecutionStages) whether a run is currently in progress
- * or already finished, so "live" and "history" are one real code
- * path, not two. Above it sits the ONE authoritative worker state
- * (computeWorkerState) — no second status indicator exists elsewhere.
- * ------------------------------------------------------------------ */
+ * Every "Configure" affordance routes to the real left-rail Build
+ * step that already owns that field (components/studio/build-panel.tsx)
+ * — this document is a read-and-navigate surface, not a second,
+ * competing editing UI. Autonomy is the one exception: its level
+ * selector is directly interactive here too, calling the same
+ * workforceStore.setAutonomy() the left rail's Access step already
+ * uses — the constitution asks for autonomy in both the context panel
+ * and the configuration surface, not one or the other.
+ *
+ * Deliberately NOT in scope here (see the Phase UX-2 report): the
+ * left Configure rail and right Live Outputs rail stay as they are —
+ * still the app's dark register. That remaining seam is real and
+ * named, not hidden; rebuilding those is a separately-scoped next
+ * step, not silently attempted inside this file.
+ * ================================================================== */
 
-import { AlertTriangle, BookOpen, Check, KeyRound, Layers, ListChecks, Loader2, Play, ShieldAlert, Wrench, XCircle } from "lucide-react"
-import { useEffect, useState } from "react"
+import { AlertTriangle, ArrowRight, Check, KeyRound, Loader2, ShieldAlert, Wallet, XCircle } from "lucide-react"
 import type { StepKey } from "@/components/studio/build-panel"
-import { ExecutionTimeline } from "@/components/outputs/output-drawer"
 import { SkillCard } from "@/components/skills/skill-card"
-import { WorkerAvatar } from "@/components/workforce/worker-avatar"
-import { getProduct } from "@/lib/products/catalog"
-import { profileForWorker } from "@/lib/workforce/business-results"
-import { toolExecutionBoundary, TOOL_BOUNDARY_META, type Worker, type WorkerEvent, type WorkerExecution, type WorkerOutput, type WorkerTask } from "@/lib/workforce/model"
 import {
-  activeWork,
-  buildExecutionStages,
-  buildSkillCardView,
-  computeReadiness,
-  computeWorkerState,
-  credentialBlockers,
-  todaysTimeline,
-  WORKER_STATE_META,
-} from "@/lib/workforce/selectors"
+  AUTONOMY_LEVEL_META,
+  AUTONOMY_LEVEL_ORDER,
+  autonomyLevelFor,
+  FUTURE_CONNECTOR_CATEGORIES,
+  TOOL_CATALOG,
+} from "@/lib/workforce/catalog"
+import { toolExecutionBoundary, TOOL_BOUNDARY_META, type Worker, type WorkerEvent, type WorkerExecution, type WorkerOutput, type WorkerTask, type WorkforceTool } from "@/lib/workforce/model"
+import { buildExecutionStages, buildSkillCardView, computeReadiness, credentialBlockers, todaysTimeline } from "@/lib/workforce/selectors"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
+import type { ReactNode } from "react"
 
 interface FinishedRunResult {
   icon: typeof KeyRound
@@ -68,16 +75,6 @@ function describeFinishedRun(worker: Worker, task: WorkerTask, execution: Worker
   }
 }
 
-/** Which capability category a Build step belongs to — connects the
- * canvas's real save-flash to the real category the store just
- * confirmed persisted (see SaveCategory in lib/workforce/store.ts). */
-const STEP_SAVE_CATEGORY: Partial<Record<StepKey, string>> = {
-  skills: "skills",
-  tools: "tools",
-  knowledge: "knowledge",
-  behavior: "behavior",
-}
-
 export function WorkerCanvas({
   worker,
   tasks,
@@ -85,7 +82,6 @@ export function WorkerCanvas({
   events,
   outputs,
   running,
-  activeStep,
   onNavigateToStep,
 }: {
   worker: Worker
@@ -97,362 +93,407 @@ export function WorkerCanvas({
   activeStep: StepKey
   onNavigateToStep: (step: StepKey) => void
 }) {
-  const { lastSaved, metrics } = useWorkforce()
-  const product = worker.productId ? getProduct(worker.productId) : undefined
-  const profile = profileForWorker(worker)
-  const readiness = computeReadiness(worker)
-  const released = worker.status !== "draft"
-  // a real blocker is shown as context, not a reason to prevent the
-  // attempt — running anyway is how the user sees the real, honest
-  // BLOCKED state instead of being told about it secondhand.
-  const canRun = released && !running && worker.skills.some((s) => s.enabled)
-  const active = activeWork([worker], executions, tasks, events).filter((a) => a.workerId === worker.id)
-  const overallState = computeWorkerState(worker, executions, running)
-  const stateMeta = WORKER_STATE_META[overallState]
-
-  // the currently running execution (if any) and the most recently
-  // finished one — the execution zone shows one real state at a time:
-  // live progression while running, the last real outcome once it isn't.
+  const { metrics } = useWorkforce()
+  const enabledSkills = worker.skills.filter((s) => s.enabled)
   const runningExecution = executions.find((e) => e.workerId === worker.id && e.status === "running")
-  const lastExecution = executions
-    .filter((e) => e.workerId === worker.id && e.status !== "running")
-    .sort((a, b) => b.startedAt - a.startedAt)[0]
+  const runningSkillId = runningExecution ? tasks.find((t) => t.id === runningExecution.taskId)?.skillId : undefined
+  const readiness = computeReadiness(worker)
+  const recent = todaysTimeline([worker], executions, tasks, outputs).filter((t) => t.workerId === worker.id).slice(0, 6)
+  const financialTool = worker.tools.find((t) => t.id === "tool_financial_data")
+
+  const active = executions.filter((e) => e.workerId === worker.id && e.status === "running")
+  const lastExecution = executions.filter((e) => e.workerId === worker.id && e.status !== "running").sort((a, b) => b.startedAt - a.startedAt)[0]
   const lastTask = lastExecution ? tasks.find((t) => t.id === lastExecution.taskId) : undefined
   const lastOutput = lastExecution ? outputs.find((o) => o.executionId === lastExecution.id) : undefined
   const lastResult =
     active.length === 0 && lastExecution && lastTask && (lastExecution.status === "blocked" || lastExecution.status === "failed" || lastExecution.status === "pending_approval")
       ? describeFinishedRun(worker, lastTask, lastExecution)
       : null
-
   const liveStages = runningExecution ? buildExecutionStages(runningExecution, events) : null
-  // which real skill (if any) the currently-running execution belongs
-  // to — used only to light up that exact Skill Card, never a blanket
-  // "something is happening" highlight across skills that aren't running.
-  const runningSkillId = runningExecution ? tasks.find((t) => t.id === runningExecution.taskId)?.skillId : undefined
-  const enabledSkills = worker.skills.filter((s) => s.enabled)
-
-  // real recent history for this worker — shown only once idle, never
-  // fabricated, and only when there's actually something to show.
-  const recent = todaysTimeline([worker], executions, tasks, outputs)
-    .filter((t) => t.workerId === worker.id)
-    .slice(0, 4)
-
-  // a brief, real acknowledgement that a Build edit actually persisted
-  // — only fires once the store confirms a real successful PATCH (see
-  // lastSaved in store.ts), never on keystroke, never faked.
-  const [flashCategory, setFlashCategory] = useState<string | null>(null)
-  useEffect(() => {
-    if (!lastSaved || lastSaved.workerId !== worker.id) return
-    setFlashCategory(lastSaved.category)
-    const t = setTimeout(() => setFlashCategory(null), 900)
-    return () => clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastSaved?.at, lastSaved?.workerId])
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="thin-scroll-light flex-1 overflow-y-auto px-6 py-8 sm:px-10">
-        {/* capability cross — Worker identity at the center, surrounded
-         * by its real capabilities, and a real navigation surface into
-         * Build. Identity is first in DOM so it leads on mobile (stacked)
-         * and lands in the center cell at lg via explicit placement —
-         * "what is this Worker?" before "is it ready?" */}
-        <div className="mx-auto mt-2 grid max-w-2xl grid-cols-1 gap-2.5 lg:grid-cols-3 lg:[grid-template-rows:auto_auto_auto]">
-          <div className="flex flex-col items-center justify-center rounded-xl border border-foreground/15 bg-card px-4 py-5 text-center lg:col-start-2 lg:row-start-2">
-            {product && (
-              <span
-                className="mb-2.5 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-white"
-                style={{ backgroundColor: product.accent }}
-              >
-                {product.name} product
-              </span>
-            )}
-            <WorkerAvatar worker={worker} size="lg" rounded="2xl" className="shadow-sm" />
-            <h1 className="mt-2.5 text-[16px] font-semibold leading-tight tracking-tight text-foreground">{worker.identity.name || "Unnamed worker"}</h1>
-            <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{worker.identity.role || "No role set"}</p>
-            {worker.mission.trim() && <p className="mt-2 line-clamp-3 text-[11.5px] leading-relaxed text-muted-foreground">{worker.mission}</p>}
-          </div>
-          <div className="flex flex-col gap-2.5 lg:col-start-2 lg:row-start-1">
-            {enabledSkills.length === 0 ? (
-              <button
-                type="button"
-                onClick={() => onNavigateToStep("skills")}
-                className={`w-full rounded-xl border bg-card p-3.5 text-left transition-colors ${cardToneClass(activeStep === "skills", flashCategory === STEP_SAVE_CATEGORY.skills, false)}`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <Layers className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-muted-foreground">Skills</span>
-                </div>
-                <p className="mt-2 text-[11px] italic text-muted-foreground/70">No skills enabled — click to configure</p>
-              </button>
-            ) : (
-              enabledSkills.map((skill) => (
-                <SkillCard
-                  key={skill.id}
-                  skill={buildSkillCardView(skill, worker, tasks, executions, outputs, metrics)}
-                  executing={skill.id === runningSkillId}
-                  onConfigure={() => onNavigateToStep("skills")}
-                />
-              ))
-            )}
-          </div>
-          <ToolsCapabilityCard
-            className="lg:col-start-1 lg:row-start-2"
-            worker={worker}
-            selected={activeStep === "tools"}
-            flash={flashCategory === STEP_SAVE_CATEGORY.tools}
-            onClick={() => onNavigateToStep("tools")}
-          />
-          <CapabilityCard
-            className="lg:col-start-3 lg:row-start-2"
-            icon={BookOpen}
-            label="Knowledge"
-            items={worker.knowledge.map((k) => k.name)}
-            empty="No knowledge sources — click to connect"
-            selected={activeStep === "knowledge"}
-            flash={flashCategory === STEP_SAVE_CATEGORY.knowledge}
-            onClick={() => onNavigateToStep("knowledge")}
-          />
-          <CapabilityCard
-            className="lg:col-start-2 lg:row-start-3"
-            icon={ListChecks}
-            label="Behavior"
-            items={worker.behaviors.map((b) => `IF ${b.condition} → ${b.action}`)}
-            empty="No behavior rules — click to add one"
-            selected={activeStep === "behavior"}
-            flash={flashCategory === STEP_SAVE_CATEGORY.behavior}
-            onClick={() => onNavigateToStep("behavior")}
-          />
-        </div>
+    <div className="thin-scroll-light h-full overflow-y-auto bg-ref-paper">
+      <div className="@container mx-auto max-w-5xl px-5 py-8 @sm:px-8 @sm:py-10">
+        <StatusBanner running={running} liveStagesCount={liveStages?.length ?? 0} lastResult={lastResult} lastCompleted={!lastResult && lastExecution?.status === "completed"} lastOutput={lastOutput} elapsedSeconds={active[0] ? Math.round((Date.now() - active[0].startedAt) / 1000) : undefined} />
 
-        <section className="mx-auto mt-4 max-w-2xl overflow-hidden rounded-xl border border-border bg-card">
-          <div className="flex items-center gap-4 p-4">
-            <img src={profile.image} alt={`${profile.label} Super Agent`} className="size-20 rounded-xl object-cover" />
-            <div className="min-w-0 flex-1"><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">{profile.label} Super Agent</p><h2 className="mt-1 text-sm font-semibold text-foreground">Business objective</h2><p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">{worker.mission || profile.objective}</p></div>
-          </div>
-          <div className="grid border-t border-border sm:grid-cols-2">{profile.metrics.map((metric) => <div key={metric.key} className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0"><div><p className="text-[11.5px] font-medium text-foreground">{metric.label}</p><p className="mt-0.5 text-[10px] text-muted-foreground">{metric.activation}</p></div><span className="shrink-0 rounded-md border border-border bg-secondary px-2 py-1 font-mono text-[8px] tracking-wider text-muted-foreground">NOT CONNECTED</span></div>)}</div>
-        </section>
-
-        {/* readiness — kept prominent (percent, bar, per-step checklist,
-         * all real) but as a slim strip rather than the visual center. */}
-        <div className="mx-auto mt-3 max-w-2xl rounded-lg border border-primary/25 bg-primary/[0.03] px-4 py-2.5">
-          <div className="flex items-center gap-3">
-            <p className="shrink-0 font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Readiness</p>
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary">
-              <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${readiness.percent}%` }} />
-            </div>
-            <p className="shrink-0 font-mono text-[13px] font-semibold tabular-nums text-foreground">{readiness.percent}%</p>
-          </div>
-          <dl className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-            {readiness.steps.map((s) => (
-              <div key={s.key} className="flex items-center gap-1">
-                <dt className="text-[10.5px] text-muted-foreground">{s.label}</dt>
-                <dd className={`font-mono text-[10px] ${s.done ? "text-grow" : "text-muted-foreground/50"}`}>{s.done ? "✓" : "—"}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-
-        {readiness.blockers.length > 0 && (
-          <div className="mx-auto mt-4 max-w-xl rounded-lg border border-warn/30 bg-warn/5 px-3 py-2">
-            <p className="font-mono text-[9.5px] uppercase tracking-wider text-warn">Cannot run</p>
-            {readiness.blockers.map((b) => (
-              <p key={b} className="mt-1 text-[11.5px] text-foreground">
-                {b}
-              </p>
-            ))}
-          </div>
-        )}
-
-        {/* execution zone — one real state at a time: live progression,
-         * the last real outcome, or real recent history when idle. */}
-        <div className="mx-auto mt-6 max-w-xl">
-          {liveStages ? (
-            <div className="rounded-xl border border-primary/25 bg-primary/[0.03] p-4">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-primary">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Running
-                </span>
-                {active[0] && <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{active[0].elapsedSeconds}s</span>}
-              </div>
-              <div className="mt-3">
-                <ExecutionTimeline stages={liveStages} live />
-              </div>
-            </div>
-          ) : lastResult ? (
-            <div className="rounded-xl border border-warn/30 bg-warn/5 p-4">
-              <div className="flex items-start gap-2.5">
-                <lastResult.icon className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
-                <div>
-                  <p className="text-[13.5px] font-medium text-foreground">{lastResult.title}</p>
-                  <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{lastResult.detail}</p>
-                </div>
-              </div>
-            </div>
-          ) : lastExecution && lastExecution.status === "completed" ? (
-            <div className="rounded-xl border border-grow/25 bg-grow/[0.03] p-4">
-              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-grow">
-                <Check className="h-3 w-3" /> Last run completed
-              </div>
-              {lastExecution && (
-                <div className="mt-2">
-                  <ExecutionTimeline stages={buildExecutionStages(lastExecution, events, lastOutput)} />
+        <div className="mt-8 flex flex-col gap-10 @2xl:grid @2xl:grid-cols-[minmax(0,1fr)_20rem] @2xl:items-start @2xl:gap-10">
+          {/* PRIMARY — the construction surface */}
+          <div className="flex min-w-0 flex-col gap-10">
+            <MissionSection worker={worker} onNavigateToStep={onNavigateToStep} />
+            <DocSection
+              eyebrow="Skills"
+              hint="Capabilities this Worker uses to pursue its financial mission."
+              action={<ConfigureLink onClick={() => onNavigateToStep("skills")} />}
+            >
+              {enabledSkills.length === 0 ? (
+                <EmptyRow text="No skills enabled yet." actionLabel="Add a skill" onClick={() => onNavigateToStep("skills")} />
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {enabledSkills.map((skill) => (
+                    <SkillCard
+                      key={skill.id}
+                      skill={buildSkillCardView(skill, worker, tasks, executions, outputs, metrics)}
+                      executing={skill.id === runningSkillId}
+                      onConfigure={() => onNavigateToStep("skills")}
+                    />
+                  ))}
                 </div>
               )}
-            </div>
-          ) : recent.length > 0 ? (
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="font-mono text-[9.5px] uppercase tracking-wider text-muted-foreground">Recent activity</p>
-              <div className="mt-2 flex flex-col gap-1.5">
-                {recent.map((r) => (
-                  <p key={r.id} className={`text-[11.5px] leading-relaxed ${r.tone === "bad" ? "text-destructive" : r.tone === "warn" ? "text-warn" : "text-foreground"}`}>
-                    {r.text}
-                  </p>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <p className="text-center text-[12px] leading-relaxed text-muted-foreground">
-              {released ? "No executions yet. Run this worker to see its real activity here." : `Build through the steps on the left, then release ${worker.identity.name || "the worker"} to run it.`}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* run worker — the ONE authoritative worker state, and the
-       * action that visually derives from it */}
-      <div className="border-t border-border bg-card/60 p-4">
-        {released && (
-          <div className="mb-2.5 flex items-center justify-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em]">
-            <span
-              className={`h-1.5 w-1.5 rounded-full transition-colors duration-300 ${
-                stateMeta.tone === "good" ? "bg-grow" : stateMeta.tone === "bad" ? "bg-destructive" : stateMeta.tone === "info" ? "bg-primary" : "bg-warn"
-              } ${overallState === "running" ? "animate-pulse" : ""}`}
-            />
-            <span
-              className={`transition-colors duration-300 ${
-                stateMeta.tone === "good" ? "text-grow" : stateMeta.tone === "bad" ? "text-destructive" : stateMeta.tone === "info" ? "text-primary" : "text-warn"
-              }`}
-            >
-              {stateMeta.label}
-            </span>
+            </DocSection>
+            <ToolsSection worker={worker} onNavigateToStep={onNavigateToStep} />
+            <PoliciesSection worker={worker} onNavigateToStep={onNavigateToStep} />
           </div>
-        )}
-        <button
-          onClick={() => workforceStore.runWorker(worker.id)}
-          disabled={!canRun}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-[14px] font-semibold text-primary-foreground transition-[opacity,transform] duration-150 hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100"
-        >
-          {running ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" /> Working…
-            </>
-          ) : (
-            <>
-              <Play className="h-4 w-4" /> Run Worker
-            </>
-          )}
-        </button>
+
+          {/* SECONDARY — persistent context, never visually dominant */}
+          <div className="flex min-w-0 flex-col gap-6">
+            <ReadinessPanel readiness={readiness} />
+            <AutonomyPanel worker={worker} />
+            <DataReadinessPanel financialTool={financialTool} />
+            <ActivityPanel recent={recent} />
+          </div>
+        </div>
       </div>
     </div>
   )
 }
 
-function cardToneClass(selected: boolean, flash: boolean, executing: boolean): string {
-  if (executing) return "border-primary/40 ring-1 ring-primary/25"
-  if (flash) return "border-primary bg-primary/[0.04]"
-  if (selected) return "border-primary/50 bg-primary/[0.02] hover:border-primary/60"
-  return "border-border hover:border-primary/30 hover:bg-secondary/30"
+/* ---- status banner — what the old "execution zone" showed, kept:
+ * running progress, the last real outcome, or nothing when idle. ---- */
+function StatusBanner({
+  running,
+  liveStagesCount,
+  lastResult,
+  lastCompleted,
+  lastOutput,
+  elapsedSeconds,
+}: {
+  running: boolean
+  liveStagesCount: number
+  lastResult: FinishedRunResult | null
+  lastCompleted: boolean
+  lastOutput?: WorkerOutput
+  elapsedSeconds?: number
+}) {
+  if (running && liveStagesCount > 0) {
+    return (
+      <div className="flex items-center gap-2.5 rounded-[3px] border border-ref-accent/40 bg-ref-accent-soft px-4 py-3">
+        <Loader2 className="size-4 shrink-0 animate-spin text-ref-accent" aria-hidden />
+        <p className="flex-1 font-mono text-[11px] uppercase tracking-[0.1em] text-ref-accent">Running now</p>
+        {elapsedSeconds != null && <span className="font-mono text-[11px] tabular-nums text-ref-ink-muted">{elapsedSeconds}s</span>}
+      </div>
+    )
+  }
+  if (lastResult) {
+    return (
+      <div className="flex items-start gap-2.5 rounded-[3px] border border-ref-warn/40 bg-ref-warn-soft px-4 py-3">
+        <lastResult.icon className="mt-0.5 size-4 shrink-0 text-ref-warn" aria-hidden />
+        <div>
+          <p className="text-[13px] font-medium text-ref-ink">{lastResult.title}</p>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-ref-ink-muted">{lastResult.detail}</p>
+        </div>
+      </div>
+    )
+  }
+  if (lastCompleted) {
+    return (
+      <div className="flex items-center gap-2.5 rounded-[3px] border border-ref-hairline bg-ref-paper px-4 py-3">
+        <Check className="size-4 shrink-0 text-ref-ink" aria-hidden />
+        <p className="text-[12.5px] text-ref-ink">Last run completed{lastOutput?.qualityScore != null ? ` — quality ${lastOutput.qualityScore}%` : ""}.</p>
+      </div>
+    )
+  }
+  return null
 }
 
-function CapabilityCard({
-  className = "",
-  icon: Icon,
-  label,
-  items,
-  empty,
-  executing = false,
-  selected = false,
-  flash = false,
-  onClick,
-}: {
-  className?: string
-  icon: typeof Layers
-  label: string
-  items: string[]
-  empty: string
-  executing?: boolean
-  selected?: boolean
-  flash?: boolean
-  onClick?: () => void
-}) {
-  const shown = items.slice(0, 3)
-  const extra = items.length - shown.length
+/* ---- shared document primitives — same visual grammar as SkillCard ---- */
+
+function DocSection({ eyebrow, hint, action, children }: { eyebrow: string; hint?: string; action?: ReactNode; children: ReactNode }) {
+  return (
+    <section>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-ref-ink">{eyebrow}</h2>
+          {hint && <p className="mt-1 text-[12.5px] leading-relaxed text-ref-ink-muted">{hint}</p>}
+        </div>
+        {action}
+      </div>
+      <div className="mt-4">{children}</div>
+    </section>
+  )
+}
+
+function ConfigureLink({ onClick, label = "Configure" }: { onClick: () => void; label?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`w-full rounded-xl border bg-card p-3.5 text-left transition-colors ${cardToneClass(selected, flash, executing)} ${className}`}
+      className="shrink-0 rounded-[2px] border border-ref-hairline px-2.5 py-1 font-sans text-[11px] text-ref-ink-muted transition-colors outline-offset-2 hover:border-ref-ink/30 hover:text-ref-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--ref-accent)]"
     >
-      <div className="flex items-center gap-1.5">
-        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-muted-foreground">{label}</span>
-        <span className="ml-auto font-mono text-[10px] tabular-nums text-muted-foreground/70">{items.length}</span>
-      </div>
-      {items.length === 0 ? (
-        <p className="mt-2 text-[11px] italic text-muted-foreground/70">{empty}</p>
-      ) : (
-        <ul className="mt-2 flex flex-col gap-1">
-          {shown.map((it) => (
-            <li key={it} className="truncate text-[11.5px] text-foreground">
-              {it}
-            </li>
-          ))}
-          {extra > 0 && <li className="text-[10.5px] text-muted-foreground">+{extra} more</li>}
-        </ul>
-      )}
+      {label}
     </button>
   )
 }
 
-function ToolsCapabilityCard({
-  worker,
-  className = "",
-  selected = false,
-  flash = false,
-  onClick,
-}: {
-  worker: Worker
-  className?: string
-  selected?: boolean
-  flash?: boolean
-  onClick?: () => void
-}) {
+function EmptyRow({ text, actionLabel, onClick }: { text: string; actionLabel: string; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`w-full rounded-xl border bg-card p-3.5 text-left transition-colors ${cardToneClass(selected, flash, false)} ${className}`}
-    >
-      <div className="flex items-center gap-1.5">
-        <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-muted-foreground">Tools</span>
-        <span className="ml-auto font-mono text-[10px] tabular-nums text-muted-foreground/70">{worker.tools.length}</span>
+    <div className="flex items-center justify-between gap-3 rounded-[3px] border border-dashed border-ref-hairline px-4 py-4">
+      <p className="text-[12.5px] italic text-ref-ink-muted">{text}</p>
+      <ConfigureLink onClick={onClick} label={actionLabel} />
+    </div>
+  )
+}
+
+function PanelBox({ eyebrow, action, children }: { eyebrow: string; action?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="rounded-[3px] border border-ref-hairline bg-ref-paper px-4 py-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ref-ink-muted">{eyebrow}</h3>
+        {action}
       </div>
-      <ul className="mt-2 flex flex-col gap-1.5">
-        {worker.tools.map((t) => {
-          const boundary = toolExecutionBoundary(t)
-          const meta = TOOL_BOUNDARY_META[boundary]
-          const dot = meta.tone === "good" ? "bg-grow" : meta.tone === "warn" ? "bg-warn" : "bg-muted-foreground/30"
+      <div className="mt-3">{children}</div>
+    </section>
+  )
+}
+
+/* ---- Mission + Economic Objective ---- */
+
+function MissionSection({ worker, onNavigateToStep }: { worker: Worker; onNavigateToStep: (step: StepKey) => void }) {
+  const obj = worker.economicObjective
+  return (
+    <DocSection eyebrow="Mission" action={<ConfigureLink onClick={() => onNavigateToStep("mission")} />}>
+      {worker.mission.trim() ? (
+        <p className="text-[14px] leading-relaxed text-ref-ink">{worker.mission}</p>
+      ) : (
+        <EmptyRow text="No mission defined yet." actionLabel="Define mission" onClick={() => onNavigateToStep("mission")} />
+      )}
+
+      <div className="mt-5 border-t border-ref-hairline pt-5">
+        <h3 className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ref-ink-muted">Economic objective</h3>
+        {!obj || !obj.objective.trim() ? (
+          <div className="mt-2">
+            <EmptyRow text="Not defined yet — this Worker has no stated economic objective." actionLabel="Define objective" onClick={() => onNavigateToStep("mission")} />
+          </div>
+        ) : (
+          <dl className="mt-3 grid grid-cols-1 gap-3 @sm:grid-cols-2">
+            <DocField term="Objective" value={obj.objective} />
+            <DocField term="Target metric" value={obj.targetMetric || "Not set"} />
+            {obj.targetValue && <DocField term="Target" value={obj.targetValue} />}
+            {obj.targetPeriod && <DocField term="Period" value={obj.targetPeriod} />}
+            <DocField term="Constraints" value={obj.constraints.length ? obj.constraints.join(", ") : "None stated"} />
+            <DocField term="Risk tolerance" value={obj.riskTolerance[0].toUpperCase() + obj.riskTolerance.slice(1)} />
+          </dl>
+        )}
+      </div>
+    </DocSection>
+  )
+}
+
+function DocField({ term, value }: { term: string; value: string }) {
+  return (
+    <div>
+      <dt className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-ref-ink-muted">{term}</dt>
+      <dd className="mt-1 text-[12.5px] leading-snug text-ref-ink">{value}</dd>
+    </div>
+  )
+}
+
+/* ---- Tools ---- */
+
+function ToolsSection({ worker, onNavigateToStep }: { worker: Worker; onNavigateToStep: (step: StepKey) => void }) {
+  return (
+    <DocSection eyebrow="Tools" hint="Real capabilities available to this Worker, not passive integrations." action={<ConfigureLink onClick={() => onNavigateToStep("tools")} />}>
+      <div className="flex flex-col gap-3">
+        {worker.tools.map((tool) => (
+          <ToolCard key={tool.id} tool={tool} onConfigure={() => onNavigateToStep("tools")} />
+        ))}
+      </div>
+    </DocSection>
+  )
+}
+
+function ToolCard({ tool, onConfigure }: { tool: WorkforceTool; onConfigure: () => void }) {
+  const template = TOOL_CATALOG.find((t) => t.id === tool.id)
+  const boundary = toolExecutionBoundary(tool)
+  const boundaryMeta = TOOL_BOUNDARY_META[boundary]
+  const boundaryTone = boundaryMeta.tone === "good" ? "text-ref-ink" : boundaryMeta.tone === "warn" ? "text-ref-warn" : "text-ref-ink-muted"
+  return (
+    <article className="@container rounded-[3px] border border-ref-hairline bg-ref-paper px-4 py-4 @sm:px-5 @sm:py-5">
+      <div className="flex flex-col gap-2 @sm:flex-row @sm:items-start @sm:justify-between">
+        <h3 className="min-w-0 flex-1 text-balance font-sans text-[15px] font-semibold leading-snug text-ref-ink">{tool.name}</h3>
+        <span className={`shrink-0 font-mono text-[9.5px] uppercase tracking-[0.1em] ${boundaryTone}`}>{boundaryMeta.label}</span>
+      </div>
+      {template?.description && <p className="mt-1.5 text-[12.5px] leading-relaxed text-ref-ink-muted">{template.description}</p>}
+      <div className="mt-3">
+        <dt className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-ref-ink-muted">Provides</dt>
+        <dd className="mt-1 text-[12px] leading-snug text-ref-ink">{template?.provides.length ? template.provides.join(", ") : "Nothing yet"}</dd>
+      </div>
+      <button
+        type="button"
+        onClick={onConfigure}
+        className="mt-3 rounded-[2px] border border-ref-hairline px-2.5 py-1 font-sans text-[11px] text-ref-ink-muted transition-colors outline-offset-2 hover:border-ref-ink/30 hover:text-ref-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--ref-accent)]"
+      >
+        Configure
+      </button>
+    </article>
+  )
+}
+
+/* ---- Policies — real BehaviorRule data, condition -> outcome. No
+ * fabricated policy titles or approver roles: the domain doesn't have
+ * a Role/Permission concept yet (docs/domain-model.md), so this shows
+ * exactly the two real fields a BehaviorRule has. ---- */
+
+function PoliciesSection({ worker, onNavigateToStep }: { worker: Worker; onNavigateToStep: (step: StepKey) => void }) {
+  return (
+    <DocSection eyebrow="Policies" hint="Guardrails this Worker's actions must pass through." action={<ConfigureLink onClick={() => onNavigateToStep("behavior")} />}>
+      {worker.behaviors.length === 0 ? (
+        <EmptyRow text="No policies configured yet." actionLabel="Add a policy" onClick={() => onNavigateToStep("behavior")} />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {worker.behaviors.map((b, i) => (
+            <article key={b.id} className="rounded-[3px] border border-ref-hairline bg-ref-paper px-4 py-4">
+              <p className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-ref-ink-muted">Policy {i + 1}</p>
+              <div className="mt-2 flex flex-col gap-2 @sm:flex-row @sm:items-center @sm:gap-3">
+                <div className="min-w-0 flex-1 rounded-[2px] border border-ref-hairline px-3 py-2">
+                  <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-ref-ink-muted">Condition</p>
+                  <p className="mt-1 text-[12.5px] leading-snug text-ref-ink">{b.condition}</p>
+                </div>
+                <ArrowRight className="hidden size-4 shrink-0 text-ref-ink-muted @sm:block" aria-hidden />
+                <div className="min-w-0 flex-1 rounded-[2px] border border-ref-hairline px-3 py-2">
+                  <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-ref-ink-muted">Outcome</p>
+                  <p className="mt-1 text-[12.5px] leading-snug text-ref-ink">{b.action}</p>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </DocSection>
+  )
+}
+
+/* ---- secondary column ---- */
+
+function ReadinessPanel({ readiness }: { readiness: ReturnType<typeof computeReadiness> }) {
+  const ready = readiness.blockers.length === 0 && readiness.percent === 100
+  return (
+    <PanelBox eyebrow="Worker readiness">
+      <dl className="flex flex-col gap-2">
+        {readiness.steps.map((s) => (
+          <div key={s.key} className="flex items-center justify-between gap-2">
+            <dt className="shrink-0 font-mono text-[10.5px] uppercase tracking-[0.08em] text-ref-ink-muted">{s.label}</dt>
+            <dd
+              title={s.detail}
+              className={`min-w-0 flex-1 truncate text-right font-mono text-[10px] ${s.done ? "text-ref-ink" : "text-ref-ink-muted/70"}`}
+            >
+              {s.done ? "✓" : "○"} {s.detail}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <p className={`mt-4 border-t border-ref-hairline pt-3 font-mono text-[10px] uppercase tracking-[0.12em] ${ready ? "text-ref-ink" : "text-ref-warn"}`}>
+        {ready ? "Simulation ready" : "Needs configuration"}
+      </p>
+    </PanelBox>
+  )
+}
+
+function AutonomyPanel({ worker }: { worker: Worker }) {
+  const currentLevel = autonomyLevelFor(worker.autonomy)
+  const meta = AUTONOMY_LEVEL_META[currentLevel]
+  return (
+    <PanelBox eyebrow="Autonomy">
+      <div className="flex flex-wrap gap-1.5">
+        {AUTONOMY_LEVEL_ORDER.map((level) => {
+          const levelMeta = AUTONOMY_LEVEL_META[level]
+          const active = level === currentLevel
+          const reachable = !!levelMeta.storedValue
           return (
-            <li key={t.id} className="flex items-center gap-1.5">
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
-              <span className="truncate text-[11.5px] text-foreground">{t.name}</span>
-            </li>
+            <button
+              key={level}
+              type="button"
+              disabled={!reachable}
+              onClick={() => levelMeta.storedValue && workforceStore.setAutonomy(worker.id, levelMeta.storedValue)}
+              title={reachable ? undefined : "Not available yet"}
+              className={`rounded-[2px] border px-2 py-1 font-mono text-[9.5px] uppercase tracking-[0.08em] transition-colors outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--ref-accent)] ${
+                active
+                  ? "border-ref-accent bg-ref-accent-soft text-ref-accent"
+                  : reachable
+                    ? "border-ref-hairline text-ref-ink-muted hover:border-ref-ink/30 hover:text-ref-ink"
+                    : "cursor-not-allowed border-ref-hairline text-ref-ink-muted/40"
+              }`}
+            >
+              {levelMeta.levelNumber} — {levelMeta.label}
+            </button>
           )
         })}
-      </ul>
-    </button>
+      </div>
+      <p className="mt-3 text-[12px] leading-relaxed text-ref-ink-muted">{meta.summary}</p>
+      <AutonomyList title="Can do" items={meta.canDo} />
+      <AutonomyList title="Cannot do" items={meta.cannotDo} />
+      <AutonomyList title="Requires approval" items={meta.requiresApproval} />
+    </PanelBox>
   )
+}
+
+function AutonomyList({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) return null
+  return (
+    <div className="mt-3">
+      <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-ref-ink-muted">{title}</p>
+      <ul className="mt-1 flex flex-col gap-0.5">
+        {items.map((item) => (
+          <li key={item} className="text-[11.5px] leading-snug text-ref-ink">{item}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function DataReadinessPanel({ financialTool }: { financialTool?: WorkforceTool }) {
+  return (
+    <PanelBox eyebrow="Data readiness">
+      <div className="flex flex-col gap-2.5">
+        {FUTURE_CONNECTOR_CATEGORIES.map((category) => (
+          <div key={category.id}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[12.5px] font-medium text-ref-ink">{category.name}</span>
+              <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ref-ink-muted">Not connected</span>
+            </div>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-ref-ink-muted">Unlocks: {category.unlocks.join(", ")}</p>
+          </div>
+        ))}
+        <div className="border-t border-ref-hairline pt-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-ref-ink"><Wallet className="size-3.5 text-ref-accent" aria-hidden />Demo data</span>
+            <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ref-accent">{financialTool ? "Available" : "Not applicable"}</span>
+          </div>
+          {financialTool && <p className="mt-0.5 text-[11px] leading-relaxed text-ref-ink-muted">A clearly fictional financial dataset — never presented as a real bank/ERP/accounting feed.</p>}
+        </div>
+      </div>
+    </PanelBox>
+  )
+}
+
+function ActivityPanel({ recent }: { recent: ReturnType<typeof todaysTimeline> }) {
+  return (
+    <PanelBox eyebrow="Recent activity">
+      {recent.length === 0 ? (
+        <p className="text-[12px] italic text-ref-ink-muted">No activity yet today.</p>
+      ) : (
+        <ol className="flex flex-col gap-2.5">
+          {recent.map((r) => (
+            <li key={r.id} className="flex gap-3">
+              <span className="mt-0.5 shrink-0 font-mono text-[10px] tabular-nums text-ref-ink-muted">{timeOfDay(r.ts)}</span>
+              <span className={`min-w-0 flex-1 text-[12px] leading-snug ${r.tone === "bad" ? "text-ref-critical" : r.tone === "warn" ? "text-ref-warn" : "text-ref-ink"}`}>{r.text}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </PanelBox>
+  )
+}
+
+function timeOfDay(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 }

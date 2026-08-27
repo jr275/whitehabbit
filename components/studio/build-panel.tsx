@@ -319,8 +319,77 @@ function MissionStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => v
       </div>
 
       <OutcomeEditor worker={worker} />
+      <EconomicObjectiveEditor worker={worker} />
 
       <Continue onClick={onAdvance} />
+    </div>
+  )
+}
+
+/* ---- what real economic result is this worker pursuing? Optional
+ * (lib/workforce/model.ts's EconomicObjective) — the Worker Studio
+ * document (worker-canvas.tsx) shows this once set; until then it
+ * shows an honest "not defined yet" state, never a placeholder. ---- */
+function EconomicObjectiveEditor({ worker }: { worker: Worker }) {
+  const [constraint, setConstraint] = useState("")
+  const obj = worker.economicObjective
+  const patch = (p: Partial<NonNullable<Worker["economicObjective"]>>) => workforceStore.setEconomicObjective(worker.id, p)
+  return (
+    <div className="rounded-lg border border-border bg-card p-3">
+      <SmallLabel>Economic objective</SmallLabel>
+      <div className="flex flex-col gap-2">
+        <Field label="Objective" hint="e.g. Maximize free cash flow">
+          <input value={obj?.objective ?? ""} onChange={(e) => patch({ objective: e.target.value })} placeholder="Maximize free cash flow" className="modal-input" />
+        </Field>
+        <Field label="Target metric">
+          <input value={obj?.targetMetric ?? ""} onChange={(e) => patch({ targetMetric: e.target.value })} placeholder="Free cash flow" className="modal-input" />
+        </Field>
+        <Field label="Target (optional)">
+          <input value={obj?.targetValue ?? ""} onChange={(e) => patch({ targetValue: e.target.value })} placeholder="Reduce avoidable financing cost by 15%" className="modal-input" />
+        </Field>
+        <Field label="Period (optional)">
+          <input value={obj?.targetPeriod ?? ""} onChange={(e) => patch({ targetPeriod: e.target.value })} placeholder="Quarterly" className="modal-input" />
+        </Field>
+        <Field label="Risk tolerance">
+          <div className="flex gap-1.5">
+            {(["low", "moderate", "high"] as const).map((level) => (
+              <button
+                key={level}
+                onClick={() => patch({ riskTolerance: level })}
+                className={`rounded-md border px-2.5 py-1 text-[11px] capitalize transition-colors ${
+                  (obj?.riskTolerance ?? "moderate") === level ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {level}
+              </button>
+            ))}
+          </div>
+        </Field>
+        <Field label="Constraints">
+          <div className="flex flex-wrap gap-1.5">
+            {(obj?.constraints ?? []).map((c) => (
+              <span key={c} className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary px-2 py-1 text-[11px] text-foreground">
+                {c}
+                <button onClick={() => patch({ constraints: (obj?.constraints ?? []).filter((x) => x !== c) })} className="text-muted-foreground hover:text-destructive">
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+            <input
+              value={constraint}
+              onChange={(e) => setConstraint(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && constraint.trim()) {
+                  patch({ constraints: [...(obj?.constraints ?? []), constraint.trim()] })
+                  setConstraint("")
+                }
+              }}
+              placeholder="Maintain minimum liquidity threshold"
+              className="min-w-[10rem] flex-1 bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground"
+            />
+          </div>
+        </Field>
+      </div>
     </div>
   )
 }

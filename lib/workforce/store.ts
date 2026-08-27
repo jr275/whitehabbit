@@ -367,6 +367,25 @@ class WorkforceStore {
     this.schedulePersist(workerId, "mission")
   }
 
+  /** Economic Objective is optional (lib/workforce/model.ts) — the
+   * first patch creates it from a sensible-but-real starting shape
+   * (empty strings/arrays the operator fills in), never a fabricated
+   * default value. */
+  setEconomicObjective(workerId: string, patch: Partial<Worker["economicObjective"]>) {
+    this.patchWorker(workerId, (w) => ({
+      ...w,
+      economicObjective: {
+        objective: "",
+        targetMetric: "",
+        constraints: [],
+        riskTolerance: "moderate",
+        ...w.economicObjective,
+        ...patch,
+      },
+    }))
+    this.schedulePersist(workerId, "mission")
+  }
+
   /* ---- 03 Knowledge ---- */
   addKnowledge(workerId: string, item: { name: string; type: KnowledgeSource["type"]; documents: number }) {
     const source: KnowledgeSource = { id: uid("kn"), addedAt: Date.now(), ...item }

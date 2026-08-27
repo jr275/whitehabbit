@@ -14,7 +14,7 @@
  * is no metadata for a skill or tool that doesn't actually exist.
  * ================================================================== */
 
-import type { ChannelId, EconomicValueCategory, SkillCategory, ToolPermission, ToolRisk } from "./model"
+import type { Autonomy, ChannelId, EconomicValueCategory, SkillCategory, ToolPermission, ToolRisk } from "./model"
 
 export interface SkillTemplate {
   id: string
@@ -172,21 +172,44 @@ export interface ToolTemplate {
   description: string
   risk: ToolRisk
   permission: ToolPermission
+  /** Real, specific things this tool can actually return — mirrors
+   * the tool's own real action labels (lib/agent/tools/*.ts), not
+   * marketing copy. A Worker Studio Tool card renders this instead of
+   * a generic "integration" claim. */
+  provides: string[]
 }
 
 export const TOOL_CATALOG: ToolTemplate[] = [
-  { id: "tool_web_search", name: "Web Search", provider: "npm registry", description: "Searches real, current package activity as a signal for what's trending.", risk: "low", permission: "read" },
-  { id: "tool_browser", name: "Browser", provider: "HTTP fetch", description: "Opens a real URL and extracts its page text.", risk: "low", permission: "read" },
-  { id: "tool_analytics", name: "Analytics", provider: "Not connected", description: "Reads engagement and performance metrics from a connected provider.", risk: "low", permission: "read" },
+  { id: "tool_web_search", name: "Web Search", provider: "npm registry", description: "Searches real, current package activity as a signal for what's trending.", risk: "low", permission: "read", provides: ["Market signal search"] },
+  { id: "tool_browser", name: "Browser", provider: "HTTP fetch", description: "Opens a real URL and extracts its page text.", risk: "low", permission: "read", provides: ["Page content"] },
+  { id: "tool_analytics", name: "Analytics", provider: "Not connected", description: "Reads engagement and performance metrics from a connected provider.", risk: "low", permission: "read", provides: ["Insights", "Posts", "Comments"] },
   // "provider" here is only the seed default — the server overwrites it
   // live on every read (lib/agent/hydrate.ts) with whichever LLM_PROVIDER
   // is actually configured (Anthropic or Gemini).
-  { id: "tool_llm", name: "LLM", provider: "Anthropic", description: "Reasons over collected information to analyze, rank and explain.", risk: "low", permission: "read" },
+  { id: "tool_llm", name: "LLM", provider: "Anthropic", description: "Reasons over collected information to analyze, rank and explain.", risk: "low", permission: "read", provides: ["Analysis"] },
   // Genuinely a demo capability, not a real bank/ERP feed — see
   // lib/agent/tools/financial-data.ts. isConnected() is honestly true
   // (the demo ledger always works); "real" vs "demo" is a fact about
   // the DATA, carried separately on each execution's dataProvenance.
-  { id: "tool_financial_data", name: "Financial Data", provider: "Demo Financial Ledger (fictional data)", description: "Provides a demo, clearly fictional financial dataset (cash, receivables, payables, cash flow history) for one illustrative company.", risk: "low", permission: "read" },
+  // `provides` mirrors the tool's four real actions exactly.
+  { id: "tool_financial_data", name: "Financial Data", provider: "Demo Financial Ledger (fictional data)", description: "Provides a demo, clearly fictional financial dataset (cash, receivables, payables, cash flow history) for one illustrative company.", risk: "low", permission: "read", provides: ["Cash position", "Receivables", "Payables", "Cash flow history"] },
+]
+
+/** The three connector categories this Worker's mission implies but
+ * that don't exist as real, toggleable Tools yet — shown in the
+ * Studio Data Readiness panel as honestly unconnectable roadmap
+ * items, never as fake WorkforceTool rows a user could "enable". See
+ * docs/domain-model.md's Connector phase; this is the read-only
+ * content layer for that, not the abstraction itself. */
+export interface FutureConnectorCategory {
+  id: string
+  name: string
+  unlocks: string[]
+}
+export const FUTURE_CONNECTOR_CATEGORIES: FutureConnectorCategory[] = [
+  { id: "banking", name: "Banking", unlocks: ["Real account balances", "Real transactions", "Real funding rates and fees"] },
+  { id: "erp", name: "ERP", unlocks: ["Real invoices", "Real payables and receivables", "Real purchase orders"] },
+  { id: "accounting", name: "Accounting", unlocks: ["Real general ledger", "Real chart of accounts", "Real financial statements"] },
 ]
 
 /* ---- channels ---- */
@@ -224,3 +247,84 @@ export const KNOWLEDGE_TEMPLATES: { name: string; type: KnowledgeSourceType; doc
   { name: "Brand guidelines", type: "brand", documents: 9 },
   { name: "Support FAQ", type: "faq", documents: 64 },
 ]
+
+/* ================================================================== *
+ * AUTONOMY LEVELS — a richer, named 5-level vocabulary for display,
+ * deliberately NOT a new stored field. Worker.autonomy stays the real,
+ * persisted "low" | "medium" | "high" (lib/workforce/model.ts) —
+ * changing that would touch every reader/writer of a field across
+ * ~10 files for a rename with no new real capability behind it. What
+ * IS real and worth building now is the explanatory language: what
+ * each level can do, can't do, and needs approval for. autonomyLevelFor()
+ * is the one, explicit, honest mapping from the real 3-value field to
+ * this 5-value display vocabulary — Level 0 (Observe) and Level 4
+ * (Autonomous optimization) are shown as real, named future levels,
+ * never selectable, until the stored field actually grows to support
+ * them. Never presented as if 5 real states exist today. */
+export type AutonomyLevel = "observe" | "recommend" | "prepare" | "execute_within_policy" | "autonomous_optimization"
+
+export const AUTONOMY_LEVEL_ORDER: AutonomyLevel[] = ["observe", "recommend", "prepare", "execute_within_policy", "autonomous_optimization"]
+
+export interface AutonomyLevelMeta {
+  levelNumber: number
+  label: string
+  /** Which real Worker.autonomy value this display level corresponds
+   * to — undefined for the two levels that aren't reachable yet. */
+  storedValue?: Autonomy
+  summary: string
+  canDo: string[]
+  cannotDo: string[]
+  requiresApproval: string[]
+}
+
+export const AUTONOMY_LEVEL_META: Record<AutonomyLevel, AutonomyLevelMeta> = {
+  observe: {
+    levelNumber: 0,
+    label: "Observe",
+    summary: "Reads data and surfaces findings. No recommendations as actions.",
+    canDo: ["Monitor connected data", "Surface findings and signals"],
+    cannotDo: ["Recommend a specific action", "Prepare or execute anything"],
+    requiresApproval: [],
+  },
+  recommend: {
+    levelNumber: 1,
+    label: "Recommend",
+    storedValue: "low",
+    summary: "Everything Observe does, plus a stated recommendation — never acted on automatically.",
+    canDo: ["Monitor connected data", "Surface findings", "Recommend a specific action"],
+    cannotDo: ["Prepare or execute any action"],
+    requiresApproval: ["Any action the worker recommends"],
+  },
+  prepare: {
+    levelNumber: 2,
+    label: "Prepare",
+    storedValue: "medium",
+    summary: "Prepares a real action for review — nothing executes until approved.",
+    canDo: ["Everything Recommend does", "Prepare a real, reviewable action"],
+    cannotDo: ["Execute a prepared action on its own"],
+    requiresApproval: ["Executing any prepared action"],
+  },
+  execute_within_policy: {
+    levelNumber: 3,
+    label: "Execute within policy",
+    storedValue: "high",
+    summary: "Executes low-risk actions inside its configured Policies; anything a Policy flags still stops for approval.",
+    canDo: ["Everything Prepare does", "Execute an action a Policy allows without approval"],
+    cannotDo: ["Execute an action a Policy blocks or a real connector hasn't confirmed"],
+    requiresApproval: ["Any action a Policy marks as requiring approval"],
+  },
+  autonomous_optimization: {
+    levelNumber: 4,
+    label: "Autonomous optimization",
+    summary: "Not available yet. Even once it is, this level never implies unrestricted financial authority — every action still passes through real Policy and Connector checks first.",
+    canDo: [],
+    cannotDo: ["Anything — this level is not reachable by any Worker today"],
+    requiresApproval: [],
+  },
+}
+
+export function autonomyLevelFor(autonomy: Autonomy): AutonomyLevel {
+  if (autonomy === "low") return "recommend"
+  if (autonomy === "medium") return "prepare"
+  return "execute_within_policy"
+}
