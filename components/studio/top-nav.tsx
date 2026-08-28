@@ -31,6 +31,7 @@ import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
+import { CommandPalette } from "./command-palette"
 
 const GROUPS = [
   {
@@ -179,7 +180,7 @@ export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
-          <button className="hidden h-8 items-center gap-2 rounded-md border border-border bg-card px-3 text-[11px] text-muted-foreground hover:text-foreground md:flex" onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))} aria-label="Open command menu"><Search className="size-3.5" />Search <kbd className="font-mono text-[9px]">⌘K</kbd></button>
+          <button className="hidden h-8 items-center gap-2 rounded-md border border-border bg-card px-3 text-[11px] text-muted-foreground hover:text-foreground md:flex" onClick={() => window.dispatchEvent(new CustomEvent("open-command-palette"))} aria-label="Open command menu"><Search className="size-3.5" />Search <kbd className="font-mono text-[9px]">⌘K</kbd></button>
           {runtimeMode && runtimeMode !== "production" && <span className="hidden rounded-full border border-warn/30 bg-warn/10 px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-warn sm:inline">{runtimeMode}</span>}
           {session && <button onClick={() => signOut({ callbackUrl: "/login" })} className="hidden size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground sm:flex" aria-label="Sign out"><LogOut className="size-4" /></button>}
           <button onClick={() => setOpen((value) => !value)} className="flex size-9 items-center justify-center rounded-lg border border-border text-muted-foreground xl:hidden" aria-expanded={open} aria-label="Toggle primary navigation">{open ? <X className="size-4" /> : <Menu className="size-4" />}</button>
@@ -187,6 +188,7 @@ export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview
       </div>
 
       {open && <nav className="max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-t border-border bg-background px-4 py-5 xl:hidden" aria-label="Mobile primary navigation"><div className="mx-auto grid max-w-4xl gap-6 sm:grid-cols-2 lg:grid-cols-4">{GROUPS.map((group) => <section key={group.label}><p className="px-2 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">{group.label}</p><div className="mt-2 flex flex-col gap-1">{group.links.map((link) => { const active = isActive(pathname, link.href); const Icon = link.icon; return <Link key={link.href} href={link.href} aria-current={active ? "page" : undefined} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm ${active ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"}`}><Icon className="size-4" />{link.label}</Link> })}</div></section>)}</div></nav>}
+      <CommandPalette />
     </header>
   )
 }
