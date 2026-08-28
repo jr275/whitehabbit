@@ -33,7 +33,7 @@ import { IntelligenceField } from "@/components/mission/intelligence-field"
 import { SignalRow } from "@/components/mission/signal-row"
 import { StageGrid, type Stage } from "@/components/mission/stage-grid"
 import { LoadingState } from "@/components/ontology/states"
-import { translateAction, translatePipeline, translateStatus, translateStep } from "@/lib/ontology/pt-br"
+import { translateAction, translateObjectType, translatePipeline, translateStatus, translateStep } from "@/lib/ontology/pt-br"
 import type { WorkflowStep } from "@/lib/workflow/types"
 
 const RISK_TONE: Record<string, string> = { low: "text-grow", medium: "text-warn", high: "text-destructive", critical: "text-destructive" }
@@ -137,32 +137,33 @@ function CommandBar({ projectId, onOpen }: { projectId: string | null; onOpen: (
   )
 }
 
-/* SYSTEM STATE — one continuous strip divided by thin separators, real
- * state buckets (Fase 4 §1 item 2) — never a grid of individually
- * bordered/shadowed KPI tiles. Horizontal-scroll-with-fade at narrow
- * widths, the same affordance already established for TopNav and the
- * Page Factory Pipeline. */
-function StateCell({ label, value, tone = "text-foreground" }: { label: string; value: string | number; tone?: string }) {
+/* ESTADO DO SISTEMA — uma linha de legenda compacta sob o título, não
+ * uma faixa de KPI própria (docs/remax-knowledge-design-reference.md:
+ * o número nunca é o primeiro elemento visual da tela — o objeto/grafo
+ * é). Mesmo dado real de antes, tratamento tipográfico muito menor,
+ * sem caixa/borda própria — nunca compete em peso visual com o Campo
+ * de Inteligência logo abaixo. */
+function StateItem({ label, value, tone = "text-foreground" }: { label: string; value: string | number; tone?: string }) {
   return (
-    <div className="flex shrink-0 flex-col gap-0.5 px-4 py-3 first:pl-0">
-      <span className={`font-mono text-lg font-semibold tabular-nums leading-none ${tone}`}>{value}</span>
-      <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">{label}</span>
-    </div>
+    <span className="flex shrink-0 items-baseline gap-1 whitespace-nowrap text-[12px] text-muted-foreground">
+      <span className={`font-mono text-[12px] font-semibold tabular-nums ${tone}`}>{value}</span>
+      {label}
+    </span>
   )
 }
 
 function SystemStateStrip({ snapshot, activeRuns }: { snapshot: MissionSnapshot; activeRuns: WorkflowRun[] }) {
   return (
     <div className="relative">
-      <div className="flex divide-x divide-border overflow-x-auto border-y border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <StateCell label="Entidades reais" value={snapshot.knowledgeAuthority.entityCount} />
-        <StateCell label="Páginas reais" value={snapshot.pageIntelligence.pageCount} />
-        <StateCell label="Em execução" value={activeRuns.length} tone={activeRuns.length > 0 ? "text-primary" : undefined} />
-        <StateCell label="Aguardando aprovação" value={snapshot.pendingDecisionCount} tone={snapshot.pendingDecisionCount > 0 ? "text-warn" : undefined} />
-        <StateCell label="Bloqueado" value={snapshot.blockedActionCount} tone={snapshot.blockedActionCount > 0 ? "text-destructive" : undefined} />
-        <StateCell label="Tendências em alta" value={`${snapshot.marketMomentum.risingTrendCount}/${snapshot.marketMomentum.totalTrendCount}`} tone={snapshot.marketMomentum.risingTrendCount > 0 ? "text-grow" : undefined} />
-        {snapshot.pageIntelligence.avgQualityScore != null && <StateCell label="Qualidade média" value={snapshot.pageIntelligence.avgQualityScore} />}
-        {snapshot.informationGain.avgScore != null && <StateCell label="Ganho de informação" value={`${snapshot.informationGain.avgScore}%`} />}
+      <div className="flex items-center gap-x-4 gap-y-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <StateItem label="entidades reais" value={snapshot.knowledgeAuthority.entityCount} />
+        <StateItem label="páginas reais" value={snapshot.pageIntelligence.pageCount} />
+        <StateItem label="em execução" value={activeRuns.length} tone={activeRuns.length > 0 ? "text-primary" : undefined} />
+        <StateItem label="aguardando aprovação" value={snapshot.pendingDecisionCount} tone={snapshot.pendingDecisionCount > 0 ? "text-warn" : undefined} />
+        <StateItem label="bloqueado" value={snapshot.blockedActionCount} tone={snapshot.blockedActionCount > 0 ? "text-destructive" : undefined} />
+        <StateItem label="tendências em alta" value={`${snapshot.marketMomentum.risingTrendCount}/${snapshot.marketMomentum.totalTrendCount}`} tone={snapshot.marketMomentum.risingTrendCount > 0 ? "text-grow" : undefined} />
+        {snapshot.pageIntelligence.avgQualityScore != null && <StateItem label="qualidade média" value={snapshot.pageIntelligence.avgQualityScore} />}
+        {snapshot.informationGain.avgScore != null && <StateItem label="ganho de informação" value={`${snapshot.informationGain.avgScore}%`} />}
       </div>
       <div className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent" aria-hidden="true" />
     </div>
@@ -207,7 +208,15 @@ function ActionPanel({ nextAction, onActed, onInspect }: { nextAction: NextActio
     <div className="rounded-lg border border-primary/30 bg-card px-4 py-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Ação recomendada</p>
+          <div className="flex items-center gap-2">
+            <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Ação recomendada</p>
+            {/* Ancorada ao objeto real que a decisão afeta — nunca um
+             * CTA genérico solto (docs/remax-knowledge-design-
+             * reference.md: ações estão sempre conectadas ao contexto). */}
+            {decision.subjectType && (
+              <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-[0.08em] text-muted-foreground">{translateObjectType(decision.subjectType)}</span>
+            )}
+          </div>
           <button onClick={onInspect} className="mt-1 text-left font-serif text-[19px] font-medium tracking-tight text-foreground hover:underline">{translateAction(decision.action)}</button>
           <p className="mt-1 max-w-xl text-[12.5px] leading-relaxed text-muted-foreground">{decision.reason}</p>
         </div>
@@ -386,11 +395,15 @@ export function MissionControl() {
     <div className="min-h-dvh bg-background bg-substrate">
       <WorkforceNav />
       <main id="main-content" className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
-        {/* HEADER/COMMAND */}
+        {/* HEADER/COMMAND — o estado do sistema vira uma linha de
+         * legenda sob o título, nunca sua própria faixa de KPI (Fase
+         * do reset RE/MAX Knowledge: o número nunca é a primeira coisa
+         * que domina a tela — o Campo de Inteligência é). */}
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-primary">Mission Control</p>
             <h1 className="mt-1 font-serif text-3xl font-medium tracking-tight text-foreground">Central de inteligência</h1>
+            {snapshot && <div className="mt-2"><SystemStateStrip snapshot={snapshot} activeRuns={activeRuns} /></div>}
           </div>
           <div className="w-full sm:w-[420px]">
             <CommandBar projectId={projectId} onOpen={inspector.open} />
@@ -403,11 +416,8 @@ export function MissionControl() {
           <div className="mt-8"><LoadingState label="Carregando o estado real do sistema…" /></div>
         ) : (
           <>
-            {/* SYSTEM STATE */}
-            <div className="mt-5"><SystemStateStrip snapshot={snapshot} activeRuns={activeRuns} /></div>
-
-            {/* INTELLIGENCE FIELD — the core element */}
-            <div className="mt-6"><IntelligenceField /></div>
+            {/* INTELLIGENCE FIELD — the core element, logo após o header */}
+            <div className="mt-5"><IntelligenceField /></div>
 
             {/* SINAIS ATIVOS + EXECUÇÕES ATIVAS */}
             <div className="mt-6 grid gap-4 lg:grid-cols-[1.4fr_1fr]">

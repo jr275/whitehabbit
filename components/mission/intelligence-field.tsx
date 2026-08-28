@@ -6,15 +6,24 @@
  * contendo um grafo": é um recorte real (8-12 nós) do mesmo grafo real
  * que alimenta `/knowledge` (GET /api/v1/intelligence/map), pareado com
  * o Object Inspector no MESMO plano — grafo + ficha do objeto lado a
- * lado, sempre juntos, nunca um modal sobre o outro (a composição
- * "grafo + inspector ancorado" é o padrão default da referência, não
- * uma tela de "explorar" separada).
+ * lado (ou empilhados em telas estreitas), sempre juntos, nunca um
+ * modal sobre o outro.
+ *
+ * Layout RADIAL, não colunas por profundidade (docs/remax-knowledge-
+ * design-reference.md — referência secundária Vizup, "grafo de
+ * presença" radial): o nó de maior grau real no recorte fica no
+ * centro, seus vizinhos diretos orbitam em um anel, o segundo grau
+ * orbita mais externamente — um mapa espacial real, nunca um
+ * fluxograma de duas colunas fixas.
  *
  * Graph UI: nó selecionado em foco total, vizinhos diretos em opacidade
  * plena, o resto recua para ~25-35%. Cada nó carrega badge de tipo +
  * nome + contagem real de relações (grau no próprio recorte) + um
- * badge circular de pontuação sobrepondo o canto — o tratamento visual
- * de identidade da referência, nunca um número solto no corpo do nó.
+ * badge circular de pontuação sobrepondo o canto.
+ *
+ * Renderizado em TODAS as larguras (nunca uma lista-só no mobile) —
+ * o ReactFlow aceita pan/zoom por toque nativamente; a sensação de
+ * "objetos e relações" não pode desaparecer no mobile.
  * ================================================================== */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -47,7 +56,7 @@ function FieldNode({ data }: NodeProps) {
   const { node, degree, focusState } = data as unknown as FieldNodeData
   const tone = TYPE_TONE[node.type] ?? "border-border bg-card text-foreground"
   const opacity = focusState === "dim" ? 0.3 : 1
-  const scale = focusState === "selected" ? 1.05 : 1
+  const scale = focusState === "selected" ? 1.08 : 1
   const ring = focusState === "selected" ? "ring-2 ring-primary" : focusState === "neighbor" ? "ring-1 ring-primary/40" : ""
   return (
     <button
@@ -58,7 +67,7 @@ function FieldNode({ data }: NodeProps) {
     >
       <Handle type="target" position={Position.Top} className="!bg-border" />
       {/* Badge circular de pontuação sobrepondo o canto — o tratamento
-       * de identidade da referência (§1.6), nunca texto solto. */}
+       * de identidade da referência, nunca texto solto. */}
       {node.score != null && (
         <span className="absolute -left-2 -top-2 flex size-6 items-center justify-center rounded-full border-2 border-background bg-primary font-mono text-[10px] font-bold tabular-nums text-primary-foreground">
           {Math.round(node.score)}
@@ -76,6 +85,77 @@ function FieldNode({ data }: NodeProps) {
 }
 
 const nodeTypes = { field: FieldNode }
+
+/** O nó de maior grau real vira o centro do mapa; seus vizinhos diretos
+ * orbitam em um anel; o resto (2º grau) orbita mais externamente perto
+ * do vizinho que os conecta — um mapa espacial real, nunca colunas por
+ * profundidade (o padrão radial da referência Vizup). */
+function radialPositions(nodeIds: string[], edges: { from: string; to: string }[]): Map<string, { x: number; y: number }> {
+  const adjacency = new Map<string, Set<string>>()
+  const degree = new Map<string, number>()
+  for (const id of nodeIds) adjacency.set(id, new Set())
+  for (const e of edges) {
+    adjacency.get(e.from)?.add(e.to)
+    adjacency.get(e.to)?.add(e.from)
+    degree.set(e.from, (degree.get(e.from) ?? 0) + 1)
+    degree.set(e.to, (degree.get(e.to) ?? 0) + 1)
+  }
+
+  let center = nodeIds[0]
+  let bestDegree = -1
+  for (const id of nodeIds) {
+    const d = degree.get(id) ?? 0
+    if (d > bestDegree) {
+      bestDegree = d
+      center = id
+    }
+  }
+
+  const positions = new Map<string, { x: number; y: number }>()
+  positions.set(center, { x: 0, y: 0 })
+
+  // Elliptical, not circular: real nodes are ~200px wide but only
+  // ~70px tall, so a true circle crowds/overlaps nodes that land near
+  // the horizontal axis. A wider-than-tall ellipse (and a slight angle
+  // offset so no two rings share an axis exactly) keeps every real
+  // node legible and non-overlapping.
+  const ring1 = [...(adjacency.get(center) ?? [])]
+  const RX1 = 300
+  const RY1 = 190
+  ring1.forEach((id, i) => {
+    const angle = (2 * Math.PI * i) / Math.max(ring1.length, 1) - Math.PI / 2
+    positions.set(id, { x: RX1 * Math.cos(angle), y: RY1 * Math.sin(angle) })
+  })
+
+  const assigned = new Set([center, ...ring1])
+  const ring2 = nodeIds.filter((id) => !assigned.has(id))
+  const RX2 = 620
+  const RY2 = 360
+  const RING2_ANGLE_OFFSET = Math.PI / (ring1.length || 1) / 2
+  const siblingsByParent = new Map<number, number>() // how many ring2 nodes already placed under this ring1 parent — spreads siblings apart instead of stacking them
+  ring2.forEach((id, i) => {
+    let parentIndex = -1
+    for (const neighbor of adjacency.get(id) ?? []) {
+      const idx = ring1.indexOf(neighbor)
+      if (idx !== -1) {
+        parentIndex = idx
+        break
+      }
+    }
+    if (parentIndex !== -1) {
+      const siblingIndex = siblingsByParent.get(parentIndex) ?? 0
+      siblingsByParent.set(parentIndex, siblingIndex + 1)
+      const spread = siblingIndex * 0.35 * (siblingIndex % 2 === 0 ? 1 : -1)
+      const angle = (2 * Math.PI * parentIndex) / Math.max(ring1.length, 1) - Math.PI / 2 + RING2_ANGLE_OFFSET + spread
+      positions.set(id, { x: RX2 * Math.cos(angle), y: RY2 * Math.sin(angle) })
+    } else {
+      const angle = (2 * Math.PI * i) / Math.max(ring2.length, 1) - Math.PI / 2
+      positions.set(id, { x: RX2 * Math.cos(angle), y: RY2 * Math.sin(angle) })
+    }
+  })
+
+  return positions
+}
 
 export function IntelligenceField() {
   const [raw, setRaw] = useState<{ nodes: MapNode[]; edges: { from: string; to: string; relation: string }[] } | null>(null)
@@ -119,20 +199,13 @@ export function IntelligenceField() {
       degree.set(e.from, (degree.get(e.from) ?? 0) + 1)
       degree.set(e.to, (degree.get(e.to) ?? 0) + 1)
     }
-    const rank = new Map<string, number>()
-    for (const edge of raw.edges) {
-      const depth = (rank.get(edge.from) ?? 0) + 1
-      if (!rank.has(edge.to) || (rank.get(edge.to) ?? 0) < depth) rank.set(edge.to, depth)
-    }
-    const byDepth = new Map<number, number>()
+    const positions = radialPositions(raw.nodes.map((n) => n.id), raw.edges)
     const activeNeighbors = selected ? (neighborsOf.get(selected) ?? new Set()) : null
 
     const flowNodes: Node[] = raw.nodes.map((n) => {
-      const depth = rank.get(n.id) ?? 0
-      const col = byDepth.get(depth) ?? 0
-      byDepth.set(depth, col + 1)
+      const pos = positions.get(n.id) ?? { x: 0, y: 0 }
       const focusState: FieldNodeData["focusState"] = !selected ? "normal" : n.id === selected ? "selected" : activeNeighbors?.has(n.id) ? "neighbor" : "dim"
-      return { id: n.id, type: "field", position: { x: depth * 280, y: col * 104 }, data: { node: n, degree: degree.get(n.id) ?? 0, focusState } }
+      return { id: n.id, type: "field", position: pos, data: { node: n, degree: degree.get(n.id) ?? 0, focusState } }
     })
     // Relation labels only render on the *selected* node's own edges —
     // with every real edge labeled at once (the pre-focus default) the
@@ -146,7 +219,7 @@ export function IntelligenceField() {
         id: `f${i}:${e.from}->${e.to}`,
         source: e.from,
         target: e.to,
-        type: "smoothstep",
+        type: "straight",
         label: isOwnEdge ? translateRelation(e.relation) : undefined,
         labelStyle: { fontSize: 9, fill: "var(--color-primary)" },
         labelBgStyle: { fill: "var(--color-popover)" },
@@ -191,52 +264,42 @@ export function IntelligenceField() {
           <p className="text-[13px] text-muted-foreground">Dados ainda não disponíveis — nenhuma oportunidade real conectada foi descoberta neste projeto ainda.</p>
         </div>
       ) : (
-        <>
-          {/* Grafo + Inspector ancorado — o mesmo plano, lado a lado,
-           * nunca um modal sobre o outro (docs/remax-knowledge-design-
-           * reference.md §1.5). */}
-          <div className="mt-3 hidden overflow-hidden rounded-xl border border-border bg-card sm:flex" style={{ height: 460 }}>
-            <div className="relative min-w-0 flex-1" onClick={(e) => e.target === e.currentTarget && closeInspector()}>
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                nodeTypes={nodeTypes}
-                onNodeClick={(_e, n) => onNodeClick(n.id)}
-                onPaneClick={closeInspector}
-                fitView
-                minZoom={0.4}
-                maxZoom={1.4}
-                proOptions={{ hideAttribution: true }}
-                nodesDraggable={false}
-              >
-                <Background gap={22} className="opacity-40" />
-              </ReactFlow>
-            </div>
-            {inspector.isOpen && (
-              <div className="w-[360px] shrink-0">
-                <ObjectInspector variant="docked" stack={inspector.stack} setStack={inspector.setStack} onClose={closeInspector} />
+        /* Grafo + Inspector ancorado — o mesmo plano, sempre juntos,
+         * nunca um modal sobre o outro. Lado a lado a partir de `sm`
+         * (container com altura definida + `min-h-0` nos dois filhos —
+         * sem isso o Inspector vaza para fora da linha do grafo, uma
+         * armadilha clássica de flexbox); empilhados em telas
+         * estreitas, cada bloco com sua própria altura fixa — o grafo
+         * real nunca desaparece, em nenhuma largura. */
+        <div className="mt-3 flex flex-col overflow-hidden rounded-xl border border-border bg-card sm:h-[500px] sm:flex-row">
+          <div className="relative h-[320px] shrink-0 sm:h-auto sm:min-h-0 sm:min-w-0 sm:flex-1" onClick={(e) => e.target === e.currentTarget && closeInspector()}>
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              onNodeClick={(_e, n) => onNodeClick(n.id)}
+              onPaneClick={closeInspector}
+              fitView
+              fitViewOptions={{ padding: 0.25 }}
+              minZoom={0.3}
+              maxZoom={1.4}
+              proOptions={{ hideAttribution: true }}
+              nodesDraggable={false}
+            >
+              <Background gap={22} className="opacity-40" />
+            </ReactFlow>
+            {!selected && (
+              <div className="pointer-events-none absolute right-3 top-3 rounded-md border border-border bg-popover/90 px-2.5 py-1.5 backdrop-blur-sm">
+                <p className="text-right text-[10px] text-muted-foreground">Como ler — selecione um objeto para revelar relações e evidências</p>
               </div>
             )}
           </div>
-
-          {/* Progressive disclosure at narrow widths: a dense, fully
-           * equivalent list of the same real nodes/edges — never a
-           * degraded experience below the graph's usable width, and
-           * the same real interaction (select → inspect, overlay
-           * variant since there's no room to dock side by side). */}
-          <ul className="mt-3 flex flex-col divide-y divide-border rounded-xl border border-border bg-card sm:hidden" aria-label="Objetos do campo de inteligência">
-            {raw.nodes.map((n) => (
-              <li key={n.id}>
-                <button onClick={() => onNodeClick(n.id)} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-secondary/40">
-                  <span className="shrink-0 font-mono text-[8px] uppercase tracking-[0.08em] text-primary">{translateObjectType(n.type)}</span>
-                  <span className="min-w-0 flex-1 truncate text-[12.5px]">{n.label}</span>
-                  <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">{n.score != null ? Math.round(n.score) : translateStatus(n.status ?? null)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {inspector.isOpen && <ObjectInspector stack={inspector.stack} setStack={inspector.setStack} onClose={closeInspector} />}
-        </>
+          {inspector.isOpen && (
+            <div className="h-[380px] shrink-0 border-t border-border sm:h-auto sm:min-h-0 sm:w-[360px] sm:border-l sm:border-t-0">
+              <ObjectInspector variant="docked" stack={inspector.stack} setStack={inspector.setStack} onClose={closeInspector} />
+            </div>
+          )}
+        </div>
       )}
     </section>
   )

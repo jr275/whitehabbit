@@ -14,7 +14,7 @@ import { listObservations } from "./observations"
 import { listDecisions } from "./decisions"
 import { listActions } from "./actions"
 import { listOutcomes } from "./outcomes"
-import { translateAction, translateActionStatusFem, translateSignalType } from "@/lib/ontology/pt-br"
+import { translateAction, translateActionStatusFem, translateMetric, translateSignalType } from "@/lib/ontology/pt-br"
 
 export type TimelineEntryType = "signal" | "observation" | "decision" | "action" | "outcome"
 
@@ -62,12 +62,25 @@ export async function buildIntelligenceTimeline(orgId: string, projectId: string
     types.has("outcome") ? listOutcomes(orgId, projectId, perKindLimit) : Promise.resolve([]),
   ])
 
+  // A Sinal Ativo nunca expõe um id interno cru ao usuário — quando a
+  // decisão real de uma Ação já está na mesma janela buscada, o sinal
+  // nomeia a ação real dela (ex. "Ação concluída: Criar página") em vez
+  // de "para a decisão dec_...". Quando não está (janela truncada), o
+  // sinal permanece honesto sem inventar um nome — nunca mostra o UUID.
+  const decisionById = new Map(decisions.map((d) => [d.id, d]))
+
   let entries: TimelineEntry[] = [
     ...signals.map((s): TimelineEntry => ({ type: "signal", id: s.id, at: s.observedAt, summary: `${translateSignalType(s.type)} (confiança ${s.confidence.toFixed(2)})`, detail: { signalType: s.type, entityId: s.entityId, source: s.source } })),
     ...observations.map((o): TimelineEntry => ({ type: "observation", id: o.id, at: o.createdAt, summary: o.summary, detail: { pattern: o.pattern, signalCount: o.signalIds.length, status: o.status } })),
     ...decisions.map((d): TimelineEntry => ({ type: "decision", id: d.id, at: d.createdAt, summary: `${translateAction(d.action)}: ${d.reason}`, detail: { status: d.status, risk: d.risk, priority: d.priority, subjectType: d.subjectType, subjectId: d.subjectId } })),
-    ...actions.map((a): TimelineEntry => ({ type: "action", id: a.id, at: a.startedAt ?? a.createdAt, summary: `Ação ${translateActionStatusFem(a.status)} para a decisão ${a.decisionId}`, detail: { decisionId: a.decisionId, agentRunId: a.agentRunId, status: a.status } })),
-    ...outcomes.map((o): TimelineEntry => ({ type: "outcome", id: o.id, at: o.measuredAt, summary: `${o.metric}: ${o.value}${o.delta != null ? ` (Δ${o.delta >= 0 ? "+" : ""}${o.delta})` : ""}`, detail: { actionId: o.actionId, baseline: o.baseline, confidence: o.confidence } })),
+    ...actions.map((a): TimelineEntry => {
+      const relatedDecision = decisionById.get(a.decisionId)
+      const summary = relatedDecision
+        ? `Ação ${translateActionStatusFem(a.status)}: ${translateAction(relatedDecision.action)}`
+        : `Ação ${translateActionStatusFem(a.status)} vinculada a uma decisão real`
+      return { type: "action", id: a.id, at: a.startedAt ?? a.createdAt, summary, detail: { decisionId: a.decisionId, agentRunId: a.agentRunId, status: a.status } }
+    }),
+    ...outcomes.map((o): TimelineEntry => ({ type: "outcome", id: o.id, at: o.measuredAt, summary: `${translateMetric(o.metric)}: ${o.value}${o.delta != null ? ` (Δ${o.delta >= 0 ? "+" : ""}${o.delta})` : ""}`, detail: { actionId: o.actionId, baseline: o.baseline, confidence: o.confidence } })),
   ]
 
   if (filters.since != null) entries = entries.filter((e) => e.at >= filters.since!)

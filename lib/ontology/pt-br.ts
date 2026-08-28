@@ -269,6 +269,25 @@ export function translateStep(step: string): string {
   return STEP_LABEL_PT[step] ?? humanize(step)
 }
 
+/* Real Outcome metric names (lib/intelligence/outcomes.ts's `metric`
+ * free-text field) — a Sinal Ativo never shows a raw snake_case
+ * identifier to the user (docs/remax-knowledge-design-reference.md
+ * §4, "nenhum inglês na UI"). */
+const METRIC_LABEL_PT: Record<string, string> = {
+  clicks: "Cliques",
+  organic_clicks: "Cliques orgânicos",
+  impressions: "Impressões",
+  organic_traffic: "Tráfego orgânico",
+  ctr: "CTR",
+  position: "Posição média",
+  leads: "Leads",
+  conversions: "Conversões",
+}
+
+export function translateMetric(metric: string): string {
+  return METRIC_LABEL_PT[metric] ?? humanize(metric)
+}
+
 /** Relative timestamp in pt-BR — "há 2 min", "há 3 h", "agora" — the one
  * shared relative-time formatter for Signal UI (Fase 3 §8). */
 export function relativeTimePt(at: number): string {
