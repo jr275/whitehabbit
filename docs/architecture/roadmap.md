@@ -192,6 +192,50 @@ tenant-isolation coverage at every layer; the E2E vertical slice
 (`tests/e2e/vertical-slice.test.ts`) continues to pass with zero
 regressions with the gate now genuinely enforced.
 
+## Phase 11 — Decision → Action bridge + Mission Control — ✅ shipped (v1, Phase 7, ADR-038..042)
+Closes `docs/architecture/risks.md` R-37, the most-named gap Phase 10 left
+open: an approved `IntelligenceDecision` now really, durably creates and
+dispatches a real execution. `DecisionActionResolver`
+(`lib/intelligence/action-plan.ts`) maps the real 16-action taxonomy onto
+an honest `ActionExecutionPolicy` — a real `WorkflowRun` for six action
+types, a real synchronous operation for two more, a real no-op for two,
+and an honest `BLOCKED` for the remaining six with no real execution path
+yet. A real `PolicyEngine` (capability/freshness/budget) gates dispatch,
+backend-owned, never the agent's own call. `ActionExecutor`
+(`lib/intelligence/action-executor.ts`) is real, DB-enforced idempotent
+per Decision (`migrations/0011`'s partial unique index), with real
+worker-crash recovery and a real completion hook wired into
+`lib/workflow/engine.ts#finalizeWorkflow()` — the one real choke point
+every workflow's terminal transition passes through. A genuinely new,
+Decision-driven Opportunity is scored with the exact same real formula
+`lib/opportunity/discovery.ts`'s batch scan already uses, never forked.
+
+Real, working UI for the first time since Phase 9's API-first posture
+began: `/mission` (real KPIs, "what should I do next," a real Intelligence
+Timeline feed) and `/intelligence/decisions` (the full real Decision
+lifecycle — approve/reject/execute). Both read live API data only.
+
+New API surface: `POST .../decisions/:id/execute`, `GET .../decisions/:id/
+action-plan`, `GET/POST .../actions/:id`, `.../actions/:id/retry`,
+`.../actions/:id/cancel`, `.../actions/process`, `GET .../mission`,
+`GET .../next-action`. A real, adversarial security review
+(`docs/architecture/phase7-security-review.md`) found and fixed two real
+issues (a subquery missing its own tenant scope, a missing rate limit on
+the real dispatch endpoint).
+
+Not yet done, named explicitly rather than silently dropped: six
+unsupported action types (R-42), automatic dispatch retry (R-43), the
+Opportunity Map graph UI (ADR-042, deliberately deferred — the real
+backend already shipped in Phase 10), a rebuilt Agent Run Inspector, a
+Live Agent Graph, real-time timeline push (R-45), an outcome-narrative
+view (R-46), and the Command Palette (R-47). Exit criterion met:
+`tests/integration/decision-action-bridge.test.ts` and
+`tests/api/decision-action-bridge-api.test.ts` prove the full real chain
+— approve → execute → drain → real Opportunity+Page, or an honest
+Information-Gain-blocked outcome — end to end against real Postgres, with
+concurrency/idempotency/budget/capability/tenant-isolation coverage; the
+E2E vertical slice continues to pass with zero regressions.
+
 ## Explicitly out of scope until a phase above reaches it
 White-label multi-brand deployment, billing, community-signal ingestion,
 non-real-estate/non-generic vertical proof (`docs/architecture/

@@ -1,18 +1,23 @@
 openapi: 3.0.3
 info:
-  title: WhiteHabbit Intelligence Layer API (Phase 5B + Phase 6)
-  version: "1.1.0"
+  title: WhiteHabbit Intelligence Layer API (Phase 5B + Phase 6 + Phase 7)
+  version: "1.2.0"
   description: >
     Real, tenant-scoped Intelligence Layer endpoints introduced in Phase 5B
-    (§38, ADR-024) and extended in Phase 6 (§19, ADR-032) with the real
+    (§38, ADR-024), extended in Phase 6 (§19, ADR-032) with the real
     Decision Layer: /intelligence/insights, /intelligence/decisions,
     /intelligence/actions, /intelligence/outcomes, /intelligence/timeline,
-    /intelligence/map. Every response reflects real, persisted data — a
-    resource with no real observations yet returns an empty list, never a
-    fabricated one. Authentication is a NextAuth session cookie; every
-    endpoint enforces org-scoped tenant isolation server-side
-    (requireSession()) — a resource belonging to another tenant returns
-    404, never 403, and never a cross-tenant value.
+    /intelligence/map — and extended again in Phase 7 (ADR-038/039/040)
+    with the real Decision -> Action bridge (/intelligence/decisions/:id/
+    execute and /action-plan, /intelligence/actions/:id/retry and
+    /cancel, /intelligence/actions/process) and Mission Control
+    (/intelligence/mission, /intelligence/next-action). Every response
+    reflects real, persisted data — a resource with no real observations
+    yet returns an empty list, never a fabricated one. Authentication is
+    a NextAuth session cookie; every endpoint enforces org-scoped tenant
+    isolation server-side (requireSession()) — a resource belonging to
+    another tenant returns 404, never 403, and never a cross-tenant
+    value.
 servers:
   - url: /api/v1
 security:
@@ -121,8 +126,10 @@ components:
         id: { type: string }
         decisionId: { type: string }
         agentRunId: { type: string, nullable: true }
-        status: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled, blocked] }
         output: { type: object, nullable: true }
+        blockedReason: { type: string, nullable: true }
+        retryOfActionId: { type: string, nullable: true }
     Outcome:
       type: object
       description: A real, measured result of an Action (§13) — delta is always server-computed, never client-supplied.
@@ -529,3 +536,77 @@ paths:
       responses:
         "200": { description: OK }
         "401": { description: Unauthorized (CRON_SECRET mismatch) }
+  /intelligence/decisions/{id}/action-plan:
+    get:
+      summary: Phase 7 — a real, side-effect-free preview of the DecisionActionResolver's output for this decision
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }
+  /intelligence/decisions/{id}/execute:
+    post:
+      summary: Phase 7 — the real Decision -> Action bridge entry point. Idempotent per decision; only ever queues or records a real blocked action, never runs anything inline.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "202": { description: Accepted — a real, queued or blocked Action was created (or an already-active one returned) }
+        "404": { description: Not found }
+        "409": { description: Decision is not approved }
+        "429": { description: Rate limited }
+  /intelligence/actions/{id}:
+    get:
+      summary: A single real Action's full detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }
+  /intelligence/actions/{id}/retry:
+    post:
+      summary: Creates a real, new, linked retry attempt for a failed or cancelled Action — never mutates the terminal row
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "202": { description: Accepted }
+        "404": { description: Not found }
+        "409": { description: Action is not retryable (not failed/cancelled) }
+  /intelligence/actions/{id}/cancel:
+    post:
+      summary: Cancels a real, still-active Action (and its linked WorkflowRun, best-effort) — a real no-op if already terminal
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found }
+  /intelligence/actions/process:
+    post:
+      summary: The real Action queue worker tick (§3) — drains due rows from intelligence_actions, dispatching real workflows/synchronous operations
+      responses:
+        "200": { description: OK }
+        "401": { description: Unauthorized (CRON_SECRET mismatch) }
+  /intelligence/mission:
+    get:
+      summary: Phase 7 — the real, aggregated KPI snapshot Mission Control renders. projectId is optional (defaults to the org's real default project).
+      responses:
+        "200": { description: OK }
+  /intelligence/next-action:
+    get:
+      summary: Phase 7 — "What should I do next?" — the single highest-priority real pending Decision, its real ActionPlan, and the real PolicyEngine read on it. projectId is optional.
+      responses:
+        "200": { description: OK }

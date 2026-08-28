@@ -97,6 +97,38 @@ surface (`GET/POST /api/v1/intelligence/insights`, ADR-036) but is not yet
 populated by any real detector — honestly empty until one exists, never
 seeded with fabricated rows to look active.
 
+## Decision → Action bridge additions (Phase 7, ADR-038)
+
+`intelligence_actions` (migrations/0008, extended by `migrations/0011`)
+gains a real `'blocked'` status (distinct from `'failed'` — a categorical
+"never even attempted" outcome), a `blocked_reason` column, and a
+`retry_of_action_id` self-reference (a real retry creates a new, linked
+row rather than mutating the terminal one it retries — full lineage
+preserved). A real, DB-enforced partial unique index on
+`(decision_id)` for active statuses (`queued`/`running`/`succeeded`/
+`blocked`) is the actual idempotency guard — the same pattern
+`agent_runs.idempotency_key`'s own unique index already established.
+
+`WorkflowPipeline` (`lib/workflow/types.ts`) gains a fourth real value,
+`"decision_execution"` — the same real-but-synchronous-provenance-run
+pattern `"trend_analysis"` already established, used only so a
+Decision-driven `Opportunity` has a real `source_agent_run_id` to satisfy
+`opportunities`' own CHECK constraint. `WorkflowSubjectType` gains
+`"decision"` to match. Neither is ever enqueued/dequeued through the real
+step-job queue.
+
+`AgentCapability` (`lib/workflow/permissions.ts`) gains two real,
+narrowly-scoped capabilities for the two new synchronous execution paths:
+`write_internal_links` (granted to `PublisherAgent`) and `run_research`
+(granted to `WebsiteDiscoveryAgent`) — never a parallel permission system.
+
+Neither `ActionPlan` (`lib/intelligence/action-plan.ts`) nor
+`PolicyDecision` (`lib/intelligence/policy-engine.ts`) is a persisted
+table — both are real, freshly-resolved-on-every-call structures derived
+from a Decision's own current fields plus (for `ActionPlan`) one real
+lookup when the subject is an existing page, so neither can ever go stale
+relative to the real data it describes.
+
 ## Not yet modeled at all
 
 CommunitySignal (§21 — no real community-source integration exists),

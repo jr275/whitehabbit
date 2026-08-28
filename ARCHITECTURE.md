@@ -100,7 +100,7 @@ triggers, not calendar dates — see `docs/architecture/roadmap.md`.
 
 ## 3. Document map
 
-- `docs/adr/ADR-000-evolve-in-place.md` … `ADR-037-*.md` — one architectural
+- `docs/adr/ADR-000-evolve-in-place.md` … `ADR-042-*.md` — one architectural
   decision each, per the brief's mandated list (§74), plus ADR-000 for the
   monorepo-timing decision above. ADR-017 through ADR-022 (Revision 3) cover
   the durable workflow platform; ADR-023 (Revision 4) covers step-level
@@ -108,8 +108,9 @@ triggers, not calendar dates — see `docs/architecture/roadmap.md`.
   Intelligence Layer foundation; ADR-031 through ADR-037 (Revision 6) cover
   the Intelligence Decision Layer — real signal correlation, explainable
   decisions, a real enforced Information Gain gate, and a deterministic
-  Learning Loop. ADR-003 and ADR-010 are marked superseded rather than
-  deleted.
+  Learning Loop; ADR-038 through ADR-042 (Revision 7) cover the real
+  Decision → Action bridge and Mission Control. ADR-003 and ADR-010 are
+  marked superseded rather than deleted.
 - `docs/architecture/domain-model.md` — the full entity model: what's
   implemented today, its column-level shape, and the target model it's a
   step toward.
@@ -284,3 +285,34 @@ fabricated data anywhere in this layer — the E2E vertical slice
 continues to pass with zero regressions with the gate now genuinely
 enforced, proven by `tests/e2e/vertical-slice.test.ts` alongside five
 new Phase 6 test files covering the full real chain end to end.
+
+**Revision 7 (Phase 7, ADR-038 through ADR-042)** closes the loop
+Revision 6 left explicitly open (`docs/architecture/risks.md` R-37): an
+approved `IntelligenceDecision` now really, durably creates and dispatches
+a real execution. A `DecisionActionResolver` (`lib/intelligence/
+action-plan.ts`) maps the real 16-action taxonomy onto an honest execution
+policy — a real `WorkflowRun` for six action types (reusing the exact same
+content-generation pipeline every prior revision already proved, never a
+second one), a real synchronous operation for two more (real internal-link
+generation, real Deep Research), a real no-op for two, and an honest
+`BLOCKED` for the remaining six with no real execution path yet — never
+silently succeeding. A real, backend-owned `PolicyEngine` gates dispatch
+(capability/freshness/budget), and `ActionExecutor` is real, DB-enforced
+idempotent per Decision with real worker-crash recovery and a real
+completion hook wired into `lib/workflow/engine.ts#finalizeWorkflow()` —
+the one real choke point every workflow's terminal transition passes
+through, regardless of trigger. Real, working UI ships for the first time
+since Revision 5's API-first posture began: `/mission` (real KPIs, "what
+should I do next," Approve & Execute) and `/intelligence/decisions` (the
+full real Decision lifecycle), both reading live API data only, using this
+codebase's existing design system. A real adversarial security review
+(`docs/architecture/phase7-security-review.md`) found and fixed two real
+issues. Five new ADRs (**ADR-038 through ADR-042**) record these
+decisions, including one deliberate deferral (ADR-042: the Opportunity Map
+graph UI, whose real backend already shipped in Revision 6, was not built
+this revision — a scope decision, not an oversight). `tests/integration/
+decision-action-bridge.test.ts` and `tests/api/decision-action-bridge-api.test.ts`
+prove the full real chain — approve → execute → drain → real
+Opportunity+Page, or an honest Information-Gain-blocked outcome — end to
+end against real Postgres; the E2E vertical slice continues to pass with
+zero regressions.

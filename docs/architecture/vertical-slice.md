@@ -73,6 +73,26 @@ of scope, named below.
   neither will still crawl and profile correctly, just discover few or no
   entities/opportunities — an honest empty result, never a fabricated one.
 
+## The autonomous loop, closed (Phase 7, ADR-038)
+
+The full brief's closing chain — Signal → Correlation → Observation →
+Decision → (human) Approval → real ActionPlan → real AgentRun/WorkflowRun
+→ the SAME durable pipeline this document describes above → Information
+Gain V2 → Content → QA → Publish → Outcome → Learning → the next Decision
+— is now real end to end, proven by
+`tests/integration/decision-action-bridge.test.ts`: a well-evidenced
+entity's real `CREATE_PAGE` Decision, once approved, is really dispatched
+through `lib/intelligence/action-executor.ts` into the exact same real
+Research→Outline→Draft→SEO→GEO→Quality→decide/publish pipeline this
+document's own vertical slice already proves — no second, parallel
+content pipeline was built for Decision-originated pages. A thin,
+under-evidenced entity's `CREATE_PAGE` Decision is instead honestly
+`BLOCKED` by the same real Information Gain V2 gate (ADR-031) the rest of
+this pipeline already enforces, proven in the same test file. See
+ADR-038/039 for the full design and `docs/architecture/roadmap.md`'s
+Phase 11 entry for what remains open (six unsupported action types,
+automatic dispatch retry).
+
 ## Multi-vertical proof (§77)
 
 `tests/e2e/vertical-slice.test.ts` runs the entire chain against
