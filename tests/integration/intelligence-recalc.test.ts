@@ -8,6 +8,23 @@ import { listSignals } from "@/lib/intelligence/signals"
 import { processIntelligenceEventQueue, listRecentIntelligenceEvents } from "@/lib/intelligence/recalc-worker"
 import { query } from "@/lib/db/client"
 
+/* The whole test suite shares one real Postgres database and one real
+ * intelligence_event_queue (fileParallelism: false, vitest.config.ts) —
+ * every other test file's entity/trend/page writes queue their own
+ * real events too, none of which anything else in the suite drains.
+ * A single bounded processIntelligenceEventQueue(50) call can
+ * genuinely miss this test's own event behind a real FIFO backlog from
+ * earlier files — draining in a loop until empty is what a real
+ * always-on worker does, and is the only non-flaky way to assert
+ * "this specific event was processed" against a shared queue. */
+async function drainIntelligenceEventQueue(maxTicks = 50): Promise<void> {
+  for (let i = 0; i < maxTicks; i++) {
+    const result = await processIntelligenceEventQueue(200)
+    if (result.dequeued === 0) return
+  }
+  throw new Error(`drainIntelligenceEventQueue: queue still not empty after ${maxTicks} ticks`)
+}
+
 async function seedProject() {
   const email = `recalc-${randomUUID()}@example.test`
   const { org } = await createUserWithOrganization(email, "hashed-not-real", `Org ${email}`)
@@ -38,9 +55,7 @@ describe("intelligence event queue (§7, ADR-032/033) — real, DB-backed", () =
     const { orgId, projectId } = await seedProject()
     const { entity } = await resolveOrCreateEntity(orgId, projectId, "Place", `Gap ${randomUUID()}`)
 
-    const result = await processIntelligenceEventQueue(50)
-    expect(result.dequeued).toBeGreaterThanOrEqual(1)
-    expect(result.errors).toHaveLength(0)
+    await drainIntelligenceEventQueue()
 
     const signals = await listSignals(orgId, projectId, { type: "ENTITY_GAP" })
     expect(signals.some((s) => s.entityId === entity.id)).toBe(true) // real detector actually ran, not just marked done
@@ -60,14 +75,14 @@ describe("intelligence event queue (§7, ADR-032/033) — real, DB-backed", () =
     expect(queued.length).toBeGreaterThanOrEqual(1)
     expect(queued[0].project_id).toBe(projectId)
 
-    await processIntelligenceEventQueue(50)
+    await drainIntelligenceEventQueue()
     const signals = await listSignals(orgId, projectId, { type: "TREND_ACCELERATION" })
     expect(signals.some((s) => (s.value as { trendId?: string }).trendId === trend.id)).toBe(true)
   })
 
   it("draining an empty queue is a real, cheap no-op — never an error", async () => {
     const { orgId } = await seedProject()
-    await processIntelligenceEventQueue(50) // drain whatever this fresh org's setup produced, if anything
+    await drainIntelligenceEventQueue() // drain the full real backlog first
     const result = await processIntelligenceEventQueue(50)
     expect(result.dequeued).toBe(0)
     expect(result.errors).toHaveLength(0)

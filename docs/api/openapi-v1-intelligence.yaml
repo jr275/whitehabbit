@@ -1,10 +1,13 @@
 openapi: 3.0.3
 info:
-  title: WhiteHabbit Intelligence Layer API (Phase 5B)
-  version: "1.0.0"
+  title: WhiteHabbit Intelligence Layer API (Phase 5B + Phase 6)
+  version: "1.1.0"
   description: >
     Real, tenant-scoped Intelligence Layer endpoints introduced in Phase 5B
-    (§38, ADR-024). Every response reflects real, persisted data — a
+    (§38, ADR-024) and extended in Phase 6 (§19, ADR-032) with the real
+    Decision Layer: /intelligence/insights, /intelligence/decisions,
+    /intelligence/actions, /intelligence/outcomes, /intelligence/timeline,
+    /intelligence/map. Every response reflects real, persisted data — a
     resource with no real observations yet returns an empty list, never a
     fabricated one. Authentication is a NextAuth session cookie; every
     endpoint enforces org-scoped tenant isolation server-side
@@ -83,6 +86,67 @@ components:
         confidence: { type: number }
         priority: { type: string, enum: [critical, high, normal, low] }
         status: { type: string, enum: [open, accepted, dismissed, done] }
+    Insight:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        category: { type: string }
+        confidence: { type: number }
+        signalIds: { type: array, items: { type: string } }
+    Decision:
+      type: object
+      description: A real, explainable choice among a closed action taxonomy (§4) — never "AI decided this."
+      properties:
+        id: { type: string }
+        action: { type: string, enum: [CREATE_PAGE, UPDATE_PAGE, MERGE_PAGES, REDIRECT_PAGE, ADD_INTERNAL_LINKS, CREATE_HUB, CREATE_DATASET, CREATE_CALCULATOR, CREATE_COMPARISON, CREATE_FAQ, REFRESH_CONTENT, INVESTIGATE_ENTITY, EXPAND_MARKET, EXPAND_ROLE, MONITOR, DO_NOTHING] }
+        subjectType: { type: string }
+        subjectId: { type: string, nullable: true }
+        reason: { type: string }
+        evidenceIds: { type: array, items: { type: string } }
+        expectedImpact: { type: string }
+        estimatedCost: { type: object }
+        risk: { type: string, enum: [low, medium, high, critical] }
+        confidence: { type: number }
+        priority: { type: string, enum: [critical, high, normal, low] }
+        recommendedAgent: { type: string, nullable: true }
+        requiredApproval: { type: boolean }
+        status: { type: string, enum: [pending, approved, rejected, executed, expired, cancelled] }
+        decidedBy: { type: string, nullable: true }
+    Action:
+      type: object
+      description: A real execution record — points at a real agent_runs row, never a second parallel tracker (§4, §12).
+      properties:
+        id: { type: string }
+        decisionId: { type: string }
+        agentRunId: { type: string, nullable: true }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        output: { type: object, nullable: true }
+    Outcome:
+      type: object
+      description: A real, measured result of an Action (§13) — delta is always server-computed, never client-supplied.
+      properties:
+        id: { type: string }
+        actionId: { type: string }
+        metric: { type: string }
+        baseline: { type: number, nullable: true }
+        value: { type: number }
+        delta: { type: number, nullable: true }
+        confidence: { type: number }
+    TimelineEntry:
+      type: object
+      properties:
+        type: { type: string, enum: [signal, observation, decision, action, outcome] }
+        id: { type: string }
+        at: { type: integer }
+        summary: { type: string }
+        detail: { type: object }
+    IntelligenceMap:
+      type: object
+      properties:
+        nodes: { type: array, items: { type: object, properties: { id: { type: string }, type: { type: string }, label: { type: string } } } }
+        edges: { type: array, items: { type: object, properties: { from: { type: string }, to: { type: string }, relation: { type: string } } } }
     Error:
       type: object
       properties:
@@ -334,7 +398,7 @@ paths:
         "404": { description: Not found }
   /opportunities/{id}/information-gain:
     get:
-      summary: Real Information Gain V2 score + gate decision (CREATE/MERGE/ENRICH/WAIT/RESEARCH/CREATE_DATA_ASSET)
+      summary: Real Information Gain V2 score + gate decision (CREATE/REJECT/MERGE/ENRICH/WAIT/RESEARCH/CREATE_DATA_ASSET), Learning Loop-adjusted (§13)
       parameters:
         - name: id
           in: path
@@ -343,3 +407,125 @@ paths:
       responses:
         "200": { description: OK }
         "404": { description: Not found }
+  /intelligence/insights:
+    get:
+      summary: List real Insights for a project (§9)
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { insights: { type: array, items: { $ref: "#/components/schemas/Insight" } } } } } } }
+    post:
+      summary: Record a real Insight
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, title, summary, category, confidence]
+              properties:
+                projectId: { type: string }
+                title: { type: string }
+                summary: { type: string }
+                category: { type: string }
+                confidence: { type: number, minimum: 0, maximum: 1 }
+                signalIds: { type: array, items: { type: string } }
+      responses:
+        "201": { description: Created }
+  /intelligence/decisions:
+    get:
+      summary: List real Decisions for a project (§4)
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, approved, rejected, executed, expired, cancelled] }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { decisions: { type: array, items: { $ref: "#/components/schemas/Decision" } } } } } } }
+    post:
+      summary: Run the real Decision Engine scan over this project's active Observations — idempotent, never double-decides
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [projectId], properties: { projectId: { type: string } } } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { type: object, properties: { decisions: { type: array, items: { $ref: "#/components/schemas/Decision" } } } } } } }
+  /intelligence/decisions/{id}:
+    patch:
+      summary: Approve or reject a real Decision — always by a real, authenticated actor, never auto-approved
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [approved, rejected, cancelled] } } } } }
+      responses:
+        "200": { description: OK }
+        "400": { description: Already decided }
+        "404": { description: Not found }
+  /intelligence/actions:
+    get:
+      summary: List real Actions (§4, §12) — read-only; an Action is created only by a real internal execution path, never fabricated by a client
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: decisionId
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { actions: { type: array, items: { $ref: "#/components/schemas/Action" } } } } } } }
+  /intelligence/outcomes:
+    get:
+      summary: List real, measured Outcomes (§13)
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: actionId
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { outcomes: { type: array, items: { $ref: "#/components/schemas/Outcome" } } } } } } }
+    post:
+      summary: Record a real, measured Outcome for an Action — delta is always server-computed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, actionId, metric, value, confidence]
+              properties:
+                projectId: { type: string }
+                actionId: { type: string }
+                metric: { type: string }
+                baseline: { type: number }
+                value: { type: number }
+                confidence: { type: number, minimum: 0, maximum: 1 }
+                evidence: { type: array, items: { type: string } }
+      responses:
+        "201": { description: Created }
+  /intelligence/timeline:
+    get:
+      summary: The real, chronological Intelligence Timeline (§8) — a merge of Signal/Observation/Decision/Action/Outcome
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: limit
+          in: query
+          schema: { type: integer }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { entries: { type: array, items: { $ref: "#/components/schemas/TimelineEntry" } } } } } } }
+  /intelligence/map:
+    get:
+      summary: The real Opportunity Map graph (§6, §10) — Observation -> Decision -> Subject, from persisted relations
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/IntelligenceMap" } } } }
+  /intelligence/process:
+    post:
+      summary: The real-time intelligence worker tick (§7) — drains due rows from the durable intelligence_event_queue
+      responses:
+        "200": { description: OK }
+        "401": { description: Unauthorized (CRON_SECRET mismatch) }
