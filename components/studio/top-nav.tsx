@@ -11,6 +11,7 @@ import {
   GitBranch,
   Globe,
   Layers3,
+  History,
   ListChecks,
   LogOut,
   Menu,
@@ -29,7 +30,7 @@ import {
 import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 const GROUPS = [
   {
@@ -51,6 +52,7 @@ const GROUPS = [
       { href: "/opportunities", label: "Opportunities", icon: Target },
       { href: "/intelligence/decisions", label: "Decision Center", icon: ListChecks },
       { href: "/intelligence/map", label: "Intelligence Graph", icon: GitBranch },
+      { href: "/intelligence/timeline", label: "Timeline", icon: History },
     ],
   },
   {
@@ -79,14 +81,42 @@ function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`)
 }
 
+function groupIsActive(pathname: string, group: (typeof GROUPS)[number]) {
+  return group.links.some((link) => isActive(pathname, link.href))
+}
+
 export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview" | "production" }) {
   const pathname = usePathname()
   const { data: session } = useSession()
   const [open, setOpen] = useState(false)
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
+  const [openGroup, setOpenGroup] = useState<string | null>(null)
+  const navRef = useRef<HTMLDivElement>(null)
   const orgName = (session as { organizationName?: string } | null)?.organizationName ?? "Primary workspace"
 
-  useEffect(() => setOpen(false), [pathname])
+  useEffect(() => {
+    setOpen(false)
+    setOpenGroup(null)
+  }, [pathname])
+
+  // Close an open group dropdown on an outside click or Escape — the
+  // one interaction affordance dense/grouped nav needs that a plain
+  // flat link row didn't (§2: "keyboard-navigable").
+  useEffect(() => {
+    if (!openGroup) return
+    function onPointerDown(e: MouseEvent) {
+      if (navRef.current && !navRef.current.contains(e.target as Node)) setOpenGroup(null)
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpenGroup(null)
+    }
+    document.addEventListener("mousedown", onPointerDown)
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown)
+      document.removeEventListener("keydown", onKeyDown)
+    }
+  }, [openGroup])
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/92 backdrop-blur-xl">
@@ -108,11 +138,44 @@ export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview
           {workspaceOpen && <div className="absolute left-0 top-10 w-64 rounded-lg border border-border bg-popover p-3 shadow-xl"><p className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">Authenticated organization</p><p className="mt-2 truncate text-sm font-medium text-popover-foreground">{orgName}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Organization switching is unavailable in this release.</p></div>}
         </div>
 
-        <nav className="hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] xl:flex [&::-webkit-scrollbar]:hidden" aria-label="Primary navigation">
-          {GROUPS.map((group) => group.links.map((link) => {
-            const active = isActive(pathname, link.href)
-            return <Link key={link.href} href={link.href} aria-current={active ? "page" : undefined} className={`shrink-0 rounded-md px-2.5 py-1.5 text-[11px] transition-colors ${active ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"}`}>{link.label}</Link>
-          }))}
+        <nav ref={navRef} className="hidden min-w-0 flex-1 items-center gap-1 xl:flex" aria-label="Primary navigation">
+          {GROUPS.map((group) => {
+            const active = groupIsActive(pathname, group)
+            const expanded = openGroup === group.label
+            return (
+              <div key={group.label} className="relative shrink-0">
+                <button
+                  onClick={() => setOpenGroup((prev) => (prev === group.label ? null : group.label))}
+                  aria-haspopup="menu"
+                  aria-expanded={expanded}
+                  className={`flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[11px] transition-colors ${active ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"}`}
+                >
+                  {group.label}
+                  <ChevronDown className={`size-3 transition-transform ${expanded ? "rotate-180" : ""}`} />
+                </button>
+                {expanded && (
+                  <div role="menu" aria-label={group.label} className="absolute left-0 top-9 z-50 w-56 rounded-lg border border-border bg-popover p-1.5 shadow-xl">
+                    {group.links.map((link) => {
+                      const linkActive = isActive(pathname, link.href)
+                      const Icon = link.icon
+                      return (
+                        <Link
+                          key={link.href}
+                          href={link.href}
+                          role="menuitem"
+                          aria-current={linkActive ? "page" : undefined}
+                          className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[12.5px] transition-colors ${linkActive ? "bg-secondary font-medium text-popover-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-popover-foreground"}`}
+                        >
+                          <Icon className="size-3.5 shrink-0" />
+                          {link.label}
+                        </Link>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </nav>
 
         <div className="ml-auto flex items-center gap-2">

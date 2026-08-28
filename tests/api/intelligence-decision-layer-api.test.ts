@@ -135,6 +135,37 @@ describe("intelligence API — real, functional (tenant A)", () => {
     for (let i = 1; i < body.entries.length; i++) expect(body.entries[i - 1].at).toBeGreaterThanOrEqual(body.entries[i].at)
   })
 
+  it("GET /api/v1/intelligence/timeline?types= filters server-side (Phase 8 §12) — a filtered-out kind never appears", async () => {
+    const { GET } = await import("@/app/api/v1/intelligence/timeline/route")
+    mockSessionFor(tenantA)
+    const res = await GET(new Request(`http://localhost/x?projectId=${tenantA.projectId}&types=decision,action`))
+    const body = await res.json()
+    expect(body.entries.length).toBeGreaterThan(0)
+    for (const entry of body.entries) expect(["decision", "action"]).toContain(entry.type)
+  })
+
+  it("GET /api/v1/intelligence/timeline?q= matches only real entries whose own summary contains the term", async () => {
+    const { GET } = await import("@/app/api/v1/intelligence/timeline/route")
+    mockSessionFor(tenantA)
+    const all = await GET(new Request(`http://localhost/x?projectId=${tenantA.projectId}`))
+    const allBody = await all.json()
+    const target = allBody.entries.find((e: { summary: string }) => e.summary.length > 3)
+    const needle = target.summary.slice(0, 4)
+
+    const res = await GET(new Request(`http://localhost/x?projectId=${tenantA.projectId}&q=${encodeURIComponent(needle)}`))
+    const body = await res.json()
+    expect(body.entries.length).toBeGreaterThan(0)
+    for (const entry of body.entries) expect(entry.summary.toLowerCase()).toContain(needle.toLowerCase())
+  })
+
+  it("GET /api/v1/intelligence/timeline respects since/until as a real inclusive date-range bound", async () => {
+    const { GET } = await import("@/app/api/v1/intelligence/timeline/route")
+    mockSessionFor(tenantA)
+    const res = await GET(new Request(`http://localhost/x?projectId=${tenantA.projectId}&since=${Date.now() + 3_600_000}`))
+    const body = await res.json()
+    expect(body.entries.length).toBe(0)
+  })
+
   it("GET /api/v1/intelligence/map returns a real, connected graph", async () => {
     const { GET } = await import("@/app/api/v1/intelligence/map/route")
     mockSessionFor(tenantA)
