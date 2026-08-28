@@ -154,6 +154,44 @@ proves every stage of OBSERVE→UNDERSTAND→DISCOVER→SCORE→DECIDE works
 against real Postgres, end to end from a raw Signal through a real,
 explainable, graph-linked Opportunity.
 
+## Phase 10 — Intelligence Decision Layer: Signal → Correlation → Decision → Action → Outcome → Learning — ✅ shipped (v1, Phase 6, ADR-031..037)
+Closes the loop Phase 9 left open: a unified Signal Engine (`lib/intelligence/
+signal-engine.ts`, ADR-032) so no module invents its own detection; a
+deterministic, rule-based Correlation Engine and Decision Engine (ADR-032)
+— never LLM-only reasoning for "is this worth acting on"; a real,
+explainable `IntelligenceDecision` object (16-action closed taxonomy,
+every row carrying its own reason/evidence/cost/risk/confidence, ADR-031);
+a real `IntelligenceAction`/`IntelligenceOutcome` pair pointing at a real
+`agent_runs` row (never a second parallel tracker); Score Calibration
+(ADR-034) and a real, bounded, sample-gated Learning Loop feeding back into
+the Information Gain V2 gate (ADR-035); durable, incremental event-driven
+recalculation via a two-tier pg_notify + queue design (`migrations/0010`,
+ADR-032/033) — never a full recomputation sweep; a full Decision Layer API
+surface (`/api/v1/intelligence/{insights,decisions,actions,outcomes,
+timeline,map}`, ADR-036); and — the headline fix — Information Gain V2
+actually wired into the real, blocking content-generation path for the
+first time (`information_gain_gate` step, ADR-031), where its first real
+run surfaced and fixed two real bugs (a dead `sourceType` heuristic, an
+unreachable REJECT branch) rather than being left as an on-demand-only
+inspection endpoint. Not yet done: single-subject-scoped detector variants
+(today's detectors are project-scoped — a real, named limitation, ADR-032);
+a dedicated Mission Control V2/Opportunity Map/Agent Control Center/
+Intelligence Timeline UI (this phase was API- and backend-first, same
+posture Phase 9 took, with reusable API responses shaped for a future UI
+rather than a built one); Search Console/AI Visibility real production
+OAuth-lifecycle hardening beyond Phase 5B's foundation (§15-16 of the
+brief — real follow-up, not attempted this phase given the scope already
+covered). Exit criterion met: `tests/integration/decision-layer.test.ts`,
+`tests/integration/intelligence-recalc.test.ts`,
+`tests/integration/learning-loop.test.ts`,
+`tests/unit/correlation-decision-engine.test.ts`, and
+`tests/api/intelligence-decision-layer-api.test.ts` prove the full real
+chain — signal → correlation → decision → action → outcome → calibration →
+adjusted score — end to end against real Postgres, with adversarial
+tenant-isolation coverage at every layer; the E2E vertical slice
+(`tests/e2e/vertical-slice.test.ts`) continues to pass with zero
+regressions with the gate now genuinely enforced.
+
 ## Explicitly out of scope until a phase above reaches it
 White-label multi-brand deployment, billing, community-signal ingestion,
 non-real-estate/non-generic vertical proof (`docs/architecture/

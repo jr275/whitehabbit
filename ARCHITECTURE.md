@@ -100,13 +100,16 @@ triggers, not calendar dates — see `docs/architecture/roadmap.md`.
 
 ## 3. Document map
 
-- `docs/adr/ADR-000-evolve-in-place.md` … `ADR-030-*.md` — one architectural
+- `docs/adr/ADR-000-evolve-in-place.md` … `ADR-037-*.md` — one architectural
   decision each, per the brief's mandated list (§74), plus ADR-000 for the
   monorepo-timing decision above. ADR-017 through ADR-022 (Revision 3) cover
   the durable workflow platform; ADR-023 (Revision 4) covers step-level
   async execution; ADR-024 through ADR-030 (Revision 5) cover the
-  Intelligence Layer foundation. ADR-003 and ADR-010 are marked superseded
-  rather than deleted.
+  Intelligence Layer foundation; ADR-031 through ADR-037 (Revision 6) cover
+  the Intelligence Decision Layer — real signal correlation, explainable
+  decisions, a real enforced Information Gain gate, and a deterministic
+  Learning Loop. ADR-003 and ADR-010 are marked superseded rather than
+  deleted.
 - `docs/architecture/domain-model.md` — the full entity model: what's
   implemented today, its column-level shape, and the target model it's a
   step toward.
@@ -242,3 +245,42 @@ R-22. The real, accepted cost: completing one whole pipeline now needs
 phase exists to deliver, not a hidden regression. One new ADR
 (**ADR-023**) records the decision to extend the existing Job model
 rather than introduce a parallel `WorkflowStepJob` concept.
+
+**Revision 6 (Phase 6, ADR-031 through ADR-037)** closes the loop
+Revision 5 left open — the transition from "workflow execution engine"
+toward a real "Knowledge + Intelligence Operating System" the Phase 6
+brief demands. A unified Signal Engine (`lib/intelligence/signal-engine.ts`)
+so no module invents its own detection; a deterministic, rule-based
+Correlation Engine and Decision Engine (`lib/intelligence/correlation-
+engine.ts`, `decision-engine.ts` — explicitly never LLM-only reasoning
+for "is this worth acting on," per the brief's own instruction) turning
+real signal patterns into a real, explainable `IntelligenceDecision`
+across a closed 16-action taxonomy; a real `IntelligenceAction`/
+`IntelligenceOutcome` pair pointing at a real `agent_runs` row; Score
+Calibration and a real, bounded, sample-gated Learning Loop
+(`lib/intelligence/learning-loop.ts`) feeding real predicted-vs-actual
+data back into the Information Gain V2 gate; durable, incremental,
+event-driven recalculation (`migrations/0010`'s two-tier `pg_notify` +
+durable queue design) — never a full recomputation sweep on any real
+change; and, closing Revision 5's most-named gap (`docs/architecture/
+risks.md` R-30), **Information Gain V2 actually enforced** in the real,
+blocking content-generation path for the first time, whose first real
+run surfaced and fixed two real bugs (a dead evidence heuristic, an
+unreachable REJECT branch) rather than being left as an on-demand-only
+inspection endpoint. A full Decision Layer API surface ships at
+`/api/v1/intelligence/{insights,decisions,actions,outcomes,timeline,
+map}` (Signal and Recommendation deliberately stay at their existing
+Phase 5B paths rather than being duplicated — ADR-036), with adversarial
+tenant-isolation coverage at every new layer. Seven new ADRs
+(**ADR-031 through ADR-037**) record these decisions. Deliberately not
+built this revision, continuing Revision 5's posture: a dedicated
+Mission Control/Opportunity Map/Agent Control Center UI (API-first,
+same reasoning as R-33), single-subject-scoped (vs. project-scoped)
+incremental recalculation, and automatic Decision→Agent dispatch for an
+approved Decision (the primitives are real and tested; the bridge from
+a Decision's subject to the existing Opportunity-rooted content
+pipeline is real, deliberately-deferred follow-up work — R-37). No
+fabricated data anywhere in this layer — the E2E vertical slice
+continues to pass with zero regressions with the gate now genuinely
+enforced, proven by `tests/e2e/vertical-slice.test.ts` alongside five
+new Phase 6 test files covering the full real chain end to end.

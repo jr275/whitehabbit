@@ -78,6 +78,25 @@ Dataset (§20, ADR-024, `data_sources`/`datasets`/`dataset_versions`/
 `data_observations`), Role/Market as dedicated first-class tables (§14–15,
 ADR-024, `roles`/`markets`/`metric_definitions`/`metric_observations`).
 
+## Intelligence Decision Layer (Phase 6, brief's OBSERVE→DECIDE→ACT→LEARN loop — ADR-031..037)
+
+| Table | Columns | Notes |
+|---|---|---|
+| `intelligence_observations` | id, org_id, project_id, pattern, summary, signal_ids JSONB, confidence, status, source, correlation_key, created_at, updated_at, expires_at | the real Correlation Engine's output — a deterministic rule match over ≥1 real Signal rows, never itself a fact. `correlation_key` (`entity:<id>` \| `page:<id>` \| `market:<id>` \| `signal:<id>`, `migrations/0009`) is how the Decision Engine resolves a real subject without guessing. |
+| `intelligence_decisions` | id, org_id, project_id, action (16-value closed CHECK), subject_type, subject_id, reason, evidence_ids JSONB, expected_impact, estimated_cost JSONB, risk, confidence, priority, recommended_agent, required_approval, status, decided_by, decided_at, expires_at, created_at, updated_at | a real, explainable choice — every row states its own reason/evidence/cost/risk/confidence; "AI decided this" is never acceptable anywhere in this codebase. |
+| `intelligence_actions` | id, org_id, project_id, decision_id, agent_run_id, status, output JSONB, started_at, completed_at, created_at | deliberately references a real `agent_runs` row — never a second, parallel run-tracking table. |
+| `intelligence_outcomes` | id, org_id, project_id, action_id, metric, baseline, value, delta, confidence, evidence JSONB, measured_at, created_at | `delta` always server-computed (`value - baseline`), never client-supplied; `null` when no real baseline exists yet. |
+| `intelligence_relations` | id, org_id, subject_type, subject_id, node_type, node_id, relation, created_at | a NEW, generic cross-object graph edge, deliberately kept separate from the existing `opportunity_graph_edges` (ADR-031) — no `project_id` column yet (risks.md R-38). |
+| `agent_decision_logs` | id, org_id, agent_run_id, agent, decision, reason, evidence JSONB, policy, confidence, risk, approval_required, approved_by, created_at | real, append-only — the tactical "why did the agent do X right now" audit trail, distinct from the strategic `intelligence_decisions`. |
+| `score_calibrations` | id, org_id, project_id, model (closed union), subject_type, subject_id, predicted_value, actual_value, delta, outcome_id, computed_at | real predicted-vs-actual bookkeeping — infrastructure for future model training, not itself machine learning (ADR-034). |
+| `intelligence_event_queue` | id, org_id, project_id, event_type, subject_id, status, attempts, last_error, created_at, processed_at | durable companion to the real `pg_notify` trigger (`migrations/0010`) — guarantees every real invalidating change is eventually processed, never silently lost to a disconnected listener (ADR-033). |
+
+`Insight` (id, org_id, project_id, title, summary, category, confidence,
+signal_ids, created_at — `insights` table, Phase 5B) now has a real API
+surface (`GET/POST /api/v1/intelligence/insights`, ADR-036) but is not yet
+populated by any real detector — honestly empty until one exists, never
+seeded with fabricated rows to look active.
+
 ## Not yet modeled at all
 
 CommunitySignal (§21 — no real community-source integration exists),
