@@ -418,7 +418,16 @@ export async function onWorkflowFinalized(runId: string, orgId: string, status: 
   if (!row || (row.status !== "queued" && row.status !== "running")) return // no linked action, or already terminal — never re-terminalize
 
   if (status === "succeeded") {
-    const page = await queryOne<{ id: string }>("SELECT id FROM pages WHERE org_id = $1 AND opportunity_id = (SELECT subject_id FROM agent_runs WHERE id = $2)", [orgId, runId])
+    // both the outer query and the inner subquery are explicitly
+    // org-scoped — defense in depth: even though runId/orgId are
+    // already real, verified values from finalizeWorkflow()'s own
+    // caller, a subquery that forgot its own org_id filter would be a
+    // real, silent tenant-isolation gap the moment this function is
+    // ever called with a mismatched pair.
+    const page = await queryOne<{ id: string }>(
+      "SELECT id FROM pages WHERE org_id = $1 AND opportunity_id = (SELECT subject_id FROM agent_runs WHERE id = $2 AND org_id = $1)",
+      [orgId, runId],
+    )
     await completeAction(row.id, orgId, "succeeded", { pageId: page?.id ?? null })
     return
   }

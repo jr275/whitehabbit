@@ -11,6 +11,7 @@ import { NextResponse } from "next/server"
 import { ConflictError, NotFoundError, withApiHandler } from "@/lib/api-error"
 import { recordAudit } from "@/lib/db/repo"
 import { executeDecision, DecisionNotFoundError, DecisionNotApprovedError } from "@/lib/intelligence/action-executor"
+import { enforceRateLimit } from "@/lib/rate-limit"
 import { requireSession } from "@/lib/session"
 
 type Params = { params: Promise<{ id: string }> }
@@ -18,6 +19,7 @@ type Params = { params: Promise<{ id: string }> }
 export async function POST(_req: Request, { params }: Params) {
   return withApiHandler("v1.intelligence.decisions.execute", async () => {
     const { organizationId, userId } = await requireSession()
+    await enforceRateLimit("decision_execute", organizationId)
     const { id } = await params
 
     const { action, plan } = await executeDecision(id, organizationId).catch((err) => {

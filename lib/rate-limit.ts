@@ -18,6 +18,7 @@ export const RATE_LIMITS = {
   opportunity_generate: { limit: 10, windowMs: 60_000 }, // triggers a real LLM call (Writer step)
   page_publish: { limit: 30, windowMs: 60_000 },
   merge_candidate_review: { limit: 60, windowMs: 60_000 },
+  decision_execute: { limit: 10, windowMs: 60_000 }, // Phase 7 — can dispatch a real workflow/LLM call, same tightness as opportunity_generate
 } as const
 
 export async function enforceRateLimit(scope: keyof typeof RATE_LIMITS, subject: string): Promise<void> {
