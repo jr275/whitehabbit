@@ -23,6 +23,11 @@ export interface IntelligenceObservation {
   confidence: number
   status: ObservationStatus
   source: string
+  /** the real correlation key the underlying signals were grouped by
+   * (lib/intelligence/correlation-engine.ts's correlationKeyFor()) —
+   * 'entity:<id>' | 'page:<id>' | 'market:<id>' | 'signal:<id>'. Lets
+   * the Decision Engine resolve a real subject without guessing. */
+  correlationKey: string | null
   createdAt: number
   updatedAt: number
   expiresAt: number | null
@@ -38,6 +43,7 @@ interface ObservationRow {
   confidence: number
   status: ObservationStatus
   source: string
+  correlation_key: string | null
   created_at: string
   updated_at: string
   expires_at: string | null
@@ -54,6 +60,7 @@ function rowToObservation(r: ObservationRow): IntelligenceObservation {
     confidence: r.confidence,
     status: r.status,
     source: r.source,
+    correlationKey: r.correlation_key,
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
     expiresAt: r.expires_at ? Number(r.expires_at) : null,
@@ -68,14 +75,15 @@ export async function createObservation(input: {
   signalIds: string[]
   confidence: number
   source?: string
+  correlationKey?: string | null
   expiresAt?: number | null
 }): Promise<IntelligenceObservation> {
   const id = `obs_${randomUUID()}`
   const now = Date.now()
   await query(
-    `INSERT INTO intelligence_observations (id, org_id, project_id, pattern, summary, signal_ids, confidence, status, source, created_at, updated_at, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, $9, $9, $10)`,
-    [id, input.orgId, input.projectId, input.pattern, input.summary, JSON.stringify(input.signalIds), input.confidence, input.source ?? "correlation_engine", now, input.expiresAt ?? null],
+    `INSERT INTO intelligence_observations (id, org_id, project_id, pattern, summary, signal_ids, confidence, status, source, correlation_key, created_at, updated_at, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, $9, $10, $10, $11)`,
+    [id, input.orgId, input.projectId, input.pattern, input.summary, JSON.stringify(input.signalIds), input.confidence, input.source ?? "correlation_engine", input.correlationKey ?? null, now, input.expiresAt ?? null],
   )
   return (await getObservation(id, input.orgId))!
 }

@@ -60,7 +60,7 @@ export async function createAction(input: { orgId: string; projectId: string; de
   const status = input.status ?? "queued"
   await query(
     `INSERT INTO intelligence_actions (id, org_id, project_id, decision_id, agent_run_id, status, started_at, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [id, input.orgId, input.projectId, input.decisionId, input.agentRunId ?? null, status, status === "running" ? now : null, now],
   )
   return (await getAction(id, input.orgId))!
