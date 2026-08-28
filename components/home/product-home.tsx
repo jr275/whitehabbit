@@ -1,89 +1,411 @@
 "use client"
 
+/* ================================================================== *
+ * SEO INTELLIGENCE OVERVIEW (Phase UX-2) — the homepage, rebuilt around
+ * docs/product-experience-reset.md's product thesis: this is a
+ * programmatic SEO intelligence + contextual page generation platform,
+ * not an AI workforce console. Every number and row on this page is
+ * real, already-persisted data read from existing APIs
+ * (lib/intelligence/mission.ts#buildMissionSnapshot(), /api/opportunities,
+ * /api/pages, /api/projects/:id/websites) — nothing here is mocked,
+ * hardcoded, or a fabricated statistic. A metric with no real data yet
+ * renders as an honest empty state that explains what's missing and
+ * what to do next, never a fake zero standing in for "unmeasured."
+ *
+ * Replaces the previous "AI workforce operations" framing (Workers,
+ * Runs, Outputs, Events from lib/workforce/store.ts) entirely on this
+ * page. That store and every page that still uses it are untouched —
+ * this file alone stops reading it.
+ * ================================================================== */
+
 import {
-  Activity,
   ArrowRight,
-  Bot,
-  CheckCircle2,
+  ArrowUpRight,
   CircleAlert,
   Clock3,
-  Factory,
-  FileOutput,
+  Compass,
+  FileText,
   Gauge,
-  Plus,
-  ShieldAlert,
-  Workflow,
+  Globe,
+  Sparkles,
+  Target,
 } from "lucide-react"
-import { useSession } from "next-auth/react"
 import Link from "next/link"
-import { useEffect, useMemo } from "react"
+import { useEffect, useState } from "react"
 import { TopNav } from "@/components/studio/top-nav"
-import { useWorkforce, workforceStore } from "@/lib/workforce/store"
+import type { MissionSnapshot, NextAction } from "@/lib/intelligence/mission"
+import type { Opportunity } from "@/lib/opportunity/model"
+import type { Page } from "@/lib/pages/model"
+import type { Website } from "@/lib/websites/model"
 
-const ACTIVE = new Set(["queued", "running", "pending_approval"])
-
-export function ProductHome() {
-  const { status } = useSession()
-  const state = useWorkforce()
-  useEffect(() => { if (status === "authenticated") void workforceStore.hydrate() }, [status])
-
-  const recentEvents = useMemo(() => [...state.events].sort((a, b) => b.timestamp - a.timestamp).slice(0, 7), [state.events])
-  const recentOutputs = useMemo(() => [...state.outputs].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5), [state.outputs])
-  const activeRuns = state.executions.filter((item) => ACTIVE.has(item.status))
-  const completed = state.executions.filter((item) => item.status === "completed")
-  const issues = state.executions.filter((item) => item.status === "failed" || item.status === "blocked" || item.status === "pending_approval")
-  const successRate = state.executions.length ? Math.round((completed.length / state.executions.length) * 100) : null
-  const taskById = new Map(state.tasks.map((task) => [task.id, task]))
-  const workerById = new Map(state.workers.map((worker) => [worker.id, worker]))
-
-  return <div className="min-h-dvh bg-background text-foreground"><TopNav /><main id="main-content" className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-    <header className="flex flex-col gap-5 border-b border-border pb-6 lg:flex-row lg:items-end lg:justify-between">
-      <div><p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">Workspace overview</p><h1 className="mt-2 text-balance text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">AI workforce operations</h1><p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">Monitor live work, resolve operating issues, and move from a business objective to a released Worker.</p></div>
-      <div className="flex flex-wrap gap-2"><Link href="/factory" className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-xs font-medium text-primary-foreground"><Plus className="size-3.5" />New Worker</Link><Link href="/studio" className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-card px-4 text-xs font-medium text-foreground"><Workflow className="size-3.5" />Open Studio</Link></div>
-    </header>
-
-    {!state.hydrated ? <StatePanel icon={Clock3} title="Loading workspace" body="Reading Workers, runs, and outputs from the authenticated organization ledger." /> : state.notice ? <StatePanel icon={CircleAlert} title="Workspace unavailable" body={state.notice} /> : state.workers.length === 0 ? <FirstRun /> : <>
-      <section aria-label="Workforce metrics" className="mt-6 grid overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-5 lg:gap-px">
-        <Metric label="Workers" value={state.workers.length} detail={`${state.workers.filter((item) => item.status === "live").length} live`} />
-        <Metric label="Active runs" value={activeRuns.length} detail="Queued, running, approval" />
-        <Metric label="Outputs" value={state.outputs.length} detail="Persisted artifacts" />
-        <Metric label="Success rate" value={successRate == null ? "—" : `${successRate}%`} detail={`${state.executions.length} total runs`} />
-        <Metric label="Issues" value={issues.length} detail="Blocked, failed, approval" tone={issues.length ? "warn" : "normal"} />
-      </section>
-
-      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,.75fr)]">
-        <div className="flex flex-col gap-6">
-          <Panel title="Active work" eyebrow="Run queue" href="/outputs">
-            {activeRuns.length ? <div className="divide-y divide-border">{activeRuns.slice(0, 6).map((run) => <Link href="/outputs" key={run.id} className="flex items-center gap-4 px-4 py-3.5 hover:bg-secondary/40"><RunState status={run.status} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{taskById.get(run.taskId)?.title ?? "Untitled execution"}</p><p className="mt-1 truncate text-xs text-muted-foreground">{workerById.get(run.workerId)?.identity.name ?? "Worker"}</p></div><span className="hidden font-mono text-[9px] text-muted-foreground sm:block">{new Date(run.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span><ArrowRight className="size-3.5 text-muted-foreground" /></Link>)}</div> : <InlineEmpty icon={CheckCircle2} title="No active runs" body="Your workforce is currently idle." />}
-          </Panel>
-
-          <Panel title="Workers" eyebrow="Deployed capacity" href="/workforce">
-            <div className="divide-y divide-border">{state.workers.slice(0, 5).map((worker) => { const runs = state.executions.filter((run) => run.workerId === worker.id); const latest = [...runs].sort((a, b) => b.startedAt - a.startedAt)[0]; return <Link href={`/workforce/${worker.id}`} key={worker.id} className="grid gap-3 px-4 py-4 hover:bg-secondary/40 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"><div className="min-w-0"><div className="flex items-center gap-2"><span className="flex size-7 items-center justify-center rounded-md bg-primary/10 text-primary"><Bot className="size-3.5" /></span><p className="truncate text-sm font-medium">{worker.identity.name}</p><span className="font-mono text-[9px] uppercase text-grow">{worker.status}</span></div><p className="mt-2 truncate text-xs text-muted-foreground">{worker.mission || "Mission not configured"}</p></div><div className="font-mono text-[9px] uppercase text-muted-foreground">{runs.length} runs · {worker.skills.filter((skill) => skill.enabled).length} skills</div><div className="font-mono text-[9px] uppercase text-muted-foreground">{latest ? latest.status.replaceAll("_", " ") : "No runs"}</div></Link> })}</div>
-          </Panel>
-        </div>
-
-        <div className="flex flex-col gap-6">
-          <Panel title="Needs attention" eyebrow="Operating issues" href="/approvals">
-            {issues.length ? <div className="divide-y divide-border">{issues.slice(0, 5).map((run) => <Link href={run.status === "pending_approval" ? "/approvals" : "/outputs"} key={run.id} className="block px-4 py-3.5 hover:bg-secondary/40"><div className="flex items-center justify-between gap-3"><RunState status={run.status} /><span className="font-mono text-[9px] text-muted-foreground">{new Date(run.startedAt).toLocaleDateString()}</span></div><p className="mt-2 truncate text-sm font-medium">{taskById.get(run.taskId)?.title ?? "Execution issue"}</p><p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{run.blockedReason ?? (run.reasonCode ? run.reasonCode.replaceAll("_", " ") : "Review execution evidence.")}</p></Link>)}</div> : <InlineEmpty icon={ShieldAlert} title="No open issues" body="No blocked, failed, or approval-gated work." />}
-          </Panel>
-
-          <Panel title="Recent outputs" eyebrow="Persisted artifacts" href="/outputs">
-            {recentOutputs.length ? <div className="divide-y divide-border">{recentOutputs.map((output) => <Link href="/outputs" key={output.id} className="flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40"><FileOutput className="size-4 text-primary" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{output.title || output.type.replaceAll("_", " ")}</p><p className="mt-1 font-mono text-[9px] uppercase text-muted-foreground">{output.type.replaceAll("_", " ")}</p></div><span className="font-mono text-[9px] text-muted-foreground">{new Date(output.createdAt).toLocaleDateString()}</span></Link>)}</div> : <InlineEmpty icon={FileOutput} title="No outputs yet" body="Outputs appear after a Worker completes real work." />}
-          </Panel>
-
-          <Panel title="Recent events" eyebrow="Organization ledger" href="/observatory">
-            {recentEvents.length ? <div className="divide-y divide-border">{recentEvents.map((event) => <div key={event.id} className="flex items-center gap-3 px-4 py-3"><Activity className="size-3.5 text-primary" /><span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{event.type.replaceAll("_", " ")}</span><span className="font-mono text-[9px] text-muted-foreground">{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></div>)}</div> : <InlineEmpty icon={Activity} title="No events yet" body="Execution events will stream here." />}
-          </Panel>
-        </div>
-      </div>
-    </>}
-  </main></div>
+interface HomeData {
+  snapshot: MissionSnapshot
+  projectId: string
+  nextAction: NextAction | null
+  opportunities: Opportunity[]
+  pages: Page[]
+  websites: Website[]
 }
 
-function Metric({ label, value, detail, tone = "normal" }: { label: string; value: string | number; detail: string; tone?: "normal" | "warn" }) { return <div className="bg-card px-4 py-4"><p className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">{label}</p><p className={`mt-2 text-2xl font-semibold tabular-nums ${tone === "warn" ? "text-warn" : "text-foreground"}`}>{value}</p><p className="mt-1 text-[11px] text-muted-foreground">{detail}</p></div> }
-function RunState({ status }: { status: string }) { const tone = status === "completed" ? "text-grow" : status === "failed" ? "text-destructive" : status === "blocked" || status === "pending_approval" ? "text-warn" : "text-primary"; return <span className={`shrink-0 font-mono text-[9px] uppercase tracking-[0.12em] ${tone}`}>{status.replaceAll("_", " ")}</span> }
-function Panel({ title, eyebrow, href, children }: { title: string; eyebrow: string; href: string; children: React.ReactNode }) { return <section className="overflow-hidden rounded-xl border border-border bg-card/70"><header className="flex items-end justify-between gap-4 border-b border-border px-4 py-3.5"><div><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">{eyebrow}</p><h2 className="mt-1 text-sm font-semibold">{title}</h2></div><Link href={href} className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">View all <ArrowRight className="size-3" /></Link></header>{children}</section> }
-function InlineEmpty({ icon: Icon, title, body }: { icon: typeof Activity; title: string; body: string }) { return <div className="flex items-start gap-3 px-4 py-6"><Icon className="mt-0.5 size-4 text-primary" /><div><p className="text-sm font-medium">{title}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{body}</p></div></div> }
-function StatePanel({ icon: Icon, title, body }: { icon: typeof Activity; title: string; body: string }) { return <div className="mt-8 flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 p-8 text-center"><Icon className="size-5 text-primary" /><p className="mt-4 text-sm font-semibold">{title}</p><p className="mt-2 max-w-lg text-xs leading-relaxed text-muted-foreground">{body}</p></div> }
-function FirstRun() { return <section className="mt-8 overflow-hidden rounded-xl border border-border bg-card"><div className="border-b border-border px-5 py-6 sm:px-7"><p className="font-mono text-[9px] uppercase tracking-[0.2em] text-primary">Empty organization ledger</p><h2 className="mt-2 text-xl font-semibold">Deploy your first Worker</h2><p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">Start with a business objective, review the generated blueprint, configure capabilities, then build and release a real version.</p></div><div className="grid md:grid-cols-3"><FirstStep icon={Factory} title="1. Define the objective" body="Turn an operational goal into a Worker blueprint." href="/factory" /><FirstStep icon={Workflow} title="2. Configure and build" body="Set skills, tools, knowledge, behavior, and release policy." href="/studio" /><FirstStep icon={Gauge} title="3. Run and observe" body="Execute real work and inspect persisted evidence." href="/observatory" /></div></section> }
-function FirstStep({ icon: Icon, title, body, href }: { icon: typeof Activity; title: string; body: string; href: string }) { return <Link href={href} className="border-b border-border p-5 last:border-b-0 hover:bg-secondary/40 md:border-b-0 md:border-r md:last:border-r-0"><Icon className="size-4 text-primary" /><p className="mt-5 text-sm font-semibold">{title}</p><p className="mt-2 text-xs leading-relaxed text-muted-foreground">{body}</p><span className="mt-5 inline-flex items-center gap-1 text-xs text-primary">Open <ArrowRight className="size-3" /></span></Link> }
+const RISK_TONE: Record<string, string> = { low: "text-grow", medium: "text-warn", high: "text-destructive", critical: "text-destructive" }
+
+const DISCOVERY_COPY: Record<Website["discoveryStatus"], string> = {
+  pending: "queued to begin",
+  discovering: "mapping your site's structure",
+  discovered: "structure mapped — extracting entities",
+  crawling: "reading your pages",
+  crawled: "pages read — analyzing content",
+  analyzing: "identifying entities, markets, and intent",
+  ready: "analysis complete",
+  failed: "ran into a problem",
+}
+
+export function ProductHome() {
+  const [data, setData] = useState<HomeData | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function load() {
+    try {
+      const missionRes = await fetch("/api/v1/intelligence/mission")
+      if (!missionRes.ok) throw new Error((await missionRes.json().catch(() => null))?.error ?? "Could not load your SEO intelligence overview.")
+      const missionBody = await missionRes.json()
+      const projectId: string = missionBody.projectId
+
+      const [nextActionRes, oppRes, pagesRes, websitesRes] = await Promise.all([
+        fetch("/api/v1/intelligence/next-action"),
+        fetch("/api/opportunities"),
+        fetch("/api/pages"),
+        fetch(`/api/projects/${projectId}/websites`),
+      ])
+      const nextAction = nextActionRes.ok ? (await nextActionRes.json()).nextAction : null
+      const opportunities: Opportunity[] = oppRes.ok ? (await oppRes.json()).opportunities : []
+      const pages: Page[] = pagesRes.ok ? (await pagesRes.json()).pages : []
+      const websites: Website[] = websitesRes.ok ? (await websitesRes.json()).websites : []
+
+      setData({ snapshot: missionBody.snapshot, projectId, nextAction, opportunities, pages, websites })
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load your SEO intelligence overview.")
+    }
+  }
+
+  useEffect(() => {
+    void load()
+  }, [])
+
+  return (
+    <div className="min-h-dvh bg-background text-foreground">
+      <TopNav />
+      <main id="main-content" className="mx-auto max-w-[1100px] px-5 py-10 sm:px-8 lg:py-14">
+        {error ? (
+          <StatePanel icon={CircleAlert} title="Could not load your overview" body={error} />
+        ) : !data ? (
+          <StatePanel icon={Clock3} title="Reading your SEO intelligence" body="Loading real, current data for your organization." />
+        ) : data.websites.length === 0 ? (
+          <FirstRunState />
+        ) : data.snapshot.knowledgeAuthority.entityCount === 0 && data.opportunities.length === 0 ? (
+          <DiscoveringState websites={data.websites} />
+        ) : (
+          <Overview data={data} onActed={load} />
+        )}
+      </main>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------- *
+ * FIRST RUN — no website connected yet. The next action is a
+ * single, obvious CTA into the real website-connect flow already
+ * built at /websites; this page does not duplicate that form.
+ * -------------------------------------------------------------- */
+function FirstRunState() {
+  return (
+    <div>
+      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">SEO Intelligence</p>
+      <h1 className="mt-3 text-balance text-4xl font-semibold tracking-[-0.03em] sm:text-5xl">Discover what should exist on your site — before you build it</h1>
+      <p className="mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-muted-foreground">
+        Connect a website and this platform reads your market, your entities, and real search demand — then tells you exactly which pages are worth creating, and why.
+      </p>
+      <Link href="/websites" className="mt-7 inline-flex h-10 items-center gap-2 rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90">
+        Connect your website <ArrowRight className="size-4" />
+      </Link>
+
+      <div className="mt-16 grid gap-8 border-t border-border pt-10 sm:grid-cols-3">
+        <FirstRunStep index={1} icon={Globe} title="Connect" body="Point the platform at your website. Nothing is crawled until you say so." />
+        <FirstRunStep index={2} icon={Compass} title="Discover" body="Real entities, markets, and search intent are mapped from your site and its market — turned into scored, explainable opportunities." />
+        <FirstRunStep index={3} icon={Sparkles} title="Create" body="Turn a real opportunity into a contextual page — researched, written, optimized, and measured." />
+      </div>
+    </div>
+  )
+}
+
+function FirstRunStep({ index, icon: Icon, title, body }: { index: number; icon: typeof Globe; title: string; body: string }) {
+  return (
+    <div>
+      <div className="flex items-center gap-2.5">
+        <span className="flex size-7 items-center justify-center rounded-full border border-border font-mono text-[11px] text-muted-foreground">{index}</span>
+        <Icon className="size-4 text-primary" />
+      </div>
+      <p className="mt-3.5 text-sm font-semibold">{title}</p>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{body}</p>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------- *
+ * DISCOVERING — a website is connected but real discovery hasn't
+ * produced entities or opportunities yet. Shows each real website's
+ * own real discoveryStatus, never a generic spinner with no state.
+ * -------------------------------------------------------------- */
+function DiscoveringState({ websites }: { websites: Website[] }) {
+  return (
+    <div>
+      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">SEO Intelligence</p>
+      <h1 className="mt-3 text-balance text-4xl font-semibold tracking-[-0.03em] sm:text-5xl">Reading your market</h1>
+      <p className="mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-muted-foreground">Once discovery finishes, real opportunities will appear here — scored and explained, ready to review.</p>
+
+      <div className="mt-10 flex flex-col gap-3">
+        {websites.map((site) => (
+          <Link key={site.id} href={`/websites/${site.id}`} className="flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-5 py-4 transition-colors hover:border-primary/40">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{site.hostname}</p>
+              <p className="mt-1 text-[13px] text-muted-foreground">{site.discoveryStatus === "failed" ? <span className="text-destructive">Discovery {DISCOVERY_COPY.failed} — {site.discoveryError ?? "see details"}</span> : `Discovery: ${DISCOVERY_COPY[site.discoveryStatus]}`}</p>
+            </div>
+            <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+          </Link>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------- *
+ * POPULATED OVERVIEW — the six-level hierarchy from the brief:
+ * SEO signal -> opportunities -> what to do next -> pages ->
+ * performance -> evidence/detail.
+ * -------------------------------------------------------------- */
+function Overview({ data, onActed }: { data: HomeData; onActed: () => void }) {
+  const { snapshot, opportunities, pages } = data
+  const readyOpportunities = opportunities.filter((o) => o.status === "discovered" || o.status === "qualified")
+  const topOpportunities = [...opportunities].sort((a, b) => (b.finalScore ?? -1) - (a.finalScore ?? -1)).slice(0, 5)
+  const recentPages = [...pages].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5)
+
+  return (
+    <div className="flex flex-col gap-14">
+      {/* LEVEL 1 — the real signal, the aha moment */}
+      <header>
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">SEO Intelligence</p>
+        <h1 className="mt-3 text-balance text-4xl font-semibold tracking-[-0.03em] sm:text-5xl">What your search landscape is telling you</h1>
+        <p className="mt-4 max-w-2xl text-pretty text-[15px] leading-relaxed text-muted-foreground">
+          <strong className="font-semibold text-foreground">{opportunities.length} real opportunit{opportunities.length === 1 ? "y" : "ies"}</strong> discovered across{" "}
+          <strong className="font-semibold text-foreground">{snapshot.knowledgeAuthority.entityCount} tracked entit{snapshot.knowledgeAuthority.entityCount === 1 ? "y" : "ies"}</strong>
+          {readyOpportunities.length > 0 && (
+            <>
+              {" "}— <strong className="font-semibold text-foreground">{readyOpportunities.length}</strong> {readyOpportunities.length === 1 ? "is" : "are"} ready for you to review.
+            </>
+          )}
+        </p>
+      </header>
+
+      {/* LEVEL 3 — what to do next (surfaced early: this is the most important single component) */}
+      {data.nextAction && <NextActionPanel nextAction={data.nextAction} onActed={onActed} />}
+
+      {/* LEVEL 2 — opportunities */}
+      <section>
+        <SectionHeader eyebrow="Opportunity" title="What's worth creating" href={opportunities.length > 0 ? "/opportunities" : undefined} />
+        {topOpportunities.length === 0 ? (
+          <EmptyNote icon={Target} title="No opportunities discovered yet" body="Real opportunities appear here once discovery finishes analyzing your market." />
+        ) : (
+          <div className="mt-4 flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
+            {topOpportunities.map((o) => <OpportunityRow key={o.id} opportunity={o} />)}
+          </div>
+        )}
+      </section>
+
+      {/* LEVEL 4 — pages / generation */}
+      <section>
+        <SectionHeader eyebrow="Generation" title="What's being created" />
+        {recentPages.length === 0 ? (
+          <EmptyNote icon={FileText} title="No pages created yet" body="Once you act on an opportunity, its real, generated page — researched, written, and optimized — will appear here." />
+        ) : (
+          <>
+            <p className="text-[13px] text-muted-foreground">
+              {snapshot.pageIntelligence.pageCount} page{snapshot.pageIntelligence.pageCount === 1 ? "" : "s"} created · {snapshot.pageIntelligence.publishedCount} live
+              {snapshot.pageIntelligence.avgQualityScore != null && <> · avg. quality {snapshot.pageIntelligence.avgQualityScore}</>}
+            </p>
+            <div className="mt-4 flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
+              {recentPages.map((p) => <PageRow key={p.id} page={p} />)}
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* LEVEL 5 — performance */}
+      <section>
+        <SectionHeader eyebrow="Performance" title="Is it working" />
+        {snapshot.organicGrowth ? (
+          <div className="mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-3">
+            <PerformanceTile label="Search clicks" value={snapshot.organicGrowth.totalClicks.toLocaleString()} detail={`${snapshot.organicGrowth.snapshotDays}-day window`} />
+            <PerformanceTile label="Search impressions" value={snapshot.organicGrowth.totalImpressions.toLocaleString()} detail="Google Search Console" />
+            <PerformanceTile label="AI citations" value={snapshot.aiVisibility.citationCount.toLocaleString()} detail={`${snapshot.aiVisibility.answerCount} AI answers checked`} />
+          </div>
+        ) : (
+          <EmptyNote icon={Gauge} title="Performance not measured yet" body="Connect Google Search Console (Integrations) to see real clicks, impressions, and ranking movement once your pages are live." />
+        )}
+      </section>
+
+      {/* LEVEL 6 — evidence / detail, de-emphasized */}
+      <footer className="border-t border-border pt-6">
+        <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">Evidence</p>
+        <div className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-[12.5px] text-muted-foreground">
+          <span>{snapshot.knowledgeAuthority.entityCount} entities tracked{snapshot.knowledgeAuthority.entitiesWithEvidencePct != null && <> · {snapshot.knowledgeAuthority.entitiesWithEvidencePct}% with real evidence</>}</span>
+          <span>{snapshot.marketMomentum.risingTrendCount} of {snapshot.marketMomentum.totalTrendCount} tracked trends rising</span>
+          {snapshot.informationGain.sampleCount > 0 && <span>{snapshot.informationGain.sampleCount} pages passed the information-gain check{snapshot.informationGain.blockedCount > 0 && <>, {snapshot.informationGain.blockedCount} blocked for thin content</>}</span>}
+        </div>
+      </footer>
+    </div>
+  )
+}
+
+function SectionHeader({ eyebrow, title, href }: { eyebrow: string; title: string; href?: string }) {
+  return (
+    <div className="flex items-end justify-between gap-4">
+      <div>
+        <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">{eyebrow}</p>
+        <h2 className="mt-1 text-xl font-semibold tracking-[-0.01em]">{title}</h2>
+      </div>
+      {href && (
+        <Link href={href} className="flex shrink-0 items-center gap-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground">
+          View all <ArrowRight className="size-3.5" />
+        </Link>
+      )}
+    </div>
+  )
+}
+
+function OpportunityRow({ opportunity }: { opportunity: Opportunity }) {
+  return (
+    <Link href="/opportunities" className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-secondary/40">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{opportunity.title}</p>
+        <p className="mt-1 truncate text-[12.5px] text-muted-foreground">
+          {opportunity.topic}
+          {opportunity.targetIntent && <> · {opportunity.targetIntent}</>}
+        </p>
+      </div>
+      <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">{opportunity.status.replaceAll("_", " ")}</span>
+      <span className="w-14 shrink-0 text-right">
+        <span className="block font-mono text-sm tabular-nums text-foreground">{opportunity.finalScore != null ? Math.round(opportunity.finalScore) : "—"}</span>
+        <span className="block font-mono text-[8px] uppercase tracking-[0.08em] text-muted-foreground">score</span>
+      </span>
+    </Link>
+  )
+}
+
+const PAGE_STATUS_TONE: Record<Page["status"], string> = { draft: "text-muted-foreground", quality_rejected: "text-destructive", ready: "text-warn", published: "text-grow" }
+
+function PageRow({ page }: { page: Page }) {
+  return (
+    <Link href={`/pages/${page.id}`} className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-secondary/40">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{page.title ?? page.slug}</p>
+        <p className="mt-1 truncate text-[12.5px] text-muted-foreground">/{page.slug}</p>
+      </div>
+      <span className={`shrink-0 font-mono text-[9px] uppercase tracking-[0.1em] ${PAGE_STATUS_TONE[page.status]}`}>{page.status.replaceAll("_", " ")}</span>
+      {page.qualityScore != null && (
+        <span className="w-14 shrink-0 text-right">
+          <span className="block font-mono text-sm tabular-nums text-foreground">{Math.round(page.qualityScore)}</span>
+          <span className="block font-mono text-[8px] uppercase tracking-[0.08em] text-muted-foreground">quality</span>
+        </span>
+      )}
+    </Link>
+  )
+}
+
+function PerformanceTile({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="bg-card px-5 py-4">
+      <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
+      <p className="mt-2 text-2xl font-semibold tabular-nums tracking-[-0.02em]">{value}</p>
+      <p className="mt-1 text-[11.5px] text-muted-foreground">{detail}</p>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------- *
+ * NEXT ACTION — the single most important component (§5 of the
+ * brief). Real Decision -> real ActionPlan -> real PolicyEngine
+ * read, and Approve & Execute drives the same real
+ * decisions/:id -> decisions/:id/execute chain the rest of the app
+ * uses — never a mock interaction.
+ * -------------------------------------------------------------- */
+function NextActionPanel({ nextAction, onActed }: { nextAction: NextAction; onActed: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const { decision, plan, policy } = nextAction
+
+  async function approveAndExecute() {
+    setBusy(true)
+    setError(null)
+    try {
+      const decideRes = await fetch(`/api/v1/intelligence/decisions/${decision.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "approved" }) })
+      if (!decideRes.ok) throw new Error((await decideRes.json().catch(() => null))?.error ?? "Approval failed.")
+      const execRes = await fetch(`/api/v1/intelligence/decisions/${decision.id}/execute`, { method: "POST" })
+      if (!execRes.ok) throw new Error((await execRes.json().catch(() => null))?.error ?? "Execution failed.")
+      onActed()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Action failed.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="rounded-xl border border-primary/25 bg-card px-6 py-6 sm:px-7">
+      <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">What to do next</p>
+      <h2 className="mt-2 text-xl font-semibold tracking-[-0.01em]">{decision.action.replaceAll("_", " ")}</h2>
+      <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-muted-foreground">{decision.reason}</p>
+      <p className="mt-3 text-[13px] leading-relaxed text-muted-foreground">{decision.expectedImpact}</p>
+
+      <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-[12.5px] text-muted-foreground">
+        <span>Confidence <strong className="font-medium text-foreground">{Math.round(decision.confidence * 100)}%</strong></span>
+        <span>Risk <strong className={`font-medium capitalize ${RISK_TONE[decision.risk]}`}>{decision.risk}</strong></span>
+        <span>Based on <strong className="font-medium text-foreground">{decision.evidenceIds.length}</strong> real signal{decision.evidenceIds.length === 1 ? "" : "s"}</span>
+      </div>
+
+      {plan.status === "unsupported" ? (
+        <p className="mt-5 text-[13px] text-warn">Not yet automatable: {plan.unsupportedReason}</p>
+      ) : (
+        <div className="mt-5 flex items-center gap-3">
+          <button onClick={approveAndExecute} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
+            {busy ? "Working…" : "Approve & create"} <ArrowUpRight className="size-3.5" />
+          </button>
+          {!policy.allowed && <span className="text-[12.5px] text-muted-foreground">{policy.reason}</span>}
+        </div>
+      )}
+      {error && <p className="mt-3 flex items-center gap-2 text-[12.5px] text-destructive"><CircleAlert className="size-3.5 shrink-0" /> {error}</p>}
+    </section>
+  )
+}
+
+function EmptyNote({ icon: Icon, title, body }: { icon: typeof Target; title: string; body: string }) {
+  return (
+    <div className="mt-4 flex items-start gap-3 rounded-xl border border-dashed border-border px-5 py-6">
+      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <div>
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{body}</p>
+      </div>
+    </div>
+  )
+}
+
+function StatePanel({ icon: Icon, title, body }: { icon: typeof Target; title: string; body: string }) {
+  return (
+    <div className="mt-8 flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 p-8 text-center">
+      <Icon className="size-5 text-primary" />
+      <p className="mt-4 text-sm font-semibold">{title}</p>
+      <p className="mt-2 max-w-lg text-[13px] leading-relaxed text-muted-foreground">{body}</p>
+    </div>
+  )
+}
