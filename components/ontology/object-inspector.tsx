@@ -60,9 +60,14 @@ interface InspectorContentProps {
   stack: Ref[]
   setStack: (s: Ref[]) => void
   onClose: () => void
+  /** Rótulo real do botão de fechar/reset — Mission Control o
+   * reaproveita como "Voltar ao foco padrão" (o foco nunca fica
+   * realmente vazio ali); o padrão "Fechar inspetor" continua valendo
+   * onde o Inspector é de fato um overlay que se fecha. */
+  closeLabel?: string
 }
 
-function InspectorContent({ stack, setStack, onClose }: InspectorContentProps) {
+function InspectorContent({ stack, setStack, onClose, closeLabel = "Fechar inspetor" }: InspectorContentProps) {
   const current = stack[stack.length - 1]
   const [detail, setDetail] = useState<ObjectDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -107,7 +112,7 @@ function InspectorContent({ stack, setStack, onClose }: InspectorContentProps) {
           </button>
         )}
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">{stack.map((s) => s.id).join(" › ")}</span>
-        <button onClick={onClose} aria-label="Fechar inspetor" className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground">
+        <button onClick={onClose} aria-label={closeLabel} className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground">
           <X className="size-4" />
         </button>
       </header>
@@ -259,13 +264,13 @@ function InspectorContent({ stack, setStack, onClose }: InspectorContentProps) {
   )
 }
 
-export function ObjectInspector({ stack, setStack, onClose, variant = "overlay" }: InspectorContentProps & { variant?: "overlay" | "docked" }) {
+export function ObjectInspector({ stack, setStack, onClose, closeLabel, variant = "overlay" }: InspectorContentProps & { variant?: "overlay" | "docked" }) {
   if (stack.length === 0) return null
 
   if (variant === "docked") {
     return (
-      <aside role="region" aria-label="Inspetor de objeto" className="flex h-full w-full flex-col overflow-hidden border-l border-border bg-popover">
-        <InspectorContent stack={stack} setStack={setStack} onClose={onClose} />
+      <aside role="region" aria-label="Foco" className="flex h-full w-full flex-col overflow-hidden bg-card">
+        <InspectorContent stack={stack} setStack={setStack} onClose={onClose} closeLabel={closeLabel} />
       </aside>
     )
   }
@@ -279,7 +284,7 @@ export function ObjectInspector({ stack, setStack, onClose, variant = "overlay" 
         className="flex h-[88dvh] w-full flex-col overflow-hidden rounded-t-xl border-t border-border bg-popover shadow-2xl sm:h-full sm:max-w-md sm:rounded-none sm:border-l sm:border-t-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <InspectorContent stack={stack} setStack={setStack} onClose={onClose} />
+        <InspectorContent stack={stack} setStack={setStack} onClose={onClose} closeLabel={closeLabel} />
       </aside>
     </div>
   )
