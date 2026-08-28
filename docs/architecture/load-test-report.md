@@ -20,11 +20,11 @@ below, not hand-written estimates. Run again after any change to
 | Metric | Value |
 |---|---|
 | Backlog size | 4000 jobs |
-| Tick p50 latency | 6.3ms |
-| Tick p95 latency | 10.4ms |
-| Tick p99 latency | 10.4ms |
+| Tick p50 latency | 8.1ms |
+| Tick p95 latency | 14.7ms |
+| Tick p99 latency | 14.7ms |
 | Jobs (steps) admitted per tick | 10 |
-| Implied throughput (p50-based) | ~1595.1 jobs/sec per worker tick |
+| Implied throughput (p50-based) | ~1233.4 jobs/sec per worker tick |
 
 ## Before/after: what Phase 5A's step-level queueing actually costs and buys (§45)
 
@@ -54,7 +54,7 @@ This is the real, named cost of Objective A, not a hidden regression.
 
 Target: 10 tenants / 100 projects / 10,000 opportunities / 100,000 pages / 1,000,000 workflow events.
 
-- At the measured ~1595.1 jobs/sec/tick, and
+- At the measured ~1233.4 jobs/sec/tick, and
   7 step jobs needed per completed page
   (Phase 5A — up from 1 whole-pipeline job in Phase 4), draining a backlog
   large enough to produce 100,000 pages would need on the
@@ -73,12 +73,41 @@ Target: 10 tenants / 100 projects / 10,000 opportunities / 100,000 pages / 1,000
   per-write, not backlog-dependent, so it does not compound with queue
   depth the way dequeue latency does.
 
+## Real-Time Intelligence Event Queue (Phase 6E, ADR-032/033)
+
+- **4000 pending rows** seeded into `intelligence_event_queue`
+  (migrations/0010) across the same 10 tenants, real rows.
+- **20 claim ticks**, each the exact `FOR UPDATE SKIP LOCKED`
+  claim + mark-processed shape
+  `lib/intelligence/recalc-worker.ts#processIntelligenceEventQueue()` uses
+  — deliberately excludes real signal-engine detector execution cost
+  (data-dependent, not backlog-dependent; covered separately by
+  `tests/integration/intelligence-recalc.test.ts`), isolating the part
+  that scales with queue depth.
+
+| Metric | Value |
+|---|---|
+| Backlog size | 4000 events |
+| Tick p50 latency | 3.7ms |
+| Tick p95 latency | 4.8ms |
+| Tick p99 latency | 4.8ms |
+| Events admitted per tick | 20 |
+| Implied throughput (p50-based) | ~5425.1 events/sec per worker tick |
+
+At the measured rate and this repo's 5-minute cron cadence
+(`vercel.json`), one worker alone drains roughly
+**1,627,524 events per tick window** —
+comfortably ahead of any single tenant's real write rate today, but the
+same "single cron tick" ceiling named for the job queue above applies
+here identically: this is a Phase-6-scale mechanism, not validated at
+thousands of concurrent tenants writing simultaneously.
+
 ## Named bottlenecks (found by building this harness, not assumed)
 
 1. **Per-candidate `countActiveRuns()` query inside `dequeue()`** — the
    real query above shows this is one extra round-trip per *admitted*
    candidate, not batched. At today's over-fetch multiplier (`limit * 4`)
-   and small tenant counts this is invisible (sub-10ms p95 above); at
+   and small tenant counts this is invisible (sub-15ms p95 above); at
    hundreds of concurrent tenants with deep backlogs this becomes the
    dominant per-tick cost. The fix is mechanical (one aggregated
    `GROUP BY org_id, pipeline` query instead of N individual ones) and is
@@ -96,3 +125,17 @@ Target: 10 tenants / 100 projects / 10,000 opportunities / 100,000 pages / 1,000
    (one dedicated Postgres connection per open stream) is a real, named
    ceiling worth load-testing directly before relying on it at high
    concurrent-viewer counts.
+4. **Signal-engine detectors are project-scoped, not subject-scoped**
+   (ADR-032) — an `EntityChanged` event re-scans a project's *entire*
+   entity list (`detectEntityGaps()`), not just the one entity that
+   changed; a project with thousands of entities pays that full scan on
+   every single entity write. Real, named follow-up: subject-filtered
+   detector variants (e.g. `detectEntityGapForEntity()`), not measured
+   here because they don't exist yet.
+5. **`intelligence_relations` has no `project_id` column** — the
+   Opportunity Map endpoint (`lib/intelligence/map.ts`) resolves a
+   project's real edges by first listing that project's Decisions, then
+   one `listRelationsForSubject()` call per Decision (N+1-shaped,
+   bounded by the same 100-200 row list caps every other Phase 6 list
+   endpoint uses). Real, named fix if this becomes a measured bottleneck:
+   add `project_id` to `intelligence_relations` in a future migration.

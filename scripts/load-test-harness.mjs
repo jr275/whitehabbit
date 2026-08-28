@@ -131,8 +131,62 @@ async function main() {
 
   console.log(`[load-test] ${ticks} dequeue ticks against a ${totalJobs}-job backlog: p50=${p50.toFixed(1)}ms p95=${p95.toFixed(1)}ms p99=${p99.toFixed(1)}ms`)
 
+  // ---- Phase 6E: the intelligence_event_queue drain (migrations/0010) —
+  // same real backlog + FOR UPDATE SKIP LOCKED shape
+  // lib/intelligence/recalc-worker.ts#processIntelligenceEventQueue()
+  // uses, measuring claim+mark-processed throughput. Deliberately does
+  // NOT run the real signal-engine detectors per event here (that cost
+  // is data-dependent — entity/page counts, not queue depth — and
+  // already has its own real, per-detector coverage in
+  // tests/integration/intelligence-recalc.test.ts); this isolates the
+  // one thing that DOES scale with backlog size: claiming and
+  // book-keeping real rows under contention.
+  const EVENTS_PER_TENANT = 400
+  console.log(`[load-test] seeding ${EVENTS_PER_TENANT} intelligence_event_queue rows/tenant...`)
+  for (const orgId of orgIds) {
+    const values = []
+    const params = []
+    for (let e = 0; e < EVENTS_PER_TENANT; e++) {
+      const id = `ieq_loadtest_${randomUUID()}`
+      const base = params.length
+      values.push(`($${base + 1}, $${base + 2}, NULL, 'EntityChanged', $${base + 3}, 'pending', 0, $${base + 4})`)
+      params.push(id, orgId, `entity_loadtest_${randomUUID()}`, now)
+    }
+    await pool.query(
+      `INSERT INTO intelligence_event_queue (id, org_id, project_id, event_type, subject_id, status, attempts, created_at) VALUES ${values.join(",")}`,
+      params,
+    )
+  }
+  const totalEvents = TENANTS * EVENTS_PER_TENANT
+  console.log(`[load-test] seeded ${totalEvents} intelligence events.`)
+
+  const eventTickLatenciesMs = []
+  const eventTicks = 20
+  const perEventTickLimit = 20
+  for (let i = 0; i < eventTicks; i++) {
+    const start = performance.now()
+    const claimed = await pool.query(
+      `SELECT id FROM intelligence_event_queue WHERE status = 'pending' ORDER BY created_at ASC LIMIT $1 FOR UPDATE SKIP LOCKED`,
+      [perEventTickLimit],
+    )
+    const ids = claimed.rows.map((r) => r.id)
+    if (ids.length) {
+      await pool.query(`UPDATE intelligence_event_queue SET status = 'processing', attempts = attempts + 1 WHERE id = ANY($1)`, [ids])
+      await pool.query(`UPDATE intelligence_event_queue SET status = 'processed', processed_at = $1 WHERE id = ANY($2)`, [Date.now(), ids])
+    }
+    eventTickLatenciesMs.push(performance.now() - start)
+  }
+  eventTickLatenciesMs.sort((a, b) => a - b)
+  const eventP50 = percentile(eventTickLatenciesMs, 50)
+  const eventP95 = percentile(eventTickLatenciesMs, 95)
+  const eventP99 = percentile(eventTickLatenciesMs, 99)
+  const eventsPerTick = perEventTickLimit
+  const eventThroughputPerSec = eventsPerTick / (eventP50 / 1000)
+  console.log(`[load-test] ${eventTicks} intelligence-event ticks against a ${totalEvents}-event backlog: p50=${eventP50.toFixed(1)}ms p95=${eventP95.toFixed(1)}ms`)
+
   // ---- cleanup: this harness's own rows only, never touches anything
   // it didn't create.
+  await pool.query("DELETE FROM intelligence_event_queue WHERE org_id = ANY($1::text[])", [orgIds])
   await pool.query("DELETE FROM jobs WHERE org_id = ANY($1::text[])", [orgIds])
   await pool.query("DELETE FROM projects WHERE org_id = ANY($1::text[])", [orgIds])
   await pool.query("DELETE FROM organizations WHERE id = ANY($1::text[])", [orgIds])
@@ -219,6 +273,35 @@ Target: ${TARGET.tenants} tenants / ${TARGET.projects} projects / ${TARGET.oppor
   per-write, not backlog-dependent, so it does not compound with queue
   depth the way dequeue latency does.
 
+## Real-Time Intelligence Event Queue (Phase 6E, ADR-032/033)
+
+- **${totalEvents} pending rows** seeded into \`intelligence_event_queue\`
+  (migrations/0010) across the same ${TENANTS} tenants, real rows.
+- **${eventTicks} claim ticks**, each the exact \`FOR UPDATE SKIP LOCKED\`
+  claim + mark-processed shape
+  \`lib/intelligence/recalc-worker.ts#processIntelligenceEventQueue()\` uses
+  — deliberately excludes real signal-engine detector execution cost
+  (data-dependent, not backlog-dependent; covered separately by
+  \`tests/integration/intelligence-recalc.test.ts\`), isolating the part
+  that scales with queue depth.
+
+| Metric | Value |
+|---|---|
+| Backlog size | ${totalEvents} events |
+| Tick p50 latency | ${eventP50.toFixed(1)}ms |
+| Tick p95 latency | ${eventP95.toFixed(1)}ms |
+| Tick p99 latency | ${eventP99.toFixed(1)}ms |
+| Events admitted per tick | ${eventsPerTick} |
+| Implied throughput (p50-based) | ~${eventThroughputPerSec.toFixed(1)} events/sec per worker tick |
+
+At the measured rate and this repo's 5-minute cron cadence
+(\`vercel.json\`), one worker alone drains roughly
+**${Math.round(eventThroughputPerSec * 300).toLocaleString()} events per tick window** —
+comfortably ahead of any single tenant's real write rate today, but the
+same "single cron tick" ceiling named for the job queue above applies
+here identically: this is a Phase-6-scale mechanism, not validated at
+thousands of concurrent tenants writing simultaneously.
+
 ## Named bottlenecks (found by building this harness, not assumed)
 
 1. **Per-candidate \`countActiveRuns()\` query inside \`dequeue()\`** — the
@@ -242,6 +325,20 @@ Target: ${TARGET.tenants} tenants / ${TARGET.projects} projects / ${TARGET.oppor
    (one dedicated Postgres connection per open stream) is a real, named
    ceiling worth load-testing directly before relying on it at high
    concurrent-viewer counts.
+4. **Signal-engine detectors are project-scoped, not subject-scoped**
+   (ADR-032) — an \`EntityChanged\` event re-scans a project's *entire*
+   entity list (\`detectEntityGaps()\`), not just the one entity that
+   changed; a project with thousands of entities pays that full scan on
+   every single entity write. Real, named follow-up: subject-filtered
+   detector variants (e.g. \`detectEntityGapForEntity()\`), not measured
+   here because they don't exist yet.
+5. **\`intelligence_relations\` has no \`project_id\` column** — the
+   Opportunity Map endpoint (\`lib/intelligence/map.ts\`) resolves a
+   project's real edges by first listing that project's Decisions, then
+   one \`listRelationsForSubject()\` call per Decision (N+1-shaped,
+   bounded by the same 100-200 row list caps every other Phase 6 list
+   endpoint uses). Real, named fix if this becomes a measured bottleneck:
+   add \`project_id\` to \`intelligence_relations\` in a future migration.
 `
   const outPath = path.join(__dirname, "..", "docs", "architecture", "load-test-report.md")
   writeFileSync(outPath, report)
