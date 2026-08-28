@@ -13,6 +13,7 @@ import "server-only"
  * checked after every step (§10).
  * ================================================================== */
 
+import { logger } from "@/lib/observability/logger"
 import { assertWithinBudget, emptyUsage } from "./budget"
 import { resolveBudgetPolicy } from "./budget-policy"
 import { computeBackoffMs, DEFAULT_RETRY_POLICY, isRetryableError } from "./retry"
@@ -178,14 +179,34 @@ function addUsage(usage: BudgetUsage, delta: Partial<BudgetUsage>): BudgetUsage 
 }
 
 /** Finalizes a run to a terminal state — validated by the same state
- * machine every other transition goes through. */
+ * machine every other transition goes through.
+ *
+ * Phase 7 (ADR-038): this is the ONE real choke point every workflow
+ * run's terminal transition passes through, regardless of which entry
+ * point triggered it (an API route's catch block, the queue-driven
+ * step worker's applyOutcome(), a dead-lettered job) — so it's the
+ * real, correct place to notify a linked IntelligenceAction that its
+ * underlying execution finished, rather than duplicating that call at
+ * every one of those call sites (easy to miss one). A dynamic import
+ * (not a static one) avoids a hard circular dependency between this
+ * generic workflow-engine module and the Intelligence Layer's domain
+ * code, which itself calls finalizeWorkflow(); any error from the hook
+ * is real but never allowed to break the workflow's own, authoritative
+ * status transition — logged, swallowed, not re-thrown. */
 export async function finalizeWorkflow(
   id: string,
   orgId: string,
   status: Extract<WorkflowStatus, "succeeded" | "failed" | "cancelled">,
   patch: { errorReason?: string; costUsd?: number; inputTokens?: number; outputTokens?: number; model?: string } = {},
 ): Promise<WorkflowRun> {
-  return repo.transitionWorkflowRun(id, orgId, status, patch)
+  const run = await repo.transitionWorkflowRun(id, orgId, status, patch)
+  try {
+    const { onWorkflowFinalized } = await import("@/lib/intelligence/action-executor")
+    await onWorkflowFinalized(id, orgId, status, patch.errorReason)
+  } catch (err) {
+    logger.error("action_executor_finalize_hook_failed", { runId: id, orgId, message: err instanceof Error ? err.message : String(err) })
+  }
+  return run
 }
 
 /** Marks a run WAITING_APPROVAL — the only path into that state, so a

@@ -192,11 +192,12 @@ export async function resolveBudgetPolicy(orgId: string, projectId: string, expl
  * same tick. */
 export async function resolveConcurrencyLimit(orgId: string, pipeline: WorkflowPipeline, fallback: number): Promise<number> {
   // note: only website_discovery/content_generation jobs ever reach
-  // dequeue() — trend_analysis never does (lib/workflow/types.ts's
-  // WorkflowPipeline doc comment), so this function is never actually
-  // called with it in practice; the branch below is only to keep this
-  // exhaustively typed against WorkflowPipeline.
-  if (pipeline === "trend_analysis") return fallback
+  // dequeue() — trend_analysis/decision_execution never do
+  // (lib/workflow/types.ts's WorkflowPipeline doc comment), so this
+  // function is never actually called with either in practice; the
+  // branch below is only to keep this exhaustively typed against
+  // WorkflowPipeline.
+  if (pipeline === "trend_analysis" || pipeline === "decision_execution") return fallback
   const tenant = await getTenantBudget(orgId)
   if (!tenant) return fallback
   return pipeline === "website_discovery" ? tenant.maxConcurrentDiscovery : tenant.maxConcurrentGeneration

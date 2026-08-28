@@ -18,7 +18,11 @@ import type { Opportunity, OpportunityScoreComponents, OpportunityType } from ".
 
 export const MAX_OPPORTUNITIES_PER_RUN = 20
 
-const BUSINESS_VALUE_BY_TYPE: Record<string, number> = {
+// Exported (Phase 7, ADR-038) so lib/intelligence/action-executor.ts's
+// Decision -> Opportunity bridge scores a single, decision-driven
+// entity with the exact same real table discovery.ts's own batch scan
+// uses — never a second, drifting copy of the same business logic.
+export const BUSINESS_VALUE_BY_TYPE: Record<string, number> = {
   Organization: 90,
   Product: 80,
   Service: 80,

@@ -8,6 +8,10 @@
     {
       "path": "/api/v1/intelligence/process",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/v1/intelligence/actions/process",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

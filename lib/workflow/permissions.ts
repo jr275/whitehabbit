@@ -29,15 +29,17 @@ export type AgentCapability =
   | "change_tenant_settings"
   | "delete_tenant_data"
   | "modify_billing"
+  | "write_internal_links" // Phase 7 (ADR-038) — real, new execution path for the ADD_INTERNAL_LINKS Decision action
+  | "run_research" // Phase 7 (ADR-038) — real, new execution path for the INVESTIGATE_ENTITY Decision action (Deep Research, never content-writing)
 
 export type AgentType = "WebsiteDiscoveryAgent" | "ContentGenerationAgent" | "PublisherAgent" | "TrendAnalysisAgent" | "AIVisibilityAgent" | "DataIngestionAgent"
 
 /** One explicit allow-list per agent type — everything not listed is
  * denied by default (assertCapability below), never inferred. */
 const AGENT_CAPABILITIES: Record<AgentType, ReadonlySet<AgentCapability>> = {
-  WebsiteDiscoveryAgent: new Set(["crawl_website", "read_robots", "read_sitemap", "extract_entities", "write_discovery_profile", "write_opportunity"]),
+  WebsiteDiscoveryAgent: new Set(["crawl_website", "read_robots", "read_sitemap", "extract_entities", "write_discovery_profile", "write_opportunity", "run_research"]),
   ContentGenerationAgent: new Set(["write_page_brief", "write_content_draft", "write_page_version"]),
-  PublisherAgent: new Set(["publish_page_version", "invalidate_cache", "request_revalidation"]),
+  PublisherAgent: new Set(["publish_page_version", "invalidate_cache", "request_revalidation", "write_internal_links"]),
   TrendAnalysisAgent: new Set(["detect_trends", "write_opportunity"]),
   AIVisibilityAgent: new Set(["run_ai_visibility_prompt"]),
   DataIngestionAgent: new Set(["ingest_external_data"]),

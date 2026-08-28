@@ -32,9 +32,18 @@ export type WorkflowStepStatus = "queued" | "running" | "succeeded" | "failed" |
  * call (see lib/intelligence/trend-opportunity.ts). It still gets a
  * real WorkflowRun row for the same reason every other real pipeline
  * does: tenant-scoped observability and a real provenance FK for the
- * opportunities it creates. */
-export type WorkflowPipeline = "website_discovery" | "content_generation" | "trend_analysis"
-export type WorkflowSubjectType = "website" | "opportunity" | "project"
+ * opportunities it creates.
+ *
+ * "decision_execution" (Phase 7, ADR-038) is the same real-but-
+ * synchronous-provenance pattern, applied to the Decision -> Action
+ * bridge: lib/intelligence/action-executor.ts starts one of these
+ * before creating a Decision-driven Opportunity, purely so that
+ * Opportunity has a real source_agent_run_id (opportunities'
+ * `opportunities_source_check` CHECK constraint requires one) and so
+ * the bridge itself is tenant-scoped-observable like every other real
+ * pipeline — never enqueued/dequeued either. */
+export type WorkflowPipeline = "website_discovery" | "content_generation" | "trend_analysis" | "decision_execution"
+export type WorkflowSubjectType = "website" | "opportunity" | "project" | "decision"
 export type WorkflowPriority = "critical" | "high" | "normal" | "low" | "background"
 
 export interface BudgetPolicy {
