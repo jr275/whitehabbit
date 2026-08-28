@@ -25,11 +25,21 @@ export async function buildInformationGainV2Input(orgId: string, projectId: stri
     const relationships = await listRelationshipsForEntity(opportunity.primaryEntityId, orgId)
     relatedEntityCount = new Set(relationships.map((r) => r.targetEntityId)).size
     const evidence = await listEvidenceForEntity(opportunity.primaryEntityId, orgId)
-    structuredDataEvidenceCount = evidence.filter((e) => e.sourceType === "structured_data").length
-    hasLocalEvidence = evidence.some((e) => e.fact.toLowerCase().includes("location") || e.fact.toLowerCase().includes("address"))
-    hasExistingSimilarPage = await hasPageForEntity(projectId, opportunity.primaryEntityId)
+    // Same real heuristics lib/opportunity/discovery.ts's V1 scorer
+    // already uses on this exact evidence — every entity_evidence row
+    // this codebase ever writes carries sourceType "crawl" (see
+    // ingest-from-crawl.ts), so a literal sourceType === "structured_data"
+    // check here would never match anything real. High-confidence
+    // evidence (>=0.85) is the actual, already-established real proxy
+    // for "this fact came from real structured data on the tenant's own
+    // site," and entity type (not fragile fact-string matching) is the
+    // real signal for local specificity.
+    structuredDataEvidenceCount = evidence.filter((e) => e.confidence != null && e.confidence >= 0.85).length
     const entities = await listCanonicalEntities(orgId, projectId, { limit: 500 })
     const entity = entities.find((e) => e.id === opportunity.primaryEntityId)
+    const neighborTypes = new Set(relationships.map((r) => entities.find((e) => e.id === r.targetEntityId)?.entityType).filter((t): t is string => !!t))
+    hasLocalEvidence = entity?.entityType === "Place" || entity?.entityType === "Market" || neighborTypes.has("Place") || neighborTypes.has("Market")
+    hasExistingSimilarPage = await hasPageForEntity(projectId, opportunity.primaryEntityId)
     siblingEntityCount = entity ? entities.filter((e) => e.entityType === entity.entityType && e.id !== entity.id).length : 0
   }
 
