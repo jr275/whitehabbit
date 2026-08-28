@@ -9,6 +9,7 @@ import Link from "next/link"
 import { ArrowRight, CheckCircle2, CircleAlert, Clock3, XCircle } from "lucide-react"
 import { WorkforceNav } from "@/components/workforce/nav"
 import type { Opportunity, OpportunityStatus } from "@/lib/opportunity/model"
+import { ObjectInspector, useObjectInspector } from "@/components/ontology/object-inspector"
 
 const STATUS_TONE: Record<OpportunityStatus, string> = {
   discovered: "text-primary",
@@ -26,6 +27,7 @@ export function OpportunitiesList() {
   const [opportunities, setOpportunities] = useState<Opportunity[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState<string | null>(null)
+  const inspector = useObjectInspector()
 
   async function load() {
     try {
@@ -88,9 +90,9 @@ export function OpportunitiesList() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <span className={`font-mono text-[9px] uppercase tracking-[0.14em] ${STATUS_TONE[opp.status]}`}>{opp.status.replaceAll("_", " ")}</span>
-                    <Link href={`/opportunities/${opp.id}`} className="mt-1 block text-lg font-semibold text-foreground hover:text-primary">
+                    <button onClick={() => inspector.open({ type: "opportunity", id: opp.id })} className="mt-1 block text-left text-lg font-semibold text-foreground hover:text-primary">
                       {opp.title}
-                    </Link>
+                    </button>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {opp.opportunityType?.replaceAll("_", " ") ?? "programmatic seo"} · {opp.targetIntent ?? "no target intent recorded"}
                     </p>
@@ -100,7 +102,7 @@ export function OpportunitiesList() {
                       <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Score</p>
                       <p className="text-2xl font-semibold text-foreground">{opp.finalScore ?? "—"}</p>
                     </div>
-                    <Link href={`/opportunities/${opp.id}`} className="flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground">
+                    <Link href={`/opportunities/${opp.id}`} title="Open full opportunity page" className="flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground">
                       <ArrowRight className="size-4" />
                     </Link>
                   </div>
@@ -128,6 +130,7 @@ export function OpportunitiesList() {
           </div>
         )}
       </main>
+      {inspector.isOpen && <ObjectInspector stack={inspector.stack} setStack={inspector.setStack} onClose={inspector.close} />}
     </div>
   )
 }

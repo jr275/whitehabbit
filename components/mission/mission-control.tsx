@@ -9,23 +9,14 @@
  * discipline, same as the rest of this app). */
 
 import { useEffect, useState } from "react"
-import { AlertTriangle, ArrowRight, CircleAlert, Clock3, Gauge, Radar, Sparkles, TrendingUp } from "lucide-react"
+import Link from "next/link"
+import { AlertTriangle, ArrowRight, CircleAlert, Clock3, Cpu } from "lucide-react"
 import { WorkforceNav } from "@/components/workforce/nav"
 import type { MissionSnapshot, NextAction } from "@/lib/intelligence/mission"
 import type { TimelineEntry } from "@/lib/intelligence/timeline"
-
-function Metric({ label, value, sublabel, icon: Icon }: { label: string; value: string; sublabel?: string; icon: React.ComponentType<{ className?: string }> }) {
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card px-4 py-4">
-      <div className="flex items-center gap-1.5 text-muted-foreground">
-        <Icon className="size-3.5" />
-        <span className="font-mono text-[9px] uppercase tracking-[0.16em]">{label}</span>
-      </div>
-      <span className="text-2xl font-semibold tracking-tight text-foreground">{value}</span>
-      {sublabel && <span className="text-xs text-muted-foreground">{sublabel}</span>}
-    </div>
-  )
-}
+import type { Opportunity } from "@/lib/opportunity/model"
+import type { WorkflowRun } from "@/lib/workflow/types"
+import { ObjectInspector, useObjectInspector } from "@/components/ontology/object-inspector"
 
 const RISK_TONE: Record<string, string> = { low: "text-grow", medium: "text-warn", high: "text-destructive", critical: "text-destructive" }
 
@@ -114,12 +105,17 @@ function TimelineFeed({ entries }: { entries: TimelineEntry[] }) {
   )
 }
 
+const ACTIVE_RUN_STATUSES = ["queued", "running", "waiting", "waiting_approval", "retrying"]
+
 export function MissionControl() {
   const [snapshot, setSnapshot] = useState<MissionSnapshot | null>(null)
   const [nextAction, setNextAction] = useState<NextAction | null>(null)
   const [timeline, setTimeline] = useState<TimelineEntry[]>([])
+  const [topOpportunities, setTopOpportunities] = useState<Opportunity[]>([])
+  const [activeRuns, setActiveRuns] = useState<WorkflowRun[]>([])
   const [projectId, setProjectId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const inspector = useObjectInspector()
 
   async function load() {
     try {
@@ -129,12 +125,20 @@ export function MissionControl() {
       setSnapshot(missionBody.snapshot)
       setProjectId(missionBody.projectId)
 
-      const [nextRes, timelineRes] = await Promise.all([
+      const [nextRes, timelineRes, oppRes, ...runResList] = await Promise.all([
         fetch("/api/v1/intelligence/next-action"),
         fetch(`/api/v1/intelligence/timeline?projectId=${missionBody.projectId}&limit=8`),
+        fetch("/api/opportunities"),
+        ...ACTIVE_RUN_STATUSES.map((s) => fetch(`/api/v1/workflows?status=${s}`)),
       ])
       if (nextRes.ok) setNextAction((await nextRes.json()).nextAction)
       if (timelineRes.ok) setTimeline((await timelineRes.json()).entries)
+      if (oppRes.ok) {
+        const opps: Opportunity[] = (await oppRes.json()).opportunities
+        setTopOpportunities([...opps].sort((a, b) => (b.finalScore ?? -1) - (a.finalScore ?? -1)).slice(0, 4))
+      }
+      const runLists = await Promise.all(runResList.map((r) => (r.ok ? r.json() : { workflows: [] })))
+      setActiveRuns(runLists.flatMap((b) => b.workflows as WorkflowRun[]))
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load Mission Control.")
     }
@@ -162,18 +166,18 @@ export function MissionControl() {
           <div className="mt-10 flex items-center gap-2 text-sm text-muted-foreground"><Clock3 className="size-4" /> Loading real system state…</div>
         ) : (
           <>
-            <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              <Metric icon={Radar} label="Knowledge Authority" value={String(snapshot.knowledgeAuthority.entityCount)} sublabel={snapshot.knowledgeAuthority.entitiesWithEvidencePct != null ? `${snapshot.knowledgeAuthority.entitiesWithEvidencePct}% evidenced` : "entities"} />
-              <Metric icon={Sparkles} label="Page Intelligence" value={String(snapshot.pageIntelligence.pageCount)} sublabel={snapshot.pageIntelligence.avgQualityScore != null ? `avg quality ${snapshot.pageIntelligence.avgQualityScore}` : "pages"} />
-              <Metric icon={Gauge} label="Information Gain" value={snapshot.informationGain.avgScore != null ? `${snapshot.informationGain.avgScore}` : "—"} sublabel={snapshot.informationGain.sampleCount > 0 ? `${snapshot.informationGain.sampleCount} real evaluations` : "no data yet"} />
-              <Metric icon={TrendingUp} label="Organic Growth" value={snapshot.organicGrowth ? String(snapshot.organicGrowth.totalClicks) : "—"} sublabel={snapshot.organicGrowth ? `${snapshot.organicGrowth.snapshotDays} real days` : "Search Console not connected"} />
-              <Metric icon={Sparkles} label="AI Visibility" value={String(snapshot.aiVisibility.answerCount)} sublabel={`${snapshot.aiVisibility.citationCount} real citations`} />
-              <Metric icon={TrendingUp} label="Market Momentum" value={String(snapshot.marketMomentum.risingTrendCount)} sublabel={`of ${snapshot.marketMomentum.totalTrendCount} tracked trends`} />
-            </div>
+            {/* SYSTEM STATE — one real, readable sentence rather than a
+             * grid of KPI tiles: what the system knows, right now. */}
+            <p className="mt-6 max-w-3xl text-pretty text-[15px] leading-relaxed text-muted-foreground">
+              <strong className="font-semibold text-foreground">{snapshot.knowledgeAuthority.entityCount}</strong> real entities tracked
+              {snapshot.knowledgeAuthority.entitiesWithEvidencePct != null && <> ({snapshot.knowledgeAuthority.entitiesWithEvidencePct}% evidenced)</>}, connected to{" "}
+              <strong className="font-semibold text-foreground">{snapshot.pageIntelligence.pageCount}</strong> real pages
+              {snapshot.pageIntelligence.avgQualityScore != null && <> at an average quality of {snapshot.pageIntelligence.avgQualityScore}</>}. Information Gain{" "}
+              {snapshot.informationGain.avgScore != null ? <>is real-checked at <strong className="font-semibold text-foreground">{snapshot.informationGain.avgScore}%</strong> confidence across {snapshot.informationGain.sampleCount} evaluations</> : "has not been evaluated yet"}.{" "}
+              <strong className="font-semibold text-foreground">{snapshot.marketMomentum.risingTrendCount}</strong> of {snapshot.marketMomentum.totalTrendCount} tracked trends are rising.
+            </p>
 
-            <div className="mt-8">
-              <NextActionCard nextAction={nextAction} onActed={() => void load()} />
-            </div>
+            <div className="mt-8"><NextActionCard nextAction={nextAction} onActed={() => void load()} /></div>
 
             {(snapshot.pendingDecisionCount > 1 || snapshot.blockedActionCount > 0) && (
               <p className="mt-4 text-xs text-muted-foreground">
@@ -183,12 +187,53 @@ export function MissionControl() {
               </p>
             )}
 
-            <div className="mt-8">
-              <TimelineFeed entries={timeline} />
+            {/* WHAT'S EMERGING + AGENTS AT WORK — side by side: the
+             * ontology's real top opportunities, and real agent activity
+             * — never a decorative chart standing in for either. */}
+            <div className="mt-10 grid gap-6 lg:grid-cols-2">
+              <section>
+                <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">What's emerging</p>
+                <h2 className="mt-1 text-lg font-semibold tracking-[-0.01em]">Top real opportunities</h2>
+                {topOpportunities.length === 0 ? (
+                  <p className="mt-3 text-[13px] text-muted-foreground">No real opportunities discovered yet.</p>
+                ) : (
+                  <div className="mt-3 flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
+                    {topOpportunities.map((o) => (
+                      <button key={o.id} onClick={() => inspector.open({ type: "opportunity", id: o.id })} className="flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-secondary/40">
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{o.title}</span>
+                        <span className="shrink-0 font-mono text-[9px] uppercase text-muted-foreground">{o.status}</span>
+                        <span className="w-8 shrink-0 text-right font-mono text-[12px] tabular-nums text-foreground">{o.finalScore != null ? Math.round(o.finalScore) : "—"}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Agents at work</p>
+                <h2 className="mt-1 text-lg font-semibold tracking-[-0.01em]">{activeRuns.length} real active run{activeRuns.length === 1 ? "" : "s"}</h2>
+                {activeRuns.length === 0 ? (
+                  <p className="mt-3 text-[13px] text-muted-foreground">No real agent runs are active right now.</p>
+                ) : (
+                  <div className="mt-3 flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
+                    {activeRuns.slice(0, 4).map((r) => (
+                      <Link key={r.id} href={`/agent-runs/${r.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-secondary/40">
+                        <Cpu className="size-3.5 shrink-0 text-primary" />
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{r.pipeline.replaceAll("_", " ")} · {r.subjectType}</span>
+                        <span className="shrink-0 font-mono text-[9px] uppercase text-primary">{r.status.replaceAll("_", " ")}</span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+                <Link href="/agents/live" className="mt-3 inline-flex items-center gap-1 text-[12.5px] text-muted-foreground hover:text-foreground">Open Live Agent Graph <ArrowRight className="size-3.5" /></Link>
+              </section>
             </div>
+
+            <div className="mt-10"><TimelineFeed entries={timeline} /></div>
           </>
         )}
       </main>
+      {inspector.isOpen && <ObjectInspector stack={inspector.stack} setStack={inspector.setStack} onClose={inspector.close} />}
     </div>
   )
 }
