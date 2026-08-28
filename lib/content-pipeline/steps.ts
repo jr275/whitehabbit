@@ -43,8 +43,12 @@ import { createContentArtifact, getArtifact } from "./repo"
 import { runResearch } from "./research"
 import { runSeoAnalysis } from "./seo"
 import type { StepOutcome } from "@/lib/workflow/step-types"
+import { buildInformationGainV2Input } from "@/lib/opportunity/information-gain-v2-input"
+import { computeInformationGainV2 } from "@/lib/opportunity/information-gain-v2"
+import { evaluateInformationGainGate } from "@/lib/opportunity/information-gain-gate"
+import { logAgentDecision } from "@/lib/intelligence/agent-decision-log"
 
-export const CONTENT_GENERATION_STEPS = ["research", "outline", "draft", "seo", "geo", "quality", "decide_publish"] as const
+export const CONTENT_GENERATION_STEPS = ["research", "information_gain_gate", "outline", "draft", "seo", "geo", "quality", "decide_publish"] as const
 export type ContentGenerationStepName = (typeof CONTENT_GENERATION_STEPS)[number]
 
 export function contentGenerationStepSequence(step: string): number {
@@ -91,13 +95,46 @@ export async function dispatchContentGenerationStep(run: WorkflowRun, opportunit
         await persistArtifact(orgId, projectId, brief.id, run.id, "research", research)
         return { output: { claimCount: research.claims.length, sourceCount: research.sources.length, confidence: research.confidence } }
       })
+      return { outcome: { kind: "advance", nextStep: "information_gain_gate" } }
+    }
+
+    case "information_gain_gate": {
+      // §5/§24 (ADR-031) — the real, enforced gate: below the real
+      // threshold, generation stops HERE, before outline/draft ever
+      // run, never after wasting an LLM call. The gate's action/reason
+      // is a real, explainable decision (never "AI decided this") and
+      // is logged to the Agent Decision Log regardless of outcome.
+      const research = await getArtifact<ResearchArtifact>(orgId, run.id, "research")
+      if (!research) throw new Error("information_gain_gate dispatched before research completed — no research artifact on record.")
+      let gateAllowed = true
+      let gateReason = ""
+      await runStep(run, 2, "information_gain_gate", null, async () => {
+        const { input, hasExistingSimilarPage } = await buildInformationGainV2Input(orgId, projectId, opportunity)
+        const result = computeInformationGainV2(input)
+        const gate = evaluateInformationGainGate(result, hasExistingSimilarPage, undefined, !!opportunity.primaryEntityId)
+        gateAllowed = gate.allowed
+        gateReason = gate.reason
+        await logAgentDecision({
+          orgId,
+          agentRunId: run.id,
+          agent: "ContentGenerationAgent",
+          decision: gate.action,
+          reason: gate.reason,
+          evidence: result.evidence,
+          policy: "information_gain_gate_v2",
+          confidence: result.score / 100,
+          approvalRequired: false,
+        })
+        return { output: { score: result.score, action: gate.action, allowed: gate.allowed, missingRequirements: result.missingRequirements } }
+      })
+      if (!gateAllowed) throw new ContentGenerationBlockedError(gateReason)
       return { outcome: { kind: "advance", nextStep: "outline" } }
     }
 
     case "outline": {
       const research = await getArtifact<ResearchArtifact>(orgId, run.id, "research")
       if (!research) throw new Error("outline dispatched before research completed — no research artifact on record.")
-      await runStep(run, 2, "outline", null, async () => {
+      await runStep(run, 3, "outline", null, async () => {
         const outline = buildOutline(brief, research)
         await persistArtifact(orgId, projectId, brief.id, run.id, "outline", outline)
         return { output: { sectionCount: outline.sections.length } }
@@ -111,7 +148,7 @@ export async function dispatchContentGenerationStep(run: WorkflowRun, opportunit
       const outline = await getArtifact<OutlineArtifact>(orgId, run.id, "outline")
       if (!research || !outline) throw new Error("draft dispatched before research/outline completed.")
       try {
-        await runStep(run, 3, "draft", null, async () => {
+        await runStep(run, 4, "draft", null, async () => {
           const draft = await runDraft(brief, research, outline)
           await persistArtifact(orgId, projectId, brief.id, run.id, "draft", draft)
           return { output: { title: draft.title, sectionCount: draft.sections.length, executionMode: draft.executionMode ?? null }, inputTokens: draft.inputTokens, outputTokens: draft.outputTokens, model: draft.model }
@@ -127,7 +164,7 @@ export async function dispatchContentGenerationStep(run: WorkflowRun, opportunit
       const research = await getArtifact<ResearchArtifact>(orgId, run.id, "research")
       const draft = await getArtifact<DraftArtifact>(orgId, run.id, "draft")
       if (!research || !draft) throw new Error("seo dispatched before research/draft completed.")
-      await runStep(run, 4, "seo", null, async () => {
+      await runStep(run, 5, "seo", null, async () => {
         const seo = runSeoAnalysis(draft, research, brief)
         await persistArtifact(orgId, projectId, brief.id, run.id, "seo", seo)
         return { output: { score: seo.score } }
@@ -139,7 +176,7 @@ export async function dispatchContentGenerationStep(run: WorkflowRun, opportunit
       const research = await getArtifact<ResearchArtifact>(orgId, run.id, "research")
       const draft = await getArtifact<DraftArtifact>(orgId, run.id, "draft")
       if (!research || !draft) throw new Error("geo dispatched before research/draft completed.")
-      await runStep(run, 5, "geo", null, async () => {
+      await runStep(run, 6, "geo", null, async () => {
         const geo = runGeoAnalysis(draft, research, brief)
         await persistArtifact(orgId, projectId, brief.id, run.id, "geo", geo)
         return { output: { geoScore: geo.geoScore, aeoScore: geo.aeoScore } }
@@ -154,7 +191,7 @@ export async function dispatchContentGenerationStep(run: WorkflowRun, opportunit
       const geo = await getArtifact<GeoArtifact>(orgId, run.id, "geo")
       if (!research || !draft || !seo || !geo) throw new Error("quality dispatched before an earlier step completed.")
       let quality!: QualityArtifact
-      await runStep(run, 6, "quality", null, async () => {
+      await runStep(run, 7, "quality", null, async () => {
         const factCheck = runFactCheck(draft, research) // deterministic, no I/O — real but not worth its own checkpointed step
         quality = runQualityGate(draft, research, brief, seo, geo, opportunity.informationGainScore, factCheck)
         await persistArtifact(orgId, projectId, brief.id, run.id, "quality", quality)
