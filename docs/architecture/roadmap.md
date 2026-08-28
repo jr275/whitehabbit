@@ -270,15 +270,23 @@ silently scrolling the newest ones off-screen. Fixed by restructuring
 `TopNav`'s desktop navigation into five grouped, keyboard-accessible
 dropdowns — a durable fix, not a one-off padding tweak.
 
+The Command Palette (R-47, previously the most-repeated unbuilt item
+across two phases) and its real global search (`lib/search.ts`, `GET
+/api/v1/search`) are now real too: tenant-scoped ILIKE search across
+Entities/Opportunities/Pages/Decisions/Workers, real ⌘K, full keyboard
+nav — deliberately without exposing destructive actions (approve/execute
+a Decision) from the palette, keeping that one real, confirmed flow in
+Mission Control/Decision Center rather than adding a second, less-guarded
+path to the same mutation.
+
 Not yet done, named explicitly rather than silently dropped: Mission
-Control's four-zone reorganization (ADR-043), the Command Palette (R-47,
-still the most-repeated unbuilt item across two phases now), global
-search, Decision Center's causal-chain graph view (the Intelligence
-Graph's "decisions" mode already covers most of this data — wiring a
-direct link from Decision Center into it, filtered to one decision, is
-the smallest remaining step), Knowledge Graph entity-detail depth, a
-dedicated Information Gain "why" visualization, graph clustering/LOD at
-target scale (R-48), and Timeline SQL-level filtering at target scale
+Control's four-zone reorganization (ADR-043), Decision Center's
+causal-chain graph view (the Intelligence Graph's "decisions" mode
+already covers most of this data — wiring a direct link from Decision
+Center into it, filtered to one decision, is the smallest remaining
+step), Knowledge Graph entity-detail depth, a dedicated Information
+Gain "why" visualization, graph clustering/LOD at target scale (R-48),
+and Timeline SQL-level filtering at target scale
 (R-49). 228/228 tests pass (225 Phase-7 baseline + 3 new Timeline filter
 tests); every new page was verified with a real dev-server + Playwright
 pass, not just `tsc`.
