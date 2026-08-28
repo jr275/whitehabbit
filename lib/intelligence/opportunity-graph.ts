@@ -13,6 +13,7 @@ import { query } from "@/lib/db/client"
 import { getEntity } from "@/lib/knowledge/repo"
 import { getTrend } from "./trends"
 import { getSignal } from "./signals"
+import { getPage } from "@/lib/pages/repo"
 
 export type OpportunityGraphNodeType = "signal" | "trend" | "query" | "intent" | "entity" | "role" | "market" | "evidence" | "data_observation" | "business_goal" | "page"
 
@@ -38,6 +39,37 @@ interface EdgeRow {
 
 function rowToEdge(r: EdgeRow): OpportunityGraphEdge {
   return { id: r.id, orgId: r.org_id, opportunityId: r.opportunity_id, nodeType: r.node_type, nodeId: r.node_id, relation: r.relation, createdAt: Number(r.created_at) }
+}
+
+/** A real graph node's own display name, never its raw internal id
+ * (Object UI, Fase 2 §"Objects"): Market/Role are real Entity rows (a
+ * real sub-type of Entity — docs/fase2-modelo-produto.md), Trend and
+ * Page have their own real label/title. The one shared resolver both
+ * the Intelligence Field/Graph (lib/intelligence/map.ts) and the
+ * universal Object Inspector (lib/ontology/object-resolver.ts) call —
+ * never a second, drifting copy. A node type this resolver doesn't yet
+ * carry a name lookup for (signal/query/intent/evidence/
+ * data_observation/business_goal) still renders — as its own real id,
+ * an honestly-named gap, never a fabricated label. */
+export async function resolveOpportunityGraphNodeLabel(orgId: string, nodeType: OpportunityGraphNodeType | string, nodeId: string): Promise<string> {
+  switch (nodeType) {
+    case "market":
+    case "role":
+    case "entity": {
+      const entity = await getEntity(nodeId, orgId)
+      return entity?.name ?? nodeId
+    }
+    case "trend": {
+      const trend = await getTrend(nodeId, orgId)
+      return trend?.label ?? nodeId
+    }
+    case "page": {
+      const page = await getPage(nodeId, orgId)
+      return page ? (page.title ?? page.slug) : nodeId
+    }
+    default:
+      return nodeId
+  }
 }
 
 export async function linkOpportunityNode(orgId: string, opportunityId: string, nodeType: OpportunityGraphNodeType, nodeId: string, relation: string): Promise<OpportunityGraphEdge> {

@@ -14,6 +14,7 @@ import { listObservations } from "./observations"
 import { listDecisions } from "./decisions"
 import { listActions } from "./actions"
 import { listOutcomes } from "./outcomes"
+import { translateAction, translateActionStatusFem, translateSignalType } from "@/lib/ontology/pt-br"
 
 export type TimelineEntryType = "signal" | "observation" | "decision" | "action" | "outcome"
 
@@ -62,10 +63,10 @@ export async function buildIntelligenceTimeline(orgId: string, projectId: string
   ])
 
   let entries: TimelineEntry[] = [
-    ...signals.map((s): TimelineEntry => ({ type: "signal", id: s.id, at: s.observedAt, summary: `${s.type} observed (confidence ${s.confidence.toFixed(2)})`, detail: { signalType: s.type, entityId: s.entityId, source: s.source } })),
+    ...signals.map((s): TimelineEntry => ({ type: "signal", id: s.id, at: s.observedAt, summary: `${translateSignalType(s.type)} (confiança ${s.confidence.toFixed(2)})`, detail: { signalType: s.type, entityId: s.entityId, source: s.source } })),
     ...observations.map((o): TimelineEntry => ({ type: "observation", id: o.id, at: o.createdAt, summary: o.summary, detail: { pattern: o.pattern, signalCount: o.signalIds.length, status: o.status } })),
-    ...decisions.map((d): TimelineEntry => ({ type: "decision", id: d.id, at: d.createdAt, summary: `${d.action}: ${d.reason}`, detail: { status: d.status, risk: d.risk, priority: d.priority, subjectType: d.subjectType, subjectId: d.subjectId } })),
-    ...actions.map((a): TimelineEntry => ({ type: "action", id: a.id, at: a.startedAt ?? a.createdAt, summary: `Action ${a.status} for decision ${a.decisionId}`, detail: { decisionId: a.decisionId, agentRunId: a.agentRunId, status: a.status } })),
+    ...decisions.map((d): TimelineEntry => ({ type: "decision", id: d.id, at: d.createdAt, summary: `${translateAction(d.action)}: ${d.reason}`, detail: { status: d.status, risk: d.risk, priority: d.priority, subjectType: d.subjectType, subjectId: d.subjectId } })),
+    ...actions.map((a): TimelineEntry => ({ type: "action", id: a.id, at: a.startedAt ?? a.createdAt, summary: `Ação ${translateActionStatusFem(a.status)} para a decisão ${a.decisionId}`, detail: { decisionId: a.decisionId, agentRunId: a.agentRunId, status: a.status } })),
     ...outcomes.map((o): TimelineEntry => ({ type: "outcome", id: o.id, at: o.measuredAt, summary: `${o.metric}: ${o.value}${o.delta != null ? ` (Δ${o.delta >= 0 ? "+" : ""}${o.delta})` : ""}`, detail: { actionId: o.actionId, baseline: o.baseline, confidence: o.confidence } })),
   ]
 

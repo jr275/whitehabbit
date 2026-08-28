@@ -47,33 +47,33 @@ interface NavCommand {
 }
 
 const NAV_COMMANDS: NavCommand[] = [
-  { id: "nav-overview", label: "Go to Overview", hint: "Workspace", href: "/", icon: Gauge },
-  { id: "nav-mission", label: "Go to Mission Control", hint: "Workspace", href: "/mission", icon: Radar },
-  { id: "nav-workers", label: "Go to Workers", hint: "Workspace", href: "/workforce", icon: Users },
-  { id: "nav-outputs", label: "Go to Runs & Outputs", hint: "Workspace", href: "/outputs", icon: Activity },
-  { id: "nav-live-agents", label: "Go to Live Agent Graph", hint: "Workspace", href: "/agents/live", icon: Boxes },
-  { id: "nav-approvals", label: "Go to Approvals", hint: "Workspace", href: "/approvals", icon: ShieldCheck },
-  { id: "nav-websites", label: "Go to Websites", hint: "Knowledge", href: "/websites", icon: Globe },
-  { id: "nav-knowledge", label: "Go to Knowledge Graph", hint: "Knowledge", href: "/knowledge", icon: Network },
-  { id: "nav-opportunities", label: "Go to Opportunities", hint: "Knowledge", href: "/opportunities", icon: Target },
-  { id: "nav-decisions", label: "Go to Decision Center", hint: "Knowledge", href: "/intelligence/decisions", icon: ListChecks },
-  { id: "nav-map", label: "Go to Intelligence Graph", hint: "Knowledge", href: "/intelligence/map", icon: GitBranch },
-  { id: "nav-timeline", label: "Go to Intelligence Timeline", hint: "Knowledge", href: "/intelligence/timeline", icon: History },
-  { id: "nav-studio", label: "Go to Worker Studio", hint: "Build", href: "/studio", icon: Workflow },
-  { id: "nav-factory", label: "Go to Factory", hint: "Build", href: "/factory", icon: Factory },
-  { id: "nav-library", label: "Go to Skills", hint: "Build", href: "/library", icon: Layers3 },
-  { id: "nav-integrations", label: "Go to Integrations", hint: "Connect", href: "/integrations", icon: PlugZap },
-  { id: "nav-observatory", label: "Go to Observatory", hint: "Observe", href: "/observatory", icon: Activity },
-  { id: "nav-outcomes", label: "Go to Outcomes", hint: "Observe", href: "/outcomes", icon: PackageOpen },
-  { id: "nav-evolve", label: "Go to Improve", hint: "Observe", href: "/evolve", icon: Sparkles },
+  { id: "nav-overview", label: "Ir para Visão geral", hint: "Workspace", href: "/", icon: Gauge },
+  { id: "nav-mission", label: "Ir para Mission Control", hint: "Workspace", href: "/mission", icon: Radar },
+  { id: "nav-workers", label: "Ir para Agentes", hint: "Workspace", href: "/workforce", icon: Users },
+  { id: "nav-outputs", label: "Ir para Execuções e resultados", hint: "Workspace", href: "/outputs", icon: Activity },
+  { id: "nav-live-agents", label: "Ir para Grafo de agentes ao vivo", hint: "Workspace", href: "/agents/live", icon: Boxes },
+  { id: "nav-approvals", label: "Ir para Aprovações", hint: "Workspace", href: "/approvals", icon: ShieldCheck },
+  { id: "nav-websites", label: "Ir para Sites", hint: "Conhecimento", href: "/websites", icon: Globe },
+  { id: "nav-knowledge", label: "Ir para Grafo de conhecimento", hint: "Conhecimento", href: "/knowledge", icon: Network },
+  { id: "nav-opportunities", label: "Ir para Oportunidades", hint: "Conhecimento", href: "/opportunities", icon: Target },
+  { id: "nav-decisions", label: "Ir para Central de decisões", hint: "Conhecimento", href: "/intelligence/decisions", icon: ListChecks },
+  { id: "nav-map", label: "Ir para Grafo de inteligência", hint: "Conhecimento", href: "/intelligence/map", icon: GitBranch },
+  { id: "nav-timeline", label: "Ir para Linha do tempo", hint: "Conhecimento", href: "/intelligence/timeline", icon: History },
+  { id: "nav-studio", label: "Ir para Worker Studio", hint: "Construir", href: "/studio", icon: Workflow },
+  { id: "nav-factory", label: "Ir para Fábrica", hint: "Construir", href: "/factory", icon: Factory },
+  { id: "nav-library", label: "Ir para Habilidades", hint: "Construir", href: "/library", icon: Layers3 },
+  { id: "nav-integrations", label: "Ir para Integrações", hint: "Conectar", href: "/integrations", icon: PlugZap },
+  { id: "nav-observatory", label: "Ir para Observatório", hint: "Observar", href: "/observatory", icon: Activity },
+  { id: "nav-outcomes", label: "Ir para Resultados", hint: "Observar", href: "/outcomes", icon: PackageOpen },
+  { id: "nav-evolve", label: "Ir para Melhorar", hint: "Observar", href: "/evolve", icon: Sparkles },
 ]
 
 const TYPE_LABEL: Record<SearchResult["type"], string> = {
-  entity: "Entity",
-  opportunity: "Opportunity",
-  page: "Page",
-  decision: "Decision",
-  worker: "Worker",
+  entity: "Entidade",
+  opportunity: "Oportunidade",
+  page: "Página",
+  decision: "Decisão",
+  worker: "Agente",
 }
 
 type PaletteItem = { kind: "command"; command: NavCommand } | { kind: "result"; result: SearchResult }
@@ -189,7 +189,7 @@ export function CommandPalette() {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-start justify-center bg-black/60 pt-[12vh]" onClick={() => setOpen(false)}>
-      <div role="dialog" aria-modal="true" aria-label="Command palette" className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-popover shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label="Paleta de comandos" className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-popover shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
           <Search className="size-4 shrink-0 text-muted-foreground" />
           <input
@@ -197,8 +197,8 @@ export function CommandPalette() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Search or jump to…"
-            aria-label="Command palette search"
+            placeholder="Pesquisar ou ir para…"
+            aria-label="Pesquisa da paleta de comandos"
             aria-activedescendant={items[activeIndex] ? `cmdk-${activeIndex}` : undefined}
             role="combobox"
             aria-expanded
@@ -209,8 +209,8 @@ export function CommandPalette() {
         </div>
 
         <ul id="cmdk-list" role="listbox" className="max-h-96 overflow-y-auto p-1.5">
-          {searching && <li className="px-3 py-2 text-xs text-muted-foreground">Searching…</li>}
-          {items.length === 0 && !searching && <li className="px-3 py-6 text-center text-xs text-muted-foreground">No matches. Try a different term.</li>}
+          {searching && <li className="px-3 py-2 text-xs text-muted-foreground">Pesquisando…</li>}
+          {items.length === 0 && !searching && <li className="px-3 py-6 text-center text-xs text-muted-foreground">Nenhum resultado. Tente outro termo.</li>}
           {items.map((item, i) => {
             const active = i === activeIndex
             if (item.kind === "command") {

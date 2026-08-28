@@ -30,7 +30,7 @@ import { listDecisions } from "./decisions"
 import { listRelationsForSubject } from "./relations"
 import { listCanonicalEntities, listRelationshipsForProject } from "@/lib/knowledge/repo"
 import { listOpportunities } from "@/lib/opportunity/repo"
-import { listOpportunityGraph } from "./opportunity-graph"
+import { listOpportunityGraph, resolveOpportunityGraphNodeLabel } from "./opportunity-graph"
 import { listPages } from "@/lib/pages/repo"
 import { getOpportunity } from "@/lib/opportunity/repo"
 
@@ -131,7 +131,7 @@ async function buildOpportunityGraph(orgId: string, projectId: string, filters: 
     const graphEdges = await listOpportunityGraph(orgId, opp.id)
     for (const edge of graphEdges) {
       const nodeId = `${edge.nodeType}:${edge.nodeId}`
-      if (!nodes.has(nodeId)) nodes.set(nodeId, { id: nodeId, type: edge.nodeType, label: edge.nodeId })
+      if (!nodes.has(nodeId)) nodes.set(nodeId, { id: nodeId, type: edge.nodeType, label: await resolveOpportunityGraphNodeLabel(orgId, edge.nodeType, edge.nodeId) })
       edges.push({ from: oppNodeId, to: nodeId, relation: edge.relation })
     }
   }

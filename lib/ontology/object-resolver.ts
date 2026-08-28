@@ -13,7 +13,7 @@ import "server-only"
 
 import { getEntity, listEvidenceForEntity, listRelationshipsForEntity } from "@/lib/knowledge/repo"
 import { getOpportunity, listOpportunities } from "@/lib/opportunity/repo"
-import { listOpportunityGraph } from "@/lib/intelligence/opportunity-graph"
+import { listOpportunityGraph, resolveOpportunityGraphNodeLabel } from "@/lib/intelligence/opportunity-graph"
 import { getPage, getPageByOpportunity } from "@/lib/pages/repo"
 import { getDecision } from "@/lib/intelligence/decisions"
 import { getObservation } from "@/lib/intelligence/observations"
@@ -22,6 +22,7 @@ import { resolveActionPlan } from "@/lib/intelligence/action-plan"
 import { evaluatePolicy } from "@/lib/intelligence/policy-engine"
 import { listEvidenceForSubject } from "@/lib/intelligence/evidence"
 import { getWorkflowRun } from "@/lib/workflow/repo"
+import { translateAction, translateActionStatusFem, translatePipeline } from "./pt-br"
 
 export type ObjectType = "entity" | "opportunity" | "page" | "decision" | "agent_run" | "observation"
 
@@ -104,9 +105,9 @@ async function resolveEntity(orgId: string, projectId: string, id: string): Prom
     score: null,
     confidence: null,
     properties: [
-      { label: "Type", value: entity.entityType },
-      { label: "Attributes", value: Object.keys(entity.attributes).length > 0 ? Object.keys(entity.attributes).join(", ") : null },
-      { label: "Discovered", value: new Date(entity.createdAt).toLocaleDateString() },
+      { label: "Tipo", value: entity.entityType },
+      { label: "Atributos", value: Object.keys(entity.attributes).length > 0 ? Object.keys(entity.attributes).join(", ") : null },
+      { label: "Descoberta em", value: new Date(entity.createdAt).toLocaleDateString("pt-BR") },
     ],
     relationships: relationships.map((r) => {
       const targetId = r.sourceEntityId === id ? r.targetEntityId : r.sourceEntityId
@@ -115,9 +116,9 @@ async function resolveEntity(orgId: string, projectId: string, id: string): Prom
     evidence: evidence.map((e) => ({ id: e.id, fact: e.fact, source: e.sourceType, sourceUrl: e.sourceUrl, confidence: e.confidence, verificationStatus: e.verificationStatus })),
     actions:
       relatedOpportunities.length > 0
-        ? [{ label: `View ${relatedOpportunities.length} real opportunit${relatedOpportunities.length === 1 ? "y" : "ies"}`, kind: "link", href: "/opportunities" }]
-        : [{ label: "No real opportunities target this entity yet", kind: "unavailable" }],
-    history: [{ at: entity.createdAt, label: "Discovered" }, ...(entity.updatedAt !== entity.createdAt ? [{ at: entity.updatedAt, label: "Updated" }] : [])],
+        ? [{ label: `Ver ${relatedOpportunities.length} oportunidade${relatedOpportunities.length === 1 ? "" : "s"} real${relatedOpportunities.length === 1 ? "" : "is"}`, kind: "link", href: "/opportunities" }]
+        : [{ label: "Nenhuma oportunidade real direciona-se a esta entidade ainda", kind: "unavailable" }],
+    history: [{ at: entity.createdAt, label: "Descoberta" }, ...(entity.updatedAt !== entity.createdAt ? [{ at: entity.updatedAt, label: "Atualizada" }] : [])],
   }
 }
 
@@ -140,23 +141,23 @@ async function resolveOpportunity(orgId: string, projectId: string, id: string):
     score: opportunity.finalScore,
     confidence: opportunity.confidenceScore,
     properties: [
-      { label: "Target intent", value: opportunity.targetIntent },
-      { label: "Business value", value: opportunity.businessValueScore },
-      { label: "Source grounding", value: opportunity.sourceGroundingScore },
-      { label: "Outline completeness", value: opportunity.outlineCompletenessScore },
-      { label: "Entity coverage", value: opportunity.entityCoverageScore },
+      { label: "Intenção-alvo", value: opportunity.targetIntent },
+      { label: "Valor de negócio", value: opportunity.businessValueScore },
+      { label: "Fundamentação da fonte", value: opportunity.sourceGroundingScore },
+      { label: "Completude do esboço", value: opportunity.outlineCompletenessScore },
+      { label: "Cobertura da entidade", value: opportunity.entityCoverageScore },
     ],
     relationships: [
       ...(entity ? [{ relation: "targets", targetType: "entity", targetId: entity.id, targetLabel: entity.name }] : []),
-      ...graphEdges.map((e) => ({ relation: e.relation, targetType: e.nodeType, targetId: e.nodeId, targetLabel: e.nodeId })),
+      ...(await Promise.all(graphEdges.map(async (e) => ({ relation: e.relation, targetType: e.nodeType, targetId: e.nodeId, targetLabel: await resolveOpportunityGraphNodeLabel(orgId, e.nodeType, e.nodeId) })))),
     ],
     evidence: (await listEvidenceForSubject(orgId, "opportunity", id)).map((e) => ({ id: e.id, fact: null, source: e.source, sourceUrl: e.sourceUrl, confidence: e.confidence, verificationStatus: e.verificationStatus })),
     actions: realPage
-      ? [{ label: "View real page", kind: "link", href: `/pages/${realPage.id}` }]
+      ? [{ label: "Ver página real", kind: "link", href: `/pages/${realPage.id}` }]
       : opportunity.status === "approved" || opportunity.status === "discovered" || opportunity.status === "qualified"
-        ? [{ label: "Generate real page", kind: "link", href: "/opportunities" }]
-        : [{ label: `No page yet — status: ${opportunity.status}`, kind: "unavailable" }],
-    history: [{ at: opportunity.createdAt, label: "Discovered" }, ...(opportunity.reviewedAt ? [{ at: opportunity.reviewedAt, label: `Reviewed (${opportunity.status})` }] : [])],
+        ? [{ label: "Gerar página real", kind: "link", href: "/opportunities" }]
+        : [{ label: `Ainda sem página — status: ${opportunity.status}`, kind: "unavailable" }],
+    history: [{ at: opportunity.createdAt, label: "Descoberta" }, ...(opportunity.reviewedAt ? [{ at: opportunity.reviewedAt, label: `Revisada (${opportunity.status})` }] : [])],
   }
 }
 
@@ -174,21 +175,21 @@ async function resolvePage(orgId: string, projectId: string, id: string): Promis
     score: page.qualityScore,
     confidence: null,
     properties: [
-      { label: "SEO score", value: page.seoScore },
-      { label: "AEO score", value: page.aeoScore },
-      { label: "GEO score", value: page.geoScore },
-      { label: "Information gain", value: page.informationGainScore },
-      { label: "Meta description", value: page.metaDescription },
+      { label: "Pontuação SEO", value: page.seoScore },
+      { label: "Pontuação AEO", value: page.aeoScore },
+      { label: "Pontuação GEO", value: page.geoScore },
+      { label: "Ganho de informação", value: page.informationGainScore },
+      { label: "Meta descrição", value: page.metaDescription },
     ],
     relationships: opportunity ? [{ relation: "materializes", targetType: "opportunity", targetId: opportunity.id, targetLabel: opportunity.title }] : [],
     evidence: (await listEvidenceForSubject(orgId, "page", id)).map((e) => ({ id: e.id, fact: null, source: e.source, sourceUrl: e.sourceUrl, confidence: e.confidence, verificationStatus: e.verificationStatus })),
     actions:
       page.status === "published"
-        ? [{ label: "View live", kind: "link", href: `/pages/${page.id}` }]
+        ? [{ label: "Ver publicada", kind: "link", href: `/pages/${page.id}` }]
         : page.status === "quality_rejected"
-          ? [{ label: `Held for thin content${page.rejectionReasons?.length ? `: ${page.rejectionReasons[0]}` : ""}`, kind: "unavailable" }]
-          : [{ label: "Open page detail", kind: "link", href: `/pages/${page.id}` }],
-    history: [{ at: page.createdAt, label: "Created" }, ...(page.updatedAt !== page.createdAt ? [{ at: page.updatedAt, label: `Updated (${page.status})` }] : [])],
+          ? [{ label: `Retida por conteúdo raso${page.rejectionReasons?.length ? `: ${page.rejectionReasons[0]}` : ""}`, kind: "unavailable" }]
+          : [{ label: "Abrir detalhe da página", kind: "link", href: `/pages/${page.id}` }],
+    history: [{ at: page.createdAt, label: "Criada" }, ...(page.updatedAt !== page.createdAt ? [{ at: page.updatedAt, label: `Atualizada (${page.status})` }] : [])],
   }
 }
 
@@ -201,21 +202,21 @@ async function resolveDecision(orgId: string, projectId: string, id: string): Pr
   return {
     type: "decision",
     id: decision.id,
-    title: decision.action.replaceAll("_", " "),
+    title: translateAction(decision.action),
     subtitle: decision.reason,
     status: decision.status,
     score: null,
     confidence: decision.confidence,
     properties: [
-      { label: "Risk", value: decision.risk },
-      { label: "Priority", value: decision.priority },
-      { label: "Expected impact", value: decision.expectedImpact },
-      { label: "Subject", value: `${decision.subjectType}${decision.subjectId ? ` · ${decision.subjectId}` : ""}` },
+      { label: "Risco", value: decision.risk },
+      { label: "Prioridade", value: decision.priority },
+      { label: "Impacto esperado", value: decision.expectedImpact },
+      { label: "Assunto", value: `${decision.subjectType}${decision.subjectId ? ` · ${decision.subjectId}` : ""}` },
     ],
     relationships: decision.subjectId ? [{ relation: "targets", targetType: decision.subjectType, targetId: decision.subjectId, targetLabel: decision.subjectId }] : [],
     evidence: [],
-    actions: plan.status === "unsupported" ? [{ label: `Not yet automatable: ${plan.unsupportedReason}`, kind: "unavailable" }] : !policy.allowed ? [{ label: policy.reason, kind: "unavailable" }] : [{ label: "Approve & execute", kind: "link", href: "/intelligence/decisions" }],
-    history: [{ at: decision.createdAt, label: "Decided" }, ...actions.map((a) => ({ at: a.startedAt ?? a.createdAt, label: `Action ${a.status}` }))],
+    actions: plan.status === "unsupported" ? [{ label: `Ainda não é possível automatizar: ${plan.unsupportedReason}`, kind: "unavailable" }] : !policy.allowed ? [{ label: policy.reason, kind: "unavailable" }] : [{ label: "Aprovar e executar", kind: "link", href: "/intelligence/decisions" }],
+    history: [{ at: decision.createdAt, label: "Decidida" }, ...actions.map((a) => ({ at: a.startedAt ?? a.createdAt, label: `Ação ${translateActionStatusFem(a.status)}` }))],
   }
 }
 
@@ -226,22 +227,22 @@ async function resolveAgentRun(orgId: string, projectId: string, id: string): Pr
   return {
     type: "agent_run",
     id: run.id,
-    title: run.pipeline.replaceAll("_", " "),
+    title: translatePipeline(run.pipeline),
     subtitle: `${run.subjectType} · ${run.subjectId}`,
     status: run.status,
     score: null,
     confidence: null,
     properties: [
-      { label: "Attempt", value: `${run.attemptCount} of ${run.maxAttempts}` },
-      { label: "Priority", value: run.priority },
-      { label: "Cost", value: run.costUsd != null ? `$${run.costUsd.toFixed(4)}` : null },
+      { label: "Tentativa", value: `${run.attemptCount} de ${run.maxAttempts}` },
+      { label: "Prioridade", value: run.priority },
+      { label: "Custo", value: run.costUsd != null ? `US$ ${run.costUsd.toFixed(4)}` : null },
       { label: "Tokens", value: run.inputTokens != null && run.outputTokens != null ? run.inputTokens + run.outputTokens : null },
-      { label: "Checkpoint", value: run.checkpoint ? `step ${run.checkpoint.lastCompletedSequence}` : null },
+      { label: "Checkpoint", value: run.checkpoint ? `etapa ${run.checkpoint.lastCompletedSequence}` : null },
     ],
     relationships: [{ relation: "operates_on", targetType: run.subjectType, targetId: run.subjectId, targetLabel: run.subjectId }],
     evidence: [],
-    actions: [{ label: "Open run inspector", kind: "link", href: `/agent-runs/${run.id}` }],
-    history: [{ at: run.createdAt, label: "Queued" }],
+    actions: [{ label: "Abrir execução", kind: "link", href: `/agent-runs/${run.id}` }],
+    history: [{ at: run.createdAt, label: "Na fila" }],
   }
 }
 
@@ -257,10 +258,10 @@ async function resolveObservation(orgId: string, projectId: string, id: string):
     status: observation.status,
     score: null,
     confidence: observation.confidence,
-    properties: [{ label: "Source", value: observation.source }, { label: "Real signals", value: observation.signalIds.length }],
+    properties: [{ label: "Origem", value: observation.source }, { label: "Sinais reais", value: observation.signalIds.length }],
     relationships: observation.signalIds.map((sid) => ({ relation: "derived_from", targetType: "signal", targetId: sid, targetLabel: sid })),
     evidence: [],
-    actions: [{ label: "Open Decision Center", kind: "link", href: "/intelligence/decisions" }],
+    actions: [{ label: "Abrir Central de Decisões", kind: "link", href: "/intelligence/decisions" }],
     history: [],
   }
 }

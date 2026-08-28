@@ -16,7 +16,7 @@ export function EmptyState({ icon: Icon, title, body }: { icon: LucideIcon; titl
   )
 }
 
-export function LoadingState({ label = "Loading real data…" }: { label?: string }) {
+export function LoadingState({ label = "Carregando dados reais…" }: { label?: string }) {
   return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground">
       <Clock3 className="size-4" /> {label}

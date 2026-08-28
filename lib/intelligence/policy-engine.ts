@@ -21,23 +21,30 @@ import type { ActionPlan } from "./action-plan"
 import type { IntelligenceDecision } from "./decisions"
 import { hasCapability } from "@/lib/workflow/permissions"
 import { resolveBudgetPolicy } from "@/lib/workflow/budget-policy"
+import { translateStatus } from "@/lib/ontology/pt-br"
 
 export interface PolicyDecision {
   allowed: boolean
   reason: string
 }
 
+/* `reason` is real, user-facing text (rendered directly in the Action
+ * UI, Fase 3 §7) — written in pt-BR. The all-caps prefixes
+ * (STALE_DECISION/MISSING_CAPABILITY/BUDGET_EXCEEDED) are real internal
+ * codes some tests match on (tests/integration/decision-action-bridge.test.ts)
+ * and stay exactly as-is; only the natural-language explanation after
+ * each one is translated. */
 export async function evaluatePolicy(plan: ActionPlan, decision: IntelligenceDecision): Promise<PolicyDecision> {
   if (plan.status === "unsupported") {
-    return { allowed: false, reason: plan.unsupportedReason ?? `No real execution path exists for ${plan.actionType} yet.` }
+    return { allowed: false, reason: plan.unsupportedReason ?? `Ainda não existe um caminho real de execução para ${plan.actionType}.` }
   }
 
   if (decision.status !== "approved") {
-    return { allowed: false, reason: `Decision is "${decision.status}", not "approved" — the ActionExecutor never dispatches an action for a decision a human hasn't approved.` }
+    return { allowed: false, reason: `A decisão está "${translateStatus(decision.status).toLowerCase()}", não "aprovada" — o executor de ações nunca despacha uma ação para uma decisão que um humano ainda não aprovou.` }
   }
 
   if (decision.expiresAt != null && decision.expiresAt < Date.now()) {
-    return { allowed: false, reason: `STALE_DECISION — this decision expired at ${new Date(decision.expiresAt).toISOString()}; the evidence it was approved on may no longer hold. Re-run the correlation/decision scan for a fresh decision instead.` }
+    return { allowed: false, reason: `STALE_DECISION — esta decisão expirou em ${new Date(decision.expiresAt).toLocaleString("pt-BR")}; a evidência sobre a qual foi aprovada pode não valer mais. Rode novamente a varredura de correlação/decisão para obter uma decisão atualizada.` }
   }
 
   // §6: fail closed. A plan naming an agent with a capability it
@@ -45,10 +52,10 @@ export async function evaluatePolicy(plan: ActionPlan, decision: IntelligenceDec
   if (plan.agentType) {
     const missing = plan.requiredCapabilities.filter((cap) => !hasCapability(plan.agentType!, cap))
     if (missing.length > 0) {
-      return { allowed: false, reason: `MISSING_CAPABILITY — ${plan.agentType} lacks required capabilit${missing.length === 1 ? "y" : "ies"}: ${missing.join(", ")}.` }
+      return { allowed: false, reason: `MISSING_CAPABILITY — ${plan.agentType} não possui a${missing.length === 1 ? "" : "s"} capacidade${missing.length === 1 ? "" : "s"} necessária${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}.` }
     }
   } else if (plan.requiredCapabilities.length > 0) {
-    return { allowed: false, reason: `MISSING_CAPABILITY — this action requires capabilities (${plan.requiredCapabilities.join(", ")}) but no agent is assigned to perform it.` }
+    return { allowed: false, reason: `MISSING_CAPABILITY — esta ação exige capacidades (${plan.requiredCapabilities.join(", ")}), mas nenhum agente está designado para executá-la.` }
   }
 
   // A real, useful pre-check: the Decision Engine's own estimated cost
@@ -59,12 +66,12 @@ export async function evaluatePolicy(plan: ActionPlan, decision: IntelligenceDec
   if (plan.executionPolicy === "workflow") {
     const budget = await resolveBudgetPolicy(plan.orgId, plan.projectId)
     if (budget.maxSteps != null && plan.estimatedCost.agentSteps != null && plan.estimatedCost.agentSteps > budget.maxSteps) {
-      return { allowed: false, reason: `BUDGET_EXCEEDED — this action's estimated ${plan.estimatedCost.agentSteps} steps already exceeds the project's ${budget.maxSteps}-step budget ceiling.` }
+      return { allowed: false, reason: `BUDGET_EXCEEDED — esta ação estima ${plan.estimatedCost.agentSteps} etapas, o que já excede o teto de ${budget.maxSteps} etapas orçado para o projeto.` }
     }
     if (budget.maxTokens != null && plan.estimatedCost.tokens != null && plan.estimatedCost.tokens > budget.maxTokens) {
-      return { allowed: false, reason: `BUDGET_EXCEEDED — this action's estimated ${plan.estimatedCost.tokens} tokens already exceeds the project's ${budget.maxTokens}-token budget ceiling.` }
+      return { allowed: false, reason: `BUDGET_EXCEEDED — esta ação estima ${plan.estimatedCost.tokens} tokens, o que já excede o teto de ${budget.maxTokens} tokens orçado para o projeto.` }
     }
   }
 
-  return { allowed: true, reason: "Policy checks passed: decision approved and fresh, every required capability present, estimated cost within budget." }
+  return { allowed: true, reason: "Verificações de política aprovadas: decisão aprovada e atualizada, todas as capacidades necessárias presentes, custo estimado dentro do orçamento." }
 }

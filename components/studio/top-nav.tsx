@@ -37,43 +37,43 @@ const GROUPS = [
   {
     label: "Workspace",
     links: [
-      { href: "/", label: "Overview", icon: Gauge },
+      { href: "/", label: "Visão geral", icon: Gauge },
       { href: "/mission", label: "Mission Control", icon: Radar },
-      { href: "/workforce", label: "Workers", icon: Users },
-      { href: "/outputs", label: "Runs & Outputs", icon: Activity },
-      { href: "/agents/live", label: "Live Agent Graph", icon: Cpu },
-      { href: "/approvals", label: "Approvals", icon: ShieldCheck },
+      { href: "/workforce", label: "Agentes", icon: Users },
+      { href: "/outputs", label: "Execuções e resultados", icon: Activity },
+      { href: "/agents/live", label: "Grafo de agentes ao vivo", icon: Cpu },
+      { href: "/approvals", label: "Aprovações", icon: ShieldCheck },
     ],
   },
   {
-    label: "Knowledge",
+    label: "Conhecimento",
     links: [
-      { href: "/websites", label: "Websites", icon: Globe },
-      { href: "/knowledge", label: "Knowledge Graph", icon: Network },
-      { href: "/opportunities", label: "Opportunities", icon: Target },
-      { href: "/intelligence/decisions", label: "Decision Center", icon: ListChecks },
-      { href: "/intelligence/map", label: "Intelligence Graph", icon: GitBranch },
-      { href: "/intelligence/timeline", label: "Timeline", icon: History },
+      { href: "/websites", label: "Sites", icon: Globe },
+      { href: "/knowledge", label: "Grafo de conhecimento", icon: Network },
+      { href: "/opportunities", label: "Oportunidades", icon: Target },
+      { href: "/intelligence/decisions", label: "Central de decisões", icon: ListChecks },
+      { href: "/intelligence/map", label: "Grafo de inteligência", icon: GitBranch },
+      { href: "/intelligence/timeline", label: "Linha do tempo", icon: History },
     ],
   },
   {
-    label: "Build",
+    label: "Construir",
     links: [
       { href: "/studio", label: "Worker Studio", icon: Workflow },
-      { href: "/factory", label: "Factory", icon: Factory },
-      { href: "/library", label: "Skills", icon: Layers3 },
+      { href: "/factory", label: "Fábrica", icon: Factory },
+      { href: "/library", label: "Habilidades", icon: Layers3 },
     ],
   },
   {
-    label: "Connect",
-    links: [{ href: "/integrations", label: "Integrations", icon: PlugZap }],
+    label: "Conectar",
+    links: [{ href: "/integrations", label: "Integrações", icon: PlugZap }],
   },
   {
-    label: "Observe",
+    label: "Observar",
     links: [
-      { href: "/observatory", label: "Observatory", icon: Activity },
-      { href: "/outcomes", label: "Outcomes", icon: PackageOpen },
-      { href: "/evolve", label: "Improve", icon: Sparkles },
+      { href: "/observatory", label: "Observatório", icon: Activity },
+      { href: "/outcomes", label: "Resultados", icon: PackageOpen },
+      { href: "/evolve", label: "Melhorar", icon: Sparkles },
     ],
   },
 ] as const
@@ -93,7 +93,7 @@ export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const [openGroup, setOpenGroup] = useState<string | null>(null)
   const navRef = useRef<HTMLDivElement>(null)
-  const orgName = (session as { organizationName?: string } | null)?.organizationName ?? "Primary workspace"
+  const orgName = (session as { organizationName?: string } | null)?.organizationName ?? "Workspace principal"
 
   useEffect(() => {
     setOpen(false)
@@ -122,10 +122,10 @@ export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/92 backdrop-blur-xl">
       <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-primary-foreground">
-        Skip to content
+        Pular para o conteúdo
       </a>
       <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-3 px-4 sm:px-6">
-        <Link href="/" className="flex shrink-0 items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Menlo Whitehabbit overview">
+        <Link href="/" className="flex shrink-0 items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Visão geral da Whitehabbit">
           <span className="flex size-8 items-center justify-center rounded-lg border border-primary/25 bg-primary/10 text-primary"><Boxes className="size-4" /></span>
           <span className="hidden font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-foreground sm:inline">Whitehabbit</span>
         </Link>
@@ -136,7 +136,7 @@ export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview
             <span className="max-w-36 truncate">{orgName}</span>
             <ChevronDown className="size-3" />
           </button>
-          {workspaceOpen && <div className="absolute left-0 top-10 w-64 rounded-lg border border-border bg-popover p-3 shadow-xl"><p className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">Authenticated organization</p><p className="mt-2 truncate text-sm font-medium text-popover-foreground">{orgName}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Organization switching is unavailable in this release.</p></div>}
+          {workspaceOpen && <div className="absolute left-0 top-10 w-64 rounded-lg border border-border bg-popover p-3 shadow-xl"><p className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">Organização autenticada</p><p className="mt-2 truncate text-sm font-medium text-popover-foreground">{orgName}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">A troca de organização não está disponível nesta versão.</p></div>}
         </div>
 
         <nav ref={navRef} className="hidden min-w-0 flex-1 items-center gap-1 xl:flex" aria-label="Primary navigation">
@@ -180,14 +180,14 @@ export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
-          <button className="hidden h-8 items-center gap-2 rounded-md border border-border bg-card px-3 text-[11px] text-muted-foreground hover:text-foreground md:flex" onClick={() => window.dispatchEvent(new CustomEvent("open-command-palette"))} aria-label="Open command menu"><Search className="size-3.5" />Search <kbd className="font-mono text-[9px]">⌘K</kbd></button>
+          <button className="hidden h-8 items-center gap-2 rounded-md border border-border bg-card px-3 text-[11px] text-muted-foreground hover:text-foreground md:flex" onClick={() => window.dispatchEvent(new CustomEvent("open-command-palette"))} aria-label="Abrir menu de comando"><Search className="size-3.5" />Pesquisar <kbd className="font-mono text-[9px]">⌘K</kbd></button>
           {runtimeMode && runtimeMode !== "production" && <span className="hidden rounded-full border border-warn/30 bg-warn/10 px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-warn sm:inline">{runtimeMode}</span>}
-          {session && <button onClick={() => signOut({ callbackUrl: "/login" })} className="hidden size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground sm:flex" aria-label="Sign out"><LogOut className="size-4" /></button>}
-          <button onClick={() => setOpen((value) => !value)} className="flex size-9 items-center justify-center rounded-lg border border-border text-muted-foreground xl:hidden" aria-expanded={open} aria-label="Toggle primary navigation">{open ? <X className="size-4" /> : <Menu className="size-4" />}</button>
+          {session && <button onClick={() => signOut({ callbackUrl: "/login" })} className="hidden size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground sm:flex" aria-label="Sair"><LogOut className="size-4" /></button>}
+          <button onClick={() => setOpen((value) => !value)} className="flex size-9 items-center justify-center rounded-lg border border-border text-muted-foreground xl:hidden" aria-expanded={open} aria-label="Alternar navegação principal">{open ? <X className="size-4" /> : <Menu className="size-4" />}</button>
         </div>
       </div>
 
-      {open && <nav className="max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-t border-border bg-background px-4 py-5 xl:hidden" aria-label="Mobile primary navigation"><div className="mx-auto grid max-w-4xl gap-6 sm:grid-cols-2 lg:grid-cols-4">{GROUPS.map((group) => <section key={group.label}><p className="px-2 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">{group.label}</p><div className="mt-2 flex flex-col gap-1">{group.links.map((link) => { const active = isActive(pathname, link.href); const Icon = link.icon; return <Link key={link.href} href={link.href} aria-current={active ? "page" : undefined} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm ${active ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"}`}><Icon className="size-4" />{link.label}</Link> })}</div></section>)}</div></nav>}
+      {open && <nav className="max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-t border-border bg-background px-4 py-5 xl:hidden" aria-label="Navegação principal (móvel)"><div className="mx-auto grid max-w-4xl gap-6 sm:grid-cols-2 lg:grid-cols-4">{GROUPS.map((group) => <section key={group.label}><p className="px-2 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">{group.label}</p><div className="mt-2 flex flex-col gap-1">{group.links.map((link) => { const active = isActive(pathname, link.href); const Icon = link.icon; return <Link key={link.href} href={link.href} aria-current={active ? "page" : undefined} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm ${active ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"}`}><Icon className="size-4" />{link.label}</Link> })}</div></section>)}</div></nav>}
       <CommandPalette />
     </header>
   )

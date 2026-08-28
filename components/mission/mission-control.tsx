@@ -1,34 +1,184 @@
 "use client"
 
-/* Mission Control (Phase 7, §16-17, ADR-040) — reads live API data
- * only: /api/v1/intelligence/mission (real KPIs) and
- * /api/v1/intelligence/next-action (the real highest-priority pending
- * Decision). No hardcoded metrics, no fake charts, no decorative
- * numbers — a metric this tenant has no real data for yet renders as
- * "—", never a guessed value (§40's Known/Estimated/Unavailable
- * discipline, same as the rest of this app). */
+/* ================================================================== *
+ * MISSION CONTROL (Fase 5 — implementação da nova linguagem visual
+ * definida em docs/fase1..4-*.md) — reads live API data only:
+ * /api/v1/intelligence/mission (real KPIs), /api/v1/intelligence/next-action
+ * (the real highest-priority pending Decision), /api/v1/intelligence/map
+ * (the real Intelligence Field excerpt), /api/v1/intelligence/timeline
+ * (real Signal UI feed), /api/v1/search (the real, persistent universal
+ * search — never hidden behind ⌘K only). No hardcoded metrics, no fake
+ * charts, no decorative numbers — a metric this tenant has no real data
+ * for yet renders as "—" / "Dados ainda não disponíveis", never a
+ * guessed value.
+ *
+ * This is not a KPI dashboard: there is no stack of independent cards.
+ * The composition follows docs/fase4-composicao-telas.md §1 —
+ * Comando/Busca → Estado do sistema → Campo de Inteligência (the core
+ * element, a real graph excerpt with visual presence, not a small card)
+ * → Sinais ativos (a real signal feed) → Ação recomendada, anchored to
+ * its own object, never a generic central card.
+ * ================================================================== */
 
-import { useEffect, useState } from "react"
-import Link from "next/link"
-import { AlertTriangle, ArrowRight, CircleAlert, Clock3, Cpu } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
+import { AlertTriangle, ArrowRight, CircleAlert, Cpu, Search, X } from "lucide-react"
 import { WorkforceNav } from "@/components/workforce/nav"
 import type { MissionSnapshot, NextAction } from "@/lib/intelligence/mission"
 import type { TimelineEntry } from "@/lib/intelligence/timeline"
-import type { Opportunity } from "@/lib/opportunity/model"
 import type { WorkflowRun } from "@/lib/workflow/types"
+import type { SearchResult } from "@/lib/search"
 import { ObjectInspector, useObjectInspector } from "@/components/ontology/object-inspector"
+import { IntelligenceField } from "@/components/mission/intelligence-field"
+import { SignalRow } from "@/components/mission/signal-row"
+import { LoadingState } from "@/components/ontology/states"
+import { translateAction, translatePipeline, translateStatus } from "@/lib/ontology/pt-br"
 
 const RISK_TONE: Record<string, string> = { low: "text-grow", medium: "text-warn", high: "text-destructive", critical: "text-destructive" }
+const RISK_LABEL: Record<string, string> = { low: "baixo", medium: "médio", high: "alto", critical: "crítico" }
+const PRIORITY_LABEL: Record<string, string> = { low: "baixa", medium: "média", high: "alta", critical: "crítica" }
 
-function NextActionCard({ nextAction, onActed }: { nextAction: NextAction | null; onActed: () => void }) {
+const TYPE_LABEL: Record<SearchResult["type"], string> = {
+  entity: "Entidade",
+  opportunity: "Oportunidade",
+  page: "Página",
+  decision: "Decisão",
+  worker: "Agente",
+}
+const INSPECTABLE_SEARCH_TYPES = new Set<SearchResult["type"]>(["entity", "opportunity", "page", "decision"])
+
+/* HEADER/COMMAND — a persistent, always-visible search field (§12: the
+ * search "starts to look like a universal system interface"), never
+ * hidden behind a ⌘K button. Finding an object opens the same real
+ * Object Inspector every other surface uses — no parallel experience. */
+function CommandBar({ projectId, onOpen }: { projectId: string | null; onOpen: (ref: { type: "entity" | "opportunity" | "page" | "decision"; id: string }) => void }) {
+  const router = useRouter()
+  const [query, setQuery] = useState("")
+  const [results, setResults] = useState<SearchResult[]>([])
+  const [open, setOpen] = useState(false)
+  const [searching, setSearching] = useState(false)
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (query.trim().length < 2) {
+      setResults([])
+      return
+    }
+    setSearching(true)
+    const controller = new AbortController()
+    const params = new URLSearchParams({ q: query.trim() })
+    if (projectId) params.set("projectId", projectId)
+    const timer = setTimeout(() => {
+      fetch(`/api/v1/search?${params.toString()}`, { signal: controller.signal })
+        .then((r) => (r.ok ? r.json() : { results: [] }))
+        .then((body) => {
+          setResults(body.results ?? [])
+          setOpen(true)
+        })
+        .catch((err) => {
+          if (err.name !== "AbortError") setResults([])
+        })
+        .finally(() => setSearching(false))
+    }, 200)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [query, projectId])
+
+  useEffect(() => {
+    function onPointerDown(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", onPointerDown)
+    return () => document.removeEventListener("mousedown", onPointerDown)
+  }, [])
+
+  function pick(result: SearchResult) {
+    if (INSPECTABLE_SEARCH_TYPES.has(result.type)) onOpen({ type: result.type as "entity" | "opportunity" | "page" | "decision", id: result.id })
+    else router.push(result.href)
+    setOpen(false)
+    setQuery("")
+  }
+
+  return (
+    <div ref={boxRef} className="relative">
+      <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 focus-within:border-primary/50">
+        <Search className="size-4 shrink-0 text-muted-foreground" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => results.length > 0 && setOpen(true)}
+          placeholder="Pesquisar entidades, oportunidades, páginas, decisões…"
+          aria-label="Pesquisa universal do sistema"
+          className="w-full bg-transparent text-[13.5px] text-foreground placeholder:text-muted-foreground focus:outline-none"
+        />
+        {query && (
+          <button onClick={() => { setQuery(""); setResults([]); setOpen(false) }} aria-label="Limpar pesquisa" className="shrink-0 text-muted-foreground hover:text-foreground">
+            <X className="size-3.5" />
+          </button>
+        )}
+      </div>
+      {open && (searching || results.length > 0) && (
+        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-20 max-h-80 overflow-y-auto rounded-lg border border-border bg-popover shadow-xl">
+          {searching && <p className="px-3 py-2.5 text-xs text-muted-foreground">Pesquisando…</p>}
+          {!searching &&
+            results.map((r) => (
+              <button key={`${r.type}:${r.id}`} onClick={() => pick(r)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-secondary/60">
+                <span className="min-w-0 flex-1 truncate text-[13px] text-popover-foreground">{r.title}</span>
+                <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.08em] text-primary">{TYPE_LABEL[r.type]}</span>
+              </button>
+            ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* SYSTEM STATE — one continuous strip divided by thin separators, real
+ * state buckets (Fase 4 §1 item 2) — never a grid of individually
+ * bordered/shadowed KPI tiles. Horizontal-scroll-with-fade at narrow
+ * widths, the same affordance already established for TopNav and the
+ * Page Factory Pipeline. */
+function StateCell({ label, value, tone = "text-foreground" }: { label: string; value: string | number; tone?: string }) {
+  return (
+    <div className="flex shrink-0 flex-col gap-0.5 px-4 py-3 first:pl-0">
+      <span className={`font-mono text-lg font-semibold tabular-nums leading-none ${tone}`}>{value}</span>
+      <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">{label}</span>
+    </div>
+  )
+}
+
+function SystemStateStrip({ snapshot, activeRuns }: { snapshot: MissionSnapshot; activeRuns: WorkflowRun[] }) {
+  return (
+    <div className="relative">
+      <div className="flex divide-x divide-border overflow-x-auto border-y border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <StateCell label="Entidades reais" value={snapshot.knowledgeAuthority.entityCount} />
+        <StateCell label="Páginas reais" value={snapshot.pageIntelligence.pageCount} />
+        <StateCell label="Em execução" value={activeRuns.length} tone={activeRuns.length > 0 ? "text-primary" : undefined} />
+        <StateCell label="Aguardando aprovação" value={snapshot.pendingDecisionCount} tone={snapshot.pendingDecisionCount > 0 ? "text-warn" : undefined} />
+        <StateCell label="Bloqueado" value={snapshot.blockedActionCount} tone={snapshot.blockedActionCount > 0 ? "text-destructive" : undefined} />
+        <StateCell label="Tendências em alta" value={`${snapshot.marketMomentum.risingTrendCount}/${snapshot.marketMomentum.totalTrendCount}`} tone={snapshot.marketMomentum.risingTrendCount > 0 ? "text-grow" : undefined} />
+        {snapshot.pageIntelligence.avgQualityScore != null && <StateCell label="Qualidade média" value={snapshot.pageIntelligence.avgQualityScore} />}
+        {snapshot.informationGain.avgScore != null && <StateCell label="Ganho de informação" value={`${snapshot.informationGain.avgScore}%`} />}
+      </div>
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent" aria-hidden="true" />
+    </div>
+  )
+}
+
+/* AÇÃO RECOMENDADA — Action UI (Fase 3 §7): verbo no infinitivo,
+ * ancorada ao próprio objeto (a Decision real), motivo de bloqueio
+ * sempre visível quando existir, nunca escondido. */
+function ActionPanel({ nextAction, onActed, onInspect }: { nextAction: NextAction | null; onActed: () => void; onInspect: () => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   if (!nextAction) {
     return (
-      <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
-        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">What should I do next?</p>
-        <p className="mt-3 text-sm text-muted-foreground">No real pending decision right now — the system has nothing it wants approval to act on.</p>
+      <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center">
+        <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Ação recomendada</p>
+        <p className="mt-2 text-[13px] text-muted-foreground">Nenhuma decisão real pendente agora — o sistema não tem nada aguardando aprovação.</p>
       </div>
     )
   }
@@ -40,78 +190,110 @@ function NextActionCard({ nextAction, onActed }: { nextAction: NextAction | null
     setError(null)
     try {
       const decideRes = await fetch(`/api/v1/intelligence/decisions/${decision.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "approved" }) })
-      if (!decideRes.ok) throw new Error((await decideRes.json().catch(() => null))?.error ?? "Approval failed.")
+      if (!decideRes.ok) throw new Error((await decideRes.json().catch(() => null))?.error ?? "Falha ao aprovar.")
       const execRes = await fetch(`/api/v1/intelligence/decisions/${decision.id}/execute`, { method: "POST" })
-      if (!execRes.ok) throw new Error((await execRes.json().catch(() => null))?.error ?? "Execution failed.")
+      if (!execRes.ok) throw new Error((await execRes.json().catch(() => null))?.error ?? "Falha ao executar.")
       onActed()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Action failed.")
+      setError(err instanceof Error ? err.message : "A ação falhou.")
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className="rounded-xl border border-primary/30 bg-card px-6 py-6">
-      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary">What should I do next?</p>
-      <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{decision.action.replaceAll("_", " ")}</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">{decision.reason}</p>
-
-      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div><p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Confidence</p><p className="mt-1 text-lg font-semibold text-foreground">{Math.round(decision.confidence * 100)}%</p></div>
-        <div><p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Priority</p><p className="mt-1 text-lg font-semibold text-foreground capitalize">{decision.priority}</p></div>
-        <div><p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Risk</p><p className={`mt-1 text-lg font-semibold capitalize ${RISK_TONE[decision.risk]}`}>{decision.risk}</p></div>
-        <div><p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Evidence</p><p className="mt-1 text-lg font-semibold text-foreground">{decision.evidenceIds.length} real signal{decision.evidenceIds.length === 1 ? "" : "s"}</p></div>
+    <div className="rounded-lg border border-primary/30 bg-card px-4 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Ação recomendada</p>
+          <button onClick={onInspect} className="mt-1 text-left text-[15px] font-semibold tracking-tight text-foreground hover:underline">{translateAction(decision.action)}</button>
+          <p className="mt-1 max-w-xl text-[12.5px] leading-relaxed text-muted-foreground">{decision.reason}</p>
+        </div>
       </div>
 
-      <p className="mt-4 text-xs leading-relaxed text-muted-foreground">{decision.expectedImpact}</p>
+      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-border/60 pt-3">
+        <Metric label="confiança" value={`${Math.round(decision.confidence * 100)}%`} />
+        <Metric label="prioridade" value={PRIORITY_LABEL[decision.priority] ?? decision.priority} />
+        <Metric label="risco" value={RISK_LABEL[decision.risk] ?? decision.risk} tone={RISK_TONE[decision.risk]} />
+        <Metric label="evidências" value={`${decision.evidenceIds.length}`} />
+      </div>
 
-      {plan.status === "unsupported" ? (
-        <p className="mt-5 flex items-center gap-2 text-xs text-warn"><AlertTriangle className="size-3.5" /> Not yet executable: {plan.unsupportedReason}</p>
-      ) : (
-        <div className="mt-5 flex items-center gap-3">
-          <button onClick={approveAndExecute} disabled={busy} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
-            {busy ? "Working…" : "Approve & Execute"} <ArrowRight className="size-3.5" />
-          </button>
-          <span className="text-xs text-muted-foreground">Agent: {plan.agentType ?? "none required"} · Est. cost: {plan.estimatedCost.agentSteps ?? "—"} steps</span>
-        </div>
-      )}
-      {!policy.allowed && plan.status === "supported" && <p className="mt-2 text-xs text-muted-foreground">Note: {policy.reason}</p>}
-      {error && <p className="mt-3 flex items-center gap-2 text-xs text-destructive"><CircleAlert className="size-3.5" /> {error}</p>}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        {plan.status === "unsupported" ? (
+          <p className="flex items-center gap-2 text-[12.5px] text-warn"><AlertTriangle className="size-3.5 shrink-0" /> Ainda não é possível automatizar: {plan.unsupportedReason}</p>
+        ) : (
+          <>
+            <button onClick={approveAndExecute} disabled={busy} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-1.5 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
+              {busy ? "Executando…" : "Aprovar e executar"} <ArrowRight className="size-3.5" />
+            </button>
+            <span className="text-[11.5px] text-muted-foreground">Agente: {plan.agentType ?? "nenhum necessário"} · custo estimado: {plan.estimatedCost.agentSteps ?? "—"} etapas</span>
+          </>
+        )}
+        {!policy.allowed && plan.status === "supported" && <p className="text-[11.5px] text-muted-foreground">Nota: {policy.reason}</p>}
+      </div>
+      {error && <p className="mt-2 flex items-center gap-2 text-[12.5px] text-destructive"><CircleAlert className="size-3.5 shrink-0" /> {error}</p>}
     </div>
   )
 }
 
-function TimelineFeed({ entries }: { entries: TimelineEntry[] }) {
+function Metric({ label, value, tone = "text-foreground" }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="rounded-xl border border-border bg-card px-5 py-5">
-      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Intelligence Timeline</p>
-      {entries.length === 0 ? (
-        <p className="mt-4 text-sm text-muted-foreground">No real intelligence events recorded yet for this project.</p>
-      ) : (
-        <ol className="mt-4 flex flex-col gap-3">
-          {entries.map((entry) => (
-            <li key={`${entry.type}:${entry.id}`} className="flex items-start gap-3 border-l border-border pl-3">
-              <span className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">{entry.type}</span>
-              <div>
-                <p className="text-xs leading-relaxed text-foreground">{entry.summary}</p>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">{new Date(entry.at).toLocaleString()}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
+    <span className="flex items-baseline gap-1.5">
+      <span className={`font-mono text-[12.5px] font-medium tabular-nums ${tone}`}>{value}</span>
+      <span className="font-mono text-[8px] uppercase tracking-[0.08em] text-muted-foreground">{label}</span>
+    </span>
+  )
+}
+
+/* EXECUÇÕES ATIVAS — o sistema trabalhando, como lista densa real
+ * (nunca cards com chips): tipo + estágio + status + tempo, clicável,
+ * progressive disclosure via Object Inspector (que já expõe tentativa/
+ * custo/tokens/checkpoint — nunca tudo de uma vez nesta linha). */
+function ActiveRuns({ runs, onInspect }: { runs: WorkflowRun[]; onInspect: (id: string) => void }) {
+  if (runs.length === 0) {
+    return <p className="px-3 py-4 text-[12.5px] text-muted-foreground">Nenhuma execução real de agente ativa agora.</p>
+  }
+  return (
+    <ul className="flex flex-col divide-y divide-border">
+      {runs.slice(0, 6).map((r) => (
+        <li key={r.id}>
+          <button onClick={() => onInspect(r.id)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-secondary/40">
+            <Cpu className="size-3.5 shrink-0 text-primary" />
+            <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground">{translatePipeline(r.pipeline)} · {r.subjectType}</span>
+            <span className="shrink-0 font-mono text-[9px] uppercase text-primary">{translateStatus(r.status)}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
   )
 }
 
 const ACTIVE_RUN_STATUSES = ["queued", "running", "waiting", "waiting_approval", "retrying"]
 
+const INSPECTABLE = new Set(["entity", "opportunity", "page", "decision", "agent_run", "observation"])
+
+type InspectableRef = { type: "entity" | "opportunity" | "page" | "decision" | "agent_run" | "observation"; id: string }
+
+/** A timeline entry's own real subject — a Decision's `subjectType`/
+ * `subjectId`, a Signal's `entityId`, an Action's `agentRunId` — opened
+ * in the same universal Object Inspector, never a separate navigation.
+ * `null` when this entry (e.g. a real Outcome) has no known inspectable
+ * subject yet — the row then renders as plain text, never a dead click. */
+function signalTarget(entry: TimelineEntry): InspectableRef | null {
+  if (entry.type === "decision" && typeof entry.detail.subjectType === "string" && typeof entry.detail.subjectId === "string" && INSPECTABLE.has(entry.detail.subjectType)) {
+    return { type: entry.detail.subjectType as InspectableRef["type"], id: entry.detail.subjectId }
+  }
+  if (entry.type === "decision") return { type: "decision", id: entry.id }
+  if (entry.type === "signal" && typeof entry.detail.entityId === "string") return { type: "entity", id: entry.detail.entityId }
+  if (entry.type === "observation") return { type: "observation", id: entry.id }
+  if (entry.type === "action" && typeof entry.detail.agentRunId === "string") return { type: "agent_run", id: entry.detail.agentRunId }
+  return null
+}
+
 export function MissionControl() {
   const [snapshot, setSnapshot] = useState<MissionSnapshot | null>(null)
   const [nextAction, setNextAction] = useState<NextAction | null>(null)
   const [timeline, setTimeline] = useState<TimelineEntry[]>([])
-  const [topOpportunities, setTopOpportunities] = useState<Opportunity[]>([])
   const [activeRuns, setActiveRuns] = useState<WorkflowRun[]>([])
   const [projectId, setProjectId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -120,27 +302,22 @@ export function MissionControl() {
   async function load() {
     try {
       const missionRes = await fetch("/api/v1/intelligence/mission")
-      if (!missionRes.ok) throw new Error((await missionRes.json().catch(() => null))?.error ?? "Could not load Mission Control.")
+      if (!missionRes.ok) throw new Error((await missionRes.json().catch(() => null))?.error ?? "Não foi possível carregar o Mission Control.")
       const missionBody = await missionRes.json()
       setSnapshot(missionBody.snapshot)
       setProjectId(missionBody.projectId)
 
-      const [nextRes, timelineRes, oppRes, ...runResList] = await Promise.all([
+      const [nextRes, timelineRes, ...runResList] = await Promise.all([
         fetch("/api/v1/intelligence/next-action"),
-        fetch(`/api/v1/intelligence/timeline?projectId=${missionBody.projectId}&limit=8`),
-        fetch("/api/opportunities"),
+        fetch(`/api/v1/intelligence/timeline?projectId=${missionBody.projectId}&limit=10`),
         ...ACTIVE_RUN_STATUSES.map((s) => fetch(`/api/v1/workflows?status=${s}`)),
       ])
       if (nextRes.ok) setNextAction((await nextRes.json()).nextAction)
       if (timelineRes.ok) setTimeline((await timelineRes.json()).entries)
-      if (oppRes.ok) {
-        const opps: Opportunity[] = (await oppRes.json()).opportunities
-        setTopOpportunities([...opps].sort((a, b) => (b.finalScore ?? -1) - (a.finalScore ?? -1)).slice(0, 4))
-      }
       const runLists = await Promise.all(runResList.map((r) => (r.ok ? r.json() : { workflows: [] })))
       setActiveRuns(runLists.flatMap((b) => b.workflows as WorkflowRun[]))
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load Mission Control.")
+      setError(err instanceof Error ? err.message : "Não foi possível carregar o Mission Control.")
     }
   }
 
@@ -148,88 +325,78 @@ export function MissionControl() {
     void load()
   }, [])
 
+  const pendingExtra = useMemo(() => (snapshot ? Math.max(0, snapshot.pendingDecisionCount - 1) : 0), [snapshot])
+
   return (
     <div className="min-h-dvh bg-background bg-substrate">
       <WorkforceNav />
-      <main id="main-content" className="mx-auto max-w-[1200px] px-5 py-8 sm:px-8">
-        <header>
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">Mission Control</p>
-          <h1 className="mt-2 text-balance text-4xl font-semibold tracking-tight text-foreground">Knowledge Operating System</h1>
-          <p className="mt-3 max-w-2xl text-pretty text-sm leading-relaxed text-muted-foreground">
-            What the system knows, what it discovered, and what it wants to do next — every number below is read from real, persisted state for this project.
-          </p>
-        </header>
+      <main id="main-content" className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+        {/* HEADER/COMMAND */}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-primary">Mission Control</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">Central de inteligência</h1>
+          </div>
+          <div className="w-full sm:w-[420px]">
+            <CommandBar projectId={projectId} onOpen={inspector.open} />
+          </div>
+        </div>
 
-        {error && <div className="mt-6 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"><CircleAlert className="size-4 shrink-0" /> {error}</div>}
+        {error && <div className="mt-4 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"><CircleAlert className="size-4 shrink-0" /> {error}</div>}
 
         {!snapshot ? (
-          <div className="mt-10 flex items-center gap-2 text-sm text-muted-foreground"><Clock3 className="size-4" /> Loading real system state…</div>
+          <div className="mt-8"><LoadingState label="Carregando o estado real do sistema…" /></div>
         ) : (
           <>
-            {/* SYSTEM STATE — one real, readable sentence rather than a
-             * grid of KPI tiles: what the system knows, right now. */}
-            <p className="mt-6 max-w-3xl text-pretty text-[15px] leading-relaxed text-muted-foreground">
-              <strong className="font-semibold text-foreground">{snapshot.knowledgeAuthority.entityCount}</strong> real entities tracked
-              {snapshot.knowledgeAuthority.entitiesWithEvidencePct != null && <> ({snapshot.knowledgeAuthority.entitiesWithEvidencePct}% evidenced)</>}, connected to{" "}
-              <strong className="font-semibold text-foreground">{snapshot.pageIntelligence.pageCount}</strong> real pages
-              {snapshot.pageIntelligence.avgQualityScore != null && <> at an average quality of {snapshot.pageIntelligence.avgQualityScore}</>}. Information Gain{" "}
-              {snapshot.informationGain.avgScore != null ? <>is real-checked at <strong className="font-semibold text-foreground">{snapshot.informationGain.avgScore}%</strong> confidence across {snapshot.informationGain.sampleCount} evaluations</> : "has not been evaluated yet"}.{" "}
-              <strong className="font-semibold text-foreground">{snapshot.marketMomentum.risingTrendCount}</strong> of {snapshot.marketMomentum.totalTrendCount} tracked trends are rising.
-            </p>
+            {/* SYSTEM STATE */}
+            <div className="mt-5"><SystemStateStrip snapshot={snapshot} activeRuns={activeRuns} /></div>
 
-            <div className="mt-8"><NextActionCard nextAction={nextAction} onActed={() => void load()} /></div>
+            {/* INTELLIGENCE FIELD — the core element */}
+            <div className="mt-6"><IntelligenceField onOpen={inspector.open} /></div>
 
-            {(snapshot.pendingDecisionCount > 1 || snapshot.blockedActionCount > 0) && (
-              <p className="mt-4 text-xs text-muted-foreground">
-                {snapshot.pendingDecisionCount > 1 && <>{snapshot.pendingDecisionCount - 1} more real decision{snapshot.pendingDecisionCount - 1 === 1 ? "" : "s"} pending. </>}
-                {snapshot.blockedActionCount > 0 && <>{snapshot.blockedActionCount} action{snapshot.blockedActionCount === 1 ? "" : "s"} currently blocked. </>}
-                <a href="/intelligence/decisions" className="text-primary hover:underline">View Decision Center →</a>
-              </p>
-            )}
-
-            {/* WHAT'S EMERGING + AGENTS AT WORK — side by side: the
-             * ontology's real top opportunities, and real agent activity
-             * — never a decorative chart standing in for either. */}
-            <div className="mt-10 grid gap-6 lg:grid-cols-2">
-              <section>
-                <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">What's emerging</p>
-                <h2 className="mt-1 text-lg font-semibold tracking-[-0.01em]">Top real opportunities</h2>
-                {topOpportunities.length === 0 ? (
-                  <p className="mt-3 text-[13px] text-muted-foreground">No real opportunities discovered yet.</p>
+            {/* SINAIS ATIVOS + EXECUÇÕES ATIVAS */}
+            <div className="mt-6 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+              <section className="rounded-xl border border-border bg-card">
+                <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
+                  <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Sinais ativos</p>
+                  <a href="/intelligence/timeline" className="text-[11px] text-muted-foreground hover:text-foreground">Ver histórico completo →</a>
+                </div>
+                {timeline.length === 0 ? (
+                  <p className="px-3 py-6 text-center text-[12.5px] text-muted-foreground">Nenhum evento real registrado ainda para este projeto.</p>
                 ) : (
-                  <div className="mt-3 flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
-                    {topOpportunities.map((o) => (
-                      <button key={o.id} onClick={() => inspector.open({ type: "opportunity", id: o.id })} className="flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-secondary/40">
-                        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{o.title}</span>
-                        <span className="shrink-0 font-mono text-[9px] uppercase text-muted-foreground">{o.status}</span>
-                        <span className="w-8 shrink-0 text-right font-mono text-[12px] tabular-nums text-foreground">{o.finalScore != null ? Math.round(o.finalScore) : "—"}</span>
-                      </button>
-                    ))}
-                  </div>
+                  <ul className="flex max-h-[280px] flex-col divide-y divide-border/60 overflow-y-auto">
+                    {timeline.map((entry) => {
+                      const target = signalTarget(entry)
+                      return (
+                        <li key={`${entry.type}:${entry.id}`}>
+                          <SignalRow entry={entry} onClick={target ? () => inspector.open(target) : undefined} />
+                        </li>
+                      )
+                    })}
+                  </ul>
                 )}
               </section>
 
-              <section>
-                <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Agents at work</p>
-                <h2 className="mt-1 text-lg font-semibold tracking-[-0.01em]">{activeRuns.length} real active run{activeRuns.length === 1 ? "" : "s"}</h2>
-                {activeRuns.length === 0 ? (
-                  <p className="mt-3 text-[13px] text-muted-foreground">No real agent runs are active right now.</p>
-                ) : (
-                  <div className="mt-3 flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
-                    {activeRuns.slice(0, 4).map((r) => (
-                      <Link key={r.id} href={`/agent-runs/${r.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-secondary/40">
-                        <Cpu className="size-3.5 shrink-0 text-primary" />
-                        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{r.pipeline.replaceAll("_", " ")} · {r.subjectType}</span>
-                        <span className="shrink-0 font-mono text-[9px] uppercase text-primary">{r.status.replaceAll("_", " ")}</span>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-                <Link href="/agents/live" className="mt-3 inline-flex items-center gap-1 text-[12.5px] text-muted-foreground hover:text-foreground">Open Live Agent Graph <ArrowRight className="size-3.5" /></Link>
+              <section className="rounded-xl border border-border bg-card">
+                <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
+                  <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Agentes em ação</p>
+                  <a href="/agents/live" className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">Grafo completo <ArrowRight className="size-3" /></a>
+                </div>
+                <ActiveRuns runs={activeRuns} onInspect={(id) => inspector.open({ type: "agent_run", id })} />
               </section>
             </div>
 
-            <div className="mt-10"><TimelineFeed entries={timeline} /></div>
+            {/* AÇÃO RECOMENDADA */}
+            <div className="mt-6">
+              <ActionPanel nextAction={nextAction} onActed={() => void load()} onInspect={() => nextAction && inspector.open({ type: "decision", id: nextAction.decision.id })} />
+              {(pendingExtra > 0 || snapshot.blockedActionCount > 0) && (
+                <p className="mt-2 text-[12px] text-muted-foreground">
+                  {pendingExtra > 0 && <>{pendingExtra} outra{pendingExtra === 1 ? "" : "s"} decisão{pendingExtra === 1 ? "" : "ões"} real{pendingExtra === 1 ? "" : "is"} pendente{pendingExtra === 1 ? "" : "s"}. </>}
+                  {snapshot.blockedActionCount > 0 && <>{snapshot.blockedActionCount} ação{snapshot.blockedActionCount === 1 ? "" : "ões"} bloqueada{snapshot.blockedActionCount === 1 ? "" : "s"} no momento. </>}
+                  <a href="/intelligence/decisions" className="text-primary hover:underline">Abrir Central de Decisões →</a>
+                </p>
+              )}
+            </div>
           </>
         )}
       </main>
