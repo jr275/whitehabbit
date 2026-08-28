@@ -7,6 +7,7 @@ import {
   Circle,
   Factory,
   Gauge,
+  GitBranch,
   Globe,
   Layers3,
   ListChecks,
@@ -47,6 +48,7 @@ const GROUPS = [
       { href: "/knowledge", label: "Knowledge Graph", icon: Network },
       { href: "/opportunities", label: "Opportunities", icon: Target },
       { href: "/intelligence/decisions", label: "Decision Center", icon: ListChecks },
+      { href: "/intelligence/map", label: "Intelligence Graph", icon: GitBranch },
     ],
   },
   {
@@ -104,10 +106,10 @@ export function TopNav({ runtimeMode }: { runtimeMode?: "development" | "preview
           {workspaceOpen && <div className="absolute left-0 top-10 w-64 rounded-lg border border-border bg-popover p-3 shadow-xl"><p className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">Authenticated organization</p><p className="mt-2 truncate text-sm font-medium text-popover-foreground">{orgName}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Organization switching is unavailable in this release.</p></div>}
         </div>
 
-        <nav className="hidden min-w-0 flex-1 items-center justify-center gap-1 xl:flex" aria-label="Primary navigation">
+        <nav className="hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] xl:flex [&::-webkit-scrollbar]:hidden" aria-label="Primary navigation">
           {GROUPS.map((group) => group.links.map((link) => {
             const active = isActive(pathname, link.href)
-            return <Link key={link.href} href={link.href} aria-current={active ? "page" : undefined} className={`rounded-md px-2.5 py-1.5 text-[11px] transition-colors ${active ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"}`}>{link.label}</Link>
+            return <Link key={link.href} href={link.href} aria-current={active ? "page" : undefined} className={`shrink-0 rounded-md px-2.5 py-1.5 text-[11px] transition-colors ${active ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"}`}>{link.label}</Link>
           }))}
         </nav>
 
