@@ -1,0 +1,21 @@
+# ADR-046: Live Agent Graph — real active-run visualization, reused backend
+
+## Status
+Accepted.
+
+## Context
+Phase 8 §10-11 asks for `/agents/live` (a live view of every currently-active agent/workflow run) and `/agents/runs/:id` (a per-run inspector), with named real states (QUEUED/RUNNING/WAITING/BLOCKED/REQUIRES_APPROVAL/SUCCEEDED/FAILED/RETRYING/CANCELLED) and an explicit constraint: "Use animation ONLY when a real state transition occurs. No decorative animation."
+
+## Decision
+No new backend. `GET /api/v1/workflows?status=` already lists every real `WorkflowRun` for the authenticated org with optional status/pipeline filters, already tenant-scoped via `requireSession()` — confirmed by reading `app/api/v1/workflows/route.ts` before writing any new code, per the brief's own §0 instruction to inspect before inventing. `components/mission/live-agent-graph.tsx` (new) polls that endpoint for each of the six real active `WorkflowStatus` values (`queued`/`running`/`waiting`/`paused`/`waiting_approval`/`retrying`) in parallel every 5 seconds and renders each run as a card showing its real per-pipeline step sequence — the exact stage order `STEP_SEQUENCE` mirrors from the content-generation and website-discovery pipelines, never an invented generic stage list — with each step's color state (succeeded/current/pending/failed) computed from the run's own real `checkpoint.lastCompletedSequence` and `status`. The pulse animation is applied to exactly one step: the one currently in flight on a RUNNING run — never decorative, always tied to a real, current state.
+
+Each run card links to the existing `/agent-runs/:id` inspector rather than a new `/agents/runs/:id` route — that page already renders a run's full step-by-step detail, checkpoint, budget/usage, and retry/cancel controls. Building a second inspector at a different URL for the same data would be exactly the "another workflow engine / another API abstraction" duplication §32 explicitly forbids; extending the existing route was judged the smaller, correct change over adding a parallel one.
+
+## Decision (continued) — polling, not a new SSE stream
+Real-time updates use a 5-second poll of the existing list endpoint, not a new tenant-wide SSE channel. `docs/architecture/phase8-ui-architecture.md` already documented, before any code was written, that the only real-time capability in this codebase is a *per-run* SSE stream (`/api/v1/workflows/:id/events`) — there is no existing tenant-wide "all active runs" stream to reuse, and building one is a materially larger, standalone piece of backend work than this page's own scope. A 5s poll was chosen as the honest, bounded interim: real data, refreshed often enough to feel live, without inventing new realtime infrastructure this phase did not have capacity to build and test properly.
+
+## Consequences
+- Positive: zero new backend surface area; the tenant-isolation guarantees `GET /api/v1/workflows` already has (and is already tested for) apply here with no new test needed on that axis.
+- Positive: verified via a real dev-server + Playwright pass — seeded a real RUNNING `content_generation` run (3/8 steps checkpointed) and a real WAITING_APPROVAL `website_discovery` run (2/4 steps checkpointed; `agent_runs.subject_id` has no FK, confirmed by grepping the migrations, so no fake parent Opportunity/Website rows were needed) directly via SQL matching the schema `lib/workflow/repo.ts#createWorkflowRun()` itself writes, then confirmed both rendered with correct per-step coloring and no console errors.
+- Negative: `/agents/runs/:id` as a distinct URL from the brief is not real — `/agent-runs/:id` serves that purpose instead. If a future phase wants the exact brief URL, the smallest correct change is a redirect page at `/agents/runs/[id]`, not a second inspector.
+- Negative: BLOCKED and REQUIRES_APPROVAL are named in the brief's state list; this codebase's real `WorkflowStatus` union does not have either as a first-class value (the closest real states are `waiting_approval` and `failed`/an `intelligence_actions.status = 'blocked'` row, which is a different table). The card labels reflect the real, persisted status values only — never a renamed or invented status the schema doesn't actually have.

@@ -316,3 +316,31 @@ prove the full real chain — approve → execute → drain → real
 Opportunity+Page, or an honest Information-Gain-blocked outcome — end to
 end against real Postgres; the E2E vertical slice continues to pass with
 zero regressions.
+
+**Revision 8 (Phase 8, in progress — ADR-043 through ADR-046)** turns
+three of Revision 7's named-but-unbuilt UI gaps real, against backends
+that were already real: a multi-mode Intelligence Graph (seven real
+`GraphMode`s — decisions/opportunities/knowledge/markets/roles/intents/
+pages — sharing one `buildGraph()` dispatcher and one `MapNode`/`MapEdge`
+shape, rendered with `@xyflow/react`, the one graph library this codebase
+now has), a Live Agent Graph (`/agents/live`, needing zero new backend —
+the existing tenant-scoped `GET /api/v1/workflows?status=` already lists
+every real active run, polled every 5s, each run's real per-pipeline step
+sequence colored by its real checkpoint state, animated only on an actual
+in-flight step), and a dedicated, server-filtered Intelligence Timeline
+(`/intelligence/timeline`, filtering by type/entity/date-range/search all
+applied server-side, never fetched-then-narrowed client-side). A real bug
+surfaced by this revision's own visual-QA discipline — not by `tsc` —
+when the three new nav links silently scrolled off `TopNav`'s 1440px flat
+row: fixed by restructuring desktop navigation into five grouped,
+keyboard-accessible dropdown menus, a durable fix rather than a repeat of
+the prior revision's overflow-scroll patch. Four new ADRs (**ADR-043
+through ADR-046**) record these decisions, including two named, real
+scale limitations carried forward rather than silently accepted as
+"done": the graph has no true viewport/clustering/LOD rendering yet
+(R-48), and the Timeline's search/date filters run in-process after a
+bounded per-kind merge rather than as SQL `WHERE` clauses (R-49). Still
+not built, named rather than dropped: the Command Palette (R-47, now
+carried across two revisions), Mission Control's four-zone reorganization
+(ADR-043), and global search. 228/228 tests pass; every new page was
+verified against a real dev server with Playwright, not just compiled.

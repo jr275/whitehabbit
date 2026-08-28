@@ -129,6 +129,17 @@ from a Decision's own current fields plus (for `ActionPlan`) one real
 lookup when the subject is an existing page, so neither can ever go stale
 relative to the real data it describes.
 
+## Intelligence Graph / Timeline UI additions (Phase 8, ADR-044/045)
+
+No new persisted table or column. `GraphMode` (`lib/intelligence/map.ts`)
+and `TimelineFilters` (`lib/intelligence/timeline.ts`) are both real,
+freshly-resolved-on-every-call query shapes over already-persisted rows —
+same non-stale-by-construction pattern as `ActionPlan`/`PolicyDecision`
+above. `MapNode`/`MapEdge` is one shared output shape across all seven
+`GraphMode`s (never seven separate node/edge types); a node's `id` is
+always `"<type>:<realId>"`, the convention the Intelligence Graph UI's
+click-through Inspector relies on to look the real record back up.
+
 ## Not yet modeled at all
 
 CommunitySignal (§21 — no real community-source integration exists),

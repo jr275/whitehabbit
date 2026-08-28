@@ -236,6 +236,53 @@ Information-Gain-blocked outcome — end to end against real Postgres, with
 concurrency/idempotency/budget/capability/tenant-isolation coverage; the
 E2E vertical slice continues to pass with zero regressions.
 
+## Phase 12 — Intelligence Command Center UI — 🟡 in progress (Phase 8, ADR-043..046)
+Continues Phase 11's real UI push into the three surfaces it named as
+not-yet-done: a multi-mode Intelligence Graph, a Live Agent Graph, and a
+dedicated Intelligence Timeline — all against already-real backends, no
+new domain logic invented.
+
+`lib/intelligence/map.ts#buildGraph()` is a single dispatcher over seven
+real `GraphMode`s (decisions/opportunities/knowledge/markets/roles/
+intents/pages) sharing one `MapNode`/`MapEdge` shape — never five
+separate graph implementations. `components/mission/intelligence-graph.tsx`
+renders it with `@xyflow/react` (the one graph library added this phase),
+server-side filters (entityType/status/minScore, never fetched-then-
+filtered client-side), and a click-through Inspector reading each node's
+real detail record (ADR-044). Named limitation: true viewport-based/
+progressive/clustered rendering was not built — a single bounded
+server-side limit (100, capped 200) stands in for it (R-48).
+
+`components/mission/live-agent-graph.tsx` (`/agents/live`) needed zero
+new backend: `GET /api/v1/workflows?status=` already lists every real,
+tenant-scoped `WorkflowRun`. Polls the six real active statuses every 5s,
+renders each run's real per-pipeline step sequence colored by its real
+checkpoint state, animates only the one step currently in flight — never
+decorative — and links out to the existing `/agent-runs/:id` inspector
+rather than duplicating it (ADR-046).
+
+`lib/intelligence/timeline.ts#buildIntelligenceTimeline()` gained real
+server-side filters (type/entity/date-range/search — ADR-045);
+`/intelligence/timeline` is the first dedicated page over it. A real bug
+surfaced by this phase's own visual-QA discipline (not by typecheck):
+adding these three nav links pushed the flat top-nav row to 19 links,
+silently scrolling the newest ones off-screen. Fixed by restructuring
+`TopNav`'s desktop navigation into five grouped, keyboard-accessible
+dropdowns — a durable fix, not a one-off padding tweak.
+
+Not yet done, named explicitly rather than silently dropped: Mission
+Control's four-zone reorganization (ADR-043), the Command Palette (R-47,
+still the most-repeated unbuilt item across two phases now), global
+search, Decision Center's causal-chain graph view (the Intelligence
+Graph's "decisions" mode already covers most of this data — wiring a
+direct link from Decision Center into it, filtered to one decision, is
+the smallest remaining step), Knowledge Graph entity-detail depth, a
+dedicated Information Gain "why" visualization, graph clustering/LOD at
+target scale (R-48), and Timeline SQL-level filtering at target scale
+(R-49). 228/228 tests pass (225 Phase-7 baseline + 3 new Timeline filter
+tests); every new page was verified with a real dev-server + Playwright
+pass, not just `tsc`.
+
 ## Explicitly out of scope until a phase above reaches it
 White-label multi-brand deployment, billing, community-signal ingestion,
 non-real-estate/non-generic vertical proof (`docs/architecture/
