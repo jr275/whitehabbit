@@ -4,6 +4,10 @@
     {
       "path": "/api/v1/workflows/process",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/v1/intelligence/process",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
