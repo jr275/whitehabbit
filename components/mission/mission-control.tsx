@@ -31,8 +31,10 @@ import type { SearchResult } from "@/lib/search"
 import { ObjectInspector, useObjectInspector } from "@/components/ontology/object-inspector"
 import { IntelligenceField } from "@/components/mission/intelligence-field"
 import { SignalRow } from "@/components/mission/signal-row"
+import { StageGrid, type Stage } from "@/components/mission/stage-grid"
 import { LoadingState } from "@/components/ontology/states"
-import { translateAction, translatePipeline, translateStatus } from "@/lib/ontology/pt-br"
+import { translateAction, translatePipeline, translateStatus, translateStep } from "@/lib/ontology/pt-br"
+import type { WorkflowStep } from "@/lib/workflow/types"
 
 const RISK_TONE: Record<string, string> = { low: "text-grow", medium: "text-warn", high: "text-destructive", critical: "text-destructive" }
 const RISK_LABEL: Record<string, string> = { low: "baixo", medium: "médio", high: "alto", critical: "crítico" }
@@ -206,7 +208,7 @@ function ActionPanel({ nextAction, onActed, onInspect }: { nextAction: NextActio
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Ação recomendada</p>
-          <button onClick={onInspect} className="mt-1 text-left text-[15px] font-semibold tracking-tight text-foreground hover:underline">{translateAction(decision.action)}</button>
+          <button onClick={onInspect} className="mt-1 text-left font-serif text-[19px] font-medium tracking-tight text-foreground hover:underline">{translateAction(decision.action)}</button>
           <p className="mt-1 max-w-xl text-[12.5px] leading-relaxed text-muted-foreground">{decision.reason}</p>
         </div>
       </div>
@@ -217,6 +219,14 @@ function ActionPanel({ nextAction, onActed, onInspect }: { nextAction: NextActio
         <Metric label="risco" value={RISK_LABEL[decision.risk] ?? decision.risk} tone={RISK_TONE[decision.risk]} />
         <Metric label="evidências" value={`${decision.evidenceIds.length}`} />
       </div>
+
+      {/* Leitura explicável — a evidência conectada à decisão
+       * (docs/remax-knowledge-design-reference.md §1.3), nunca só os
+       * números soltos acima. */}
+      <p className="mt-2 text-[11.5px] leading-relaxed text-muted-foreground">
+        Recomendada com {Math.round(decision.confidence * 100)}% de confiança, risco {RISK_LABEL[decision.risk] ?? decision.risk}
+        {decision.evidenceIds.length > 0 ? `, sustentada por ${decision.evidenceIds.length} evidência${decision.evidenceIds.length === 1 ? "" : "s"} real${decision.evidenceIds.length === 1 ? "" : "is"}` : ", ainda sem evidência real vinculada"}.
+      </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {plan.status === "unsupported" ? (
@@ -245,26 +255,71 @@ function Metric({ label, value, tone = "text-foreground" }: { label: string; val
   )
 }
 
-/* EXECUÇÕES ATIVAS — o sistema trabalhando, como lista densa real
- * (nunca cards com chips): tipo + estágio + status + tempo, clicável,
- * progressive disclosure via Object Inspector (que já expõe tentativa/
- * custo/tokens/checkpoint — nunca tudo de uma vez nesta linha). */
-function ActiveRuns({ runs, onInspect }: { runs: WorkflowRun[]; onInspect: (id: string) => void }) {
+/* AGENTES EM AÇÃO — o sistema trabalhando, como uma grade real de
+ * etapas (StageGrid, docs/remax-knowledge-design-reference.md §1.10),
+ * nunca uma lista de cards com chips. A execução mais relevante (a
+ * primeira "running", senão a primeira da fila) mostra seus passos
+ * reais (WorkflowStep, GET /api/agent-runs/:id) — nunca etapas
+ * inventadas. As demais execuções ativas ficam como uma lista densa
+ * abaixo, clicável, progressive disclosure via Object Inspector (que já
+ * expõe tentativa/custo/tokens/checkpoint). */
+function FeaturedRunStages({ runs, onInspect }: { runs: WorkflowRun[]; onInspect: (id: string) => void }) {
+  const featured = useMemo(() => runs.find((r) => r.status === "running") ?? runs[0] ?? null, [runs])
+  const [steps, setSteps] = useState<WorkflowStep[] | null>(null)
+
+  useEffect(() => {
+    if (!featured) {
+      setSteps(null)
+      return
+    }
+    setSteps(null)
+    fetch(`/api/agent-runs/${featured.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => setSteps(body?.steps ?? []))
+      .catch(() => setSteps([]))
+  }, [featured])
+
   if (runs.length === 0) {
     return <p className="px-3 py-4 text-[12.5px] text-muted-foreground">Nenhuma execução real de agente ativa agora.</p>
   }
+
+  const rest = featured ? runs.filter((r) => r.id !== featured.id) : runs
+  const stages: Stage[] = (steps ?? []).map((s) => ({ label: translateStep(s.step), status: s.status, detail: s.error ?? undefined }))
+
   return (
-    <ul className="flex flex-col divide-y divide-border">
-      {runs.slice(0, 6).map((r) => (
-        <li key={r.id}>
-          <button onClick={() => onInspect(r.id)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-secondary/40">
+    <div className="flex flex-col gap-3 px-3 py-3">
+      {featured && (
+        <div>
+          <button onClick={() => onInspect(featured.id)} className="flex w-full items-center gap-2 text-left hover:underline">
             <Cpu className="size-3.5 shrink-0 text-primary" />
-            <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground">{translatePipeline(r.pipeline)} · {r.subjectType}</span>
-            <span className="shrink-0 font-mono text-[9px] uppercase text-primary">{translateStatus(r.status)}</span>
+            <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-foreground">{translatePipeline(featured.pipeline)} · {featured.subjectType}</span>
+            <span className="shrink-0 font-mono text-[9px] uppercase text-primary">{translateStatus(featured.status)}</span>
           </button>
-        </li>
-      ))}
-    </ul>
+          <div className="mt-2">
+            {steps == null ? (
+              <LoadingState label="Carregando etapas reais…" />
+            ) : stages.length === 0 ? (
+              <p className="text-[12px] text-muted-foreground">Nenhuma etapa real registrada ainda para esta execução.</p>
+            ) : (
+              <StageGrid stages={stages} />
+            )}
+          </div>
+        </div>
+      )}
+      {rest.length > 0 && (
+        <ul className="flex flex-col divide-y divide-border border-t border-border/60 pt-1">
+          {rest.slice(0, 4).map((r) => (
+            <li key={r.id}>
+              <button onClick={() => onInspect(r.id)} className="flex w-full items-center gap-2.5 py-2 text-left transition-colors hover:bg-secondary/40">
+                <Cpu className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate text-[12px] text-foreground">{translatePipeline(r.pipeline)} · {r.subjectType}</span>
+                <span className="shrink-0 font-mono text-[9px] uppercase text-muted-foreground">{translateStatus(r.status)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -335,7 +390,7 @@ export function MissionControl() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-primary">Mission Control</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">Central de inteligência</h1>
+            <h1 className="mt-1 font-serif text-3xl font-medium tracking-tight text-foreground">Central de inteligência</h1>
           </div>
           <div className="w-full sm:w-[420px]">
             <CommandBar projectId={projectId} onOpen={inspector.open} />
@@ -352,7 +407,7 @@ export function MissionControl() {
             <div className="mt-5"><SystemStateStrip snapshot={snapshot} activeRuns={activeRuns} /></div>
 
             {/* INTELLIGENCE FIELD — the core element */}
-            <div className="mt-6"><IntelligenceField onOpen={inspector.open} /></div>
+            <div className="mt-6"><IntelligenceField /></div>
 
             {/* SINAIS ATIVOS + EXECUÇÕES ATIVAS */}
             <div className="mt-6 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
@@ -382,7 +437,7 @@ export function MissionControl() {
                   <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">Agentes em ação</p>
                   <a href="/agents/live" className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">Grafo completo <ArrowRight className="size-3" /></a>
                 </div>
-                <ActiveRuns runs={activeRuns} onInspect={(id) => inspector.open({ type: "agent_run", id })} />
+                <FeaturedRunStages runs={activeRuns} onInspect={(id) => inspector.open({ type: "agent_run", id })} />
               </section>
             </div>
 

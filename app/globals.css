@@ -7,6 +7,10 @@
 @theme inline {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  /* Editorial display serif for object titles/headlines only —
+   * docs/remax-knowledge-design-reference.md §1.2. `font-serif`
+   * utility class. */
+  --font-serif: var(--font-fraunces), ui-serif, Georgia, serif;
   --color-alive: var(--alive);
   --color-alive-foreground: var(--alive-foreground);
   --color-grow: var(--grow);

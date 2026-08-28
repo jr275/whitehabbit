@@ -13,7 +13,10 @@
 
 import type { ObjectType } from "./object-resolver"
 
-function humanize(raw: string): string {
+/** Exported for the rare caller with a real identifier this dictionary
+ * doesn't cover yet (e.g. a WorkflowStep's own `step` name) — still
+ * needs a readable pt-BR-shaped fallback, never a raw token verbatim. */
+export function humanize(raw: string): string {
   return raw
     .replaceAll("_", " ")
     .replace(/\s+/g, " ")
@@ -81,6 +84,8 @@ const STATUS_LABEL_PT: Record<string, string> = {
   merged: "Mesclado",
   executed: "Executado",
   expired: "Expirado",
+  skipped: "Ignorada",
+  timed_out: "Tempo esgotado",
 }
 
 export function translateStatus(status: string | null): string {
@@ -239,6 +244,29 @@ const PIPELINE_LABEL_PT: Record<string, string> = {
 
 export function translatePipeline(pipeline: string): string {
   return PIPELINE_LABEL_PT[pipeline] ?? humanize(pipeline)
+}
+
+/* Real WorkflowStep names (lib/website-discovery/steps.ts,
+ * lib/content-pipeline/steps.ts) — used by the Mission Control
+ * StageGrid (RE/MAX Knowledge reference §1.10) to show a running
+ * Agent Run's own real steps, never invented stage names. */
+const STEP_LABEL_PT: Record<string, string> = {
+  crawl: "Rastreamento",
+  extract_entities: "Extração de entidades",
+  build_profile: "Construção de perfil",
+  discover_opportunities: "Descoberta de oportunidades",
+  research: "Pesquisa",
+  outline: "Esboço",
+  draft: "Redação",
+  information_gain_gate: "Verificação de ganho de informação",
+  seo: "Otimização SEO",
+  geo: "Otimização GEO",
+  quality: "Verificação de qualidade",
+  decide_publish: "Decisão de publicação",
+}
+
+export function translateStep(step: string): string {
+  return STEP_LABEL_PT[step] ?? humanize(step)
 }
 
 /** Relative timestamp in pt-BR — "há 2 min", "há 3 h", "agora" — the one
