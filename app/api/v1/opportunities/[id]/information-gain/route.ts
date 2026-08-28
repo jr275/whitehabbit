@@ -26,7 +26,7 @@ export async function GET(_req: Request, { params }: Params) {
 
     const { input, hasExistingSimilarPage } = await buildInformationGainV2Input(organizationId, opportunity.projectId, opportunity)
     const result = computeInformationGainV2(input)
-    const gate = evaluateInformationGainGate(result, hasExistingSimilarPage)
+    const gate = evaluateInformationGainGate(result, hasExistingSimilarPage, undefined, !!opportunity.primaryEntityId)
     return NextResponse.json({ result, gate })
   })
 }
