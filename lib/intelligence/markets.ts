@@ -10,6 +10,7 @@ import "server-only"
 
 import { randomUUID } from "node:crypto"
 import { query, queryOne } from "@/lib/db/client"
+import { recordSignal } from "./signals"
 
 export interface Market {
   id: string
@@ -39,6 +40,9 @@ export async function getOrCreateMarket(orgId: string, projectId: string, name: 
   const id = `mkt_${randomUUID()}`
   const now = Date.now()
   await query("INSERT INTO markets (id, org_id, project_id, name, geography, created_at) VALUES ($1, $2, $3, $4, $5, $6)", [id, orgId, projectId, name, geography ?? null, now])
+  // NEW_MARKET_SIGNAL (§2) — only on a genuinely new row, never on a
+  // cache hit against an already-known market.
+  await recordSignal({ orgId, projectId, type: "NEW_MARKET_SIGNAL", marketId: id, value: { name, geography: geography ?? null }, source: "signal_engine", confidence: 1 })
   return { id, orgId, projectId, name, geography: geography ?? null, createdAt: now }
 }
 

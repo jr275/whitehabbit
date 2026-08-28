@@ -9,6 +9,7 @@ import "server-only"
 
 import { randomUUID } from "node:crypto"
 import { query, queryOne } from "@/lib/db/client"
+import { recordSignal } from "./signals"
 
 export interface Role {
   id: string
@@ -82,6 +83,9 @@ export async function createRole(input: {
       now,
     ],
   )
+  // NEW_ROLE_SIGNAL (§2) — createRole() always inserts a new row (no
+  // upsert semantics here), so every call is a genuinely new role.
+  await recordSignal({ orgId: input.orgId, projectId: input.projectId, type: "NEW_ROLE_SIGNAL", roleId: id, value: { name: input.name }, source: "signal_engine", confidence: 1 })
   return (await getRole(id, input.orgId))!
 }
 

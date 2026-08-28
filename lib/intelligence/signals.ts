@@ -10,7 +10,20 @@ import "server-only"
 import { randomUUID } from "node:crypto"
 import { query, queryOne } from "@/lib/db/client"
 
+/* Two naming generations coexist deliberately (ADR-032, not an
+ * oversight): the lowercase_snake_case types below were Phase 5B's
+ * Search Console detector output, already covered by real tests and a
+ * real UI-facing contract (the /api/v1/signals response shape). Phase
+ * 6's brief specifies a broader, UPPER_SNAKE_CASE taxonomy covering
+ * sources beyond Search Console (Knowledge Graph, AI Visibility,
+ * competitors, internal links, Information Gain). Renaming the
+ * existing types would be a breaking API change with zero real
+ * benefit; both generations are valid, real signal types emitted by
+ * lib/intelligence/signal-engine.ts, the one unified emission facade
+ * every detector in this codebase goes through (§2 — "não deixe cada
+ * módulo criar seu próprio sistema de sinais isoladamente"). */
 export type SignalType =
+  // Phase 5B — Search Console detectors (lib/intelligence/search-console/signal-detection.ts)
   | "search_impression_spike"
   | "search_click_spike"
   | "ctr_anomaly"
@@ -25,6 +38,25 @@ export type SignalType =
   | "stale_data"
   | "competitor_change"
   | "manual"
+  // Phase 6 — the unified taxonomy (lib/intelligence/signal-engine.ts)
+  | "SEARCH_DEMAND_INCREASED"
+  | "QUERY_EMERGING"
+  | "QUERY_DECLINING"
+  | "PAGE_TRAFFIC_DECLINED"
+  | "PAGE_CTR_DECLINED"
+  | "ENTITY_GAP"
+  | "ENTITY_RELATIONSHIP_GAP"
+  | "CONTENT_GAP"
+  | "COMPETITOR_GAIN"
+  | "NEW_MARKET_SIGNAL"
+  | "NEW_ROLE_SIGNAL"
+  | "TREND_ACCELERATION"
+  | "CONTENT_DECAY"
+  | "AI_CITATION_GAIN"
+  | "AI_CITATION_LOSS"
+  | "INDEXATION_CHANGE"
+  | "INFORMATION_GAIN_GAP"
+  | "INTERNAL_LINK_GAP"
 
 export interface Signal {
   id: string
