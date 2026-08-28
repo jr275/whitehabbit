@@ -1,16 +1,23 @@
 "use client"
 
 /* ================================================================== *
- * SEO INTELLIGENCE OVERVIEW (Phase UX-2) — the homepage, rebuilt around
- * docs/product-experience-reset.md's product thesis: this is a
- * programmatic SEO intelligence + contextual page generation platform,
- * not an AI workforce console. Every number and row on this page is
- * real, already-persisted data read from existing APIs
+ * SEO INTELLIGENCE OVERVIEW — "Page Factory" (Phase UX-3) — the
+ * homepage, redesigned around docs/product-experience-reset.md's
+ * product thesis: this is a programmatic SEO intelligence + contextual
+ * page generation platform, shown as a live production system
+ * (Context -> Opportunity -> Page -> Publish -> Performance -> Learning),
+ * not a report about one. Every number, stage count, and stream event
+ * on this page is real, already-persisted data read from existing APIs
  * (lib/intelligence/mission.ts#buildMissionSnapshot(), /api/opportunities,
- * /api/pages, /api/projects/:id/websites) — nothing here is mocked,
- * hardcoded, or a fabricated statistic. A metric with no real data yet
- * renders as an honest empty state that explains what's missing and
- * what to do next, never a fake zero standing in for "unmeasured."
+ * /api/pages, /api/projects/:id/websites) — no new backend, nothing
+ * mocked or fabricated. A stage or metric with no real data yet renders
+ * as an honest empty state, never a fake zero or invented activity.
+ *
+ * Production stages are a presentation-layer mapping over this
+ * codebase's real, already-closed status unions
+ * (OpportunityStatus/PageStatus) — never a new status value invented
+ * for this page. See STAGE labels below for the exact real-status ->
+ * display-label mapping.
  *
  * Replaces the previous "AI workforce operations" framing (Workers,
  * Runs, Outputs, Events from lib/workforce/store.ts) entirely on this
@@ -21,10 +28,10 @@
 import {
   ArrowRight,
   ArrowUpRight,
+  ChevronRight,
   CircleAlert,
   Clock3,
   Compass,
-  FileText,
   Gauge,
   Globe,
   Sparkles,
@@ -33,6 +40,7 @@ import {
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { TopNav } from "@/components/studio/top-nav"
+import type { DecisionAction } from "@/lib/intelligence/decisions"
 import type { MissionSnapshot, NextAction } from "@/lib/intelligence/mission"
 import type { Opportunity } from "@/lib/opportunity/model"
 import type { Page } from "@/lib/pages/model"
@@ -46,8 +54,6 @@ interface HomeData {
   pages: Page[]
   websites: Website[]
 }
-
-const RISK_TONE: Record<string, string> = { low: "text-grow", medium: "text-warn", high: "text-destructive", critical: "text-destructive" }
 
 const DISCOVERY_COPY: Record<Website["discoveryStatus"], string> = {
   pending: "queued to begin",
@@ -96,7 +102,7 @@ export function ProductHome() {
   return (
     <div className="min-h-dvh bg-background text-foreground">
       <TopNav />
-      <main id="main-content" className="mx-auto max-w-[1100px] px-5 py-10 sm:px-8 lg:py-14">
+      <main id="main-content" className="mx-auto max-w-[1180px] px-5 py-10 sm:px-8 lg:py-14">
         {error ? (
           <StatePanel icon={CircleAlert} title="Could not load your overview" body={error} />
         ) : !data ? (
@@ -114,9 +120,7 @@ export function ProductHome() {
 }
 
 /* -------------------------------------------------------------- *
- * FIRST RUN — no website connected yet. The next action is a
- * single, obvious CTA into the real website-connect flow already
- * built at /websites; this page does not duplicate that form.
+ * FIRST RUN — no website connected yet.
  * -------------------------------------------------------------- */
 function FirstRunState() {
   return (
@@ -124,7 +128,7 @@ function FirstRunState() {
       <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">SEO Intelligence</p>
       <h1 className="mt-3 text-balance text-4xl font-semibold tracking-[-0.03em] sm:text-5xl">Discover what should exist on your site — before you build it</h1>
       <p className="mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-muted-foreground">
-        Connect a website and this platform reads your market, your entities, and real search demand — then tells you exactly which pages are worth creating, and why.
+        Connect a website and this platform reads your market, your entities, and real search demand — then turns what it finds into contextual pages, produced start to finish.
       </p>
       <Link href="/websites" className="mt-7 inline-flex h-10 items-center gap-2 rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90">
         Connect your website <ArrowRight className="size-4" />
@@ -133,7 +137,7 @@ function FirstRunState() {
       <div className="mt-16 grid gap-8 border-t border-border pt-10 sm:grid-cols-3">
         <FirstRunStep index={1} icon={Globe} title="Connect" body="Point the platform at your website. Nothing is crawled until you say so." />
         <FirstRunStep index={2} icon={Compass} title="Discover" body="Real entities, markets, and search intent are mapped from your site and its market — turned into scored, explainable opportunities." />
-        <FirstRunStep index={3} icon={Sparkles} title="Create" body="Turn a real opportunity into a contextual page — researched, written, optimized, and measured." />
+        <FirstRunStep index={3} icon={Sparkles} title="Create" body="A real opportunity enters production — researched, written, optimized, published, and measured." />
       </div>
     </div>
   )
@@ -154,15 +158,14 @@ function FirstRunStep({ index, icon: Icon, title, body }: { index: number; icon:
 
 /* -------------------------------------------------------------- *
  * DISCOVERING — a website is connected but real discovery hasn't
- * produced entities or opportunities yet. Shows each real website's
- * own real discoveryStatus, never a generic spinner with no state.
+ * produced entities or opportunities yet.
  * -------------------------------------------------------------- */
 function DiscoveringState({ websites }: { websites: Website[] }) {
   return (
     <div>
       <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">SEO Intelligence</p>
       <h1 className="mt-3 text-balance text-4xl font-semibold tracking-[-0.03em] sm:text-5xl">Reading your market</h1>
-      <p className="mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-muted-foreground">Once discovery finishes, real opportunities will appear here — scored and explained, ready to review.</p>
+      <p className="mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-muted-foreground">Once discovery finishes, real opportunities enter production here — scored, explained, and ready to become pages.</p>
 
       <div className="mt-10 flex flex-col gap-3">
         {websites.map((site) => (
@@ -179,88 +182,152 @@ function DiscoveringState({ websites }: { websites: Website[] }) {
   )
 }
 
+/* ================================================================== *
+ * PRODUCTION STAGE MODEL — the one real lifecycle this whole page is
+ * organized around. Every stage below is a direct read of a real,
+ * already-closed status value; nothing here is a new status.
+ * ================================================================== */
+
+type StageKey = "discovered" | "qualified" | "ready" | "generating" | "review" | "published"
+
+const STAGE_META: Record<StageKey, { label: string; tone: string }> = {
+  discovered: { label: "Discovered", tone: "text-muted-foreground" },
+  qualified: { label: "Qualified", tone: "text-muted-foreground" },
+  ready: { label: "Ready to create", tone: "text-primary" },
+  generating: { label: "Generating", tone: "text-primary" },
+  review: { label: "In review", tone: "text-warn" },
+  published: { label: "Published", tone: "text-grow" },
+}
+
+interface StreamEvent {
+  stage: StageKey | "rejected"
+  title: string
+  at: number
+  href: string
+}
+
+function buildProductionStream(opportunities: Opportunity[], pages: Page[]): StreamEvent[] {
+  const oppEvents: StreamEvent[] = opportunities
+    .filter((o) => o.status === "discovered" || o.status === "qualified")
+    .map((o) => ({ stage: o.status === "discovered" ? "discovered" : "qualified", title: o.title, at: o.updatedAt, href: "/opportunities" }))
+
+  const pageEvents: StreamEvent[] = pages.map((p) => ({
+    stage: p.status === "draft" ? "generating" : p.status === "ready" ? "review" : p.status === "published" ? "published" : "rejected",
+    title: p.title ?? p.slug,
+    at: p.updatedAt,
+    href: `/pages/${p.id}`,
+  }))
+
+  return [...oppEvents, ...pageEvents].sort((a, b) => b.at - a.at).slice(0, 8)
+}
+
+function timeAgo(ms: number): string {
+  const diff = Date.now() - ms
+  const min = Math.floor(diff / 60_000)
+  if (min < 1) return "just now"
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  return `${Math.floor(hr / 24)}d ago`
+}
+
+const NEXT_ACTION_VERB: Partial<Record<DecisionAction, string>> = {
+  CREATE_PAGE: "Create this page",
+  UPDATE_PAGE: "Update this page",
+  REFRESH_CONTENT: "Refresh this page",
+  ADD_INTERNAL_LINKS: "Add these links",
+  CREATE_HUB: "Create this hub",
+  CREATE_COMPARISON: "Create this comparison",
+  CREATE_FAQ: "Create this FAQ",
+  INVESTIGATE_ENTITY: "Investigate this",
+}
+
 /* -------------------------------------------------------------- *
- * POPULATED OVERVIEW — the six-level hierarchy from the brief:
- * SEO signal -> opportunities -> what to do next -> pages ->
- * performance -> evidence/detail.
+ * POPULATED OVERVIEW — the system at work: Context -> Opportunity
+ * -> Page -> Publish -> Performance -> Learning.
  * -------------------------------------------------------------- */
 function Overview({ data, onActed }: { data: HomeData; onActed: () => void }) {
-  const { snapshot, opportunities, pages } = data
-  const readyOpportunities = opportunities.filter((o) => o.status === "discovered" || o.status === "qualified")
-  const topOpportunities = [...opportunities].sort((a, b) => (b.finalScore ?? -1) - (a.finalScore ?? -1)).slice(0, 5)
-  const recentPages = [...pages].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5)
+  const { snapshot, opportunities, pages, websites } = data
+  const primarySite = websites[0]
+
+  const stageCounts: Record<StageKey, number> = {
+    discovered: opportunities.filter((o) => o.status === "discovered").length,
+    qualified: opportunities.filter((o) => o.status === "qualified").length,
+    ready: opportunities.filter((o) => o.status === "approved").length,
+    generating: pages.filter((p) => p.status === "draft").length,
+    review: pages.filter((p) => p.status === "ready").length,
+    published: pages.filter((p) => p.status === "published").length,
+  }
+  const needsReworkCount = pages.filter((p) => p.status === "quality_rejected").length
+
+  const spotlightPage = [...pages].sort((a, b) => b.updatedAt - a.updatedAt)[0]
+  const spotlightOpportunity = spotlightPage ? opportunities.find((o) => o.id === spotlightPage.opportunityId) : undefined
+
+  const streamEvents = buildProductionStream(opportunities, pages)
 
   return (
-    <div className="flex flex-col gap-14">
-      {/* LEVEL 1 — the real signal, the aha moment */}
+    <div className="flex flex-col gap-12">
+      {/* CONTEXT — identity: what site, what market */}
       <header>
-        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">SEO Intelligence</p>
-        <h1 className="mt-3 text-balance text-4xl font-semibold tracking-[-0.03em] sm:text-5xl">What your search landscape is telling you</h1>
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">SEO Intelligence · {primarySite?.hostname ?? "Your site"}</p>
+        <h1 className="mt-3 text-balance text-4xl font-semibold tracking-[-0.03em] sm:text-5xl">Your search landscape, in production</h1>
         <p className="mt-4 max-w-2xl text-pretty text-[15px] leading-relaxed text-muted-foreground">
-          <strong className="font-semibold text-foreground">{opportunities.length} real opportunit{opportunities.length === 1 ? "y" : "ies"}</strong> discovered across{" "}
-          <strong className="font-semibold text-foreground">{snapshot.knowledgeAuthority.entityCount} tracked entit{snapshot.knowledgeAuthority.entityCount === 1 ? "y" : "ies"}</strong>
-          {readyOpportunities.length > 0 && (
-            <>
-              {" "}— <strong className="font-semibold text-foreground">{readyOpportunities.length}</strong> {readyOpportunities.length === 1 ? "is" : "are"} ready for you to review.
-            </>
-          )}
+          <strong className="font-semibold text-foreground">{opportunities.length} real opportunit{opportunities.length === 1 ? "y" : "ies"}</strong> found across{" "}
+          <strong className="font-semibold text-foreground">{snapshot.knowledgeAuthority.entityCount} tracked entit{snapshot.knowledgeAuthority.entityCount === 1 ? "y" : "ies"}</strong> — {stageCounts.published} page{stageCounts.published === 1 ? "" : "s"} already live.
         </p>
       </header>
 
-      {/* LEVEL 3 — what to do next (surfaced early: this is the most important single component) */}
-      {data.nextAction && <NextActionPanel nextAction={data.nextAction} onActed={onActed} />}
+      {/* the one, contextual primary action */}
+      {data.nextAction && <NextActionBanner nextAction={data.nextAction} onActed={onActed} />}
 
-      {/* LEVEL 2 — opportunities */}
+      {/* THE PIPELINE — the factory itself */}
+      <Pipeline counts={stageCounts} needsRework={needsReworkCount} />
+
+      {/* OPPORTUNITY -> PAGE — the relationship made visible */}
+      {spotlightOpportunity && spotlightPage && <OpportunityToPage opportunity={spotlightOpportunity} page={spotlightPage} />}
+
+      {/* the production line, live */}
       <section>
-        <SectionHeader eyebrow="Opportunity" title="What's worth creating" href={opportunities.length > 0 ? "/opportunities" : undefined} />
-        {topOpportunities.length === 0 ? (
-          <EmptyNote icon={Target} title="No opportunities discovered yet" body="Real opportunities appear here once discovery finishes analyzing your market." />
+        <SectionHeader eyebrow="Production" title="What's happening right now" />
+        {streamEvents.length === 0 ? (
+          <EmptyNote icon={Target} title="Nothing in production yet" body="Once discovery finds an opportunity, its progress toward a published page will stream here." />
         ) : (
-          <div className="mt-4 flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
-            {topOpportunities.map((o) => <OpportunityRow key={o.id} opportunity={o} />)}
-          </div>
+          <ol className="mt-4 flex flex-col gap-2">
+            {streamEvents.map((event, i) => <StreamRow key={`${event.href}:${event.title}:${i}`} event={event} />)}
+          </ol>
         )}
       </section>
 
-      {/* LEVEL 4 — pages / generation */}
+      {/* PERFORMANCE + LEARNING — the loop closing */}
       <section>
-        <SectionHeader eyebrow="Generation" title="What's being created" />
-        {recentPages.length === 0 ? (
-          <EmptyNote icon={FileText} title="No pages created yet" body="Once you act on an opportunity, its real, generated page — researched, written, and optimized — will appear here." />
-        ) : (
-          <>
-            <p className="text-[13px] text-muted-foreground">
-              {snapshot.pageIntelligence.pageCount} page{snapshot.pageIntelligence.pageCount === 1 ? "" : "s"} created · {snapshot.pageIntelligence.publishedCount} live
-              {snapshot.pageIntelligence.avgQualityScore != null && <> · avg. quality {snapshot.pageIntelligence.avgQualityScore}</>}
-            </p>
-            <div className="mt-4 flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
-              {recentPages.map((p) => <PageRow key={p.id} page={p} />)}
+        <SectionHeader eyebrow="Performance & learning" title="Is it working" />
+        <div className="mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+          {snapshot.organicGrowth ? (
+            <>
+              <PerformanceTile label="Search clicks" value={snapshot.organicGrowth.totalClicks.toLocaleString()} detail={`${snapshot.organicGrowth.snapshotDays}-day window`} />
+              <PerformanceTile label="Search impressions" value={snapshot.organicGrowth.totalImpressions.toLocaleString()} detail="Google Search Console" />
+            </>
+          ) : (
+            <div className="col-span-1 flex flex-col justify-center gap-1 bg-card px-5 py-4 sm:col-span-2">
+              <p className="text-sm font-medium">Search performance not measured yet</p>
+              <p className="text-[12.5px] text-muted-foreground">Connect Google Search Console (Integrations) once your pages are live.</p>
             </div>
-          </>
-        )}
+          )}
+          <PerformanceTile label="AI citations" value={snapshot.aiVisibility.citationCount.toLocaleString()} detail={`${snapshot.aiVisibility.answerCount} AI answers checked`} />
+          <PerformanceTile
+            label="Learning signal"
+            value={snapshot.informationGain.sampleCount > 0 ? `${snapshot.informationGain.sampleCount}` : "—"}
+            detail={snapshot.informationGain.sampleCount > 0 ? `pages checked for real substance${snapshot.informationGain.blockedCount > 0 ? `, ${snapshot.informationGain.blockedCount} sent back` : ""}` : "not enough data yet"}
+          />
+        </div>
       </section>
 
-      {/* LEVEL 5 — performance */}
-      <section>
-        <SectionHeader eyebrow="Performance" title="Is it working" />
-        {snapshot.organicGrowth ? (
-          <div className="mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-3">
-            <PerformanceTile label="Search clicks" value={snapshot.organicGrowth.totalClicks.toLocaleString()} detail={`${snapshot.organicGrowth.snapshotDays}-day window`} />
-            <PerformanceTile label="Search impressions" value={snapshot.organicGrowth.totalImpressions.toLocaleString()} detail="Google Search Console" />
-            <PerformanceTile label="AI citations" value={snapshot.aiVisibility.citationCount.toLocaleString()} detail={`${snapshot.aiVisibility.answerCount} AI answers checked`} />
-          </div>
-        ) : (
-          <EmptyNote icon={Gauge} title="Performance not measured yet" body="Connect Google Search Console (Integrations) to see real clicks, impressions, and ranking movement once your pages are live." />
-        )}
-      </section>
-
-      {/* LEVEL 6 — evidence / detail, de-emphasized */}
+      {/* de-emphasized evidence */}
       <footer className="border-t border-border pt-6">
         <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">Evidence</p>
         <div className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-[12.5px] text-muted-foreground">
           <span>{snapshot.knowledgeAuthority.entityCount} entities tracked{snapshot.knowledgeAuthority.entitiesWithEvidencePct != null && <> · {snapshot.knowledgeAuthority.entitiesWithEvidencePct}% with real evidence</>}</span>
           <span>{snapshot.marketMomentum.risingTrendCount} of {snapshot.marketMomentum.totalTrendCount} tracked trends rising</span>
-          {snapshot.informationGain.sampleCount > 0 && <span>{snapshot.informationGain.sampleCount} pages passed the information-gain check{snapshot.informationGain.blockedCount > 0 && <>, {snapshot.informationGain.blockedCount} blocked for thin content</>}</span>}
         </div>
       </footer>
     </div>
@@ -283,42 +350,97 @@ function SectionHeader({ eyebrow, title, href }: { eyebrow: string; title: strin
   )
 }
 
-function OpportunityRow({ opportunity }: { opportunity: Opportunity }) {
+/* -------------------------------------------------------------- *
+ * THE PIPELINE — real stage counts, connected left to right. On
+ * narrow screens the row scrolls horizontally rather than wrapping,
+ * so the production-line feel survives on mobile (never a stack of
+ * unrelated cards).
+ * -------------------------------------------------------------- */
+function Pipeline({ counts, needsRework }: { counts: Record<StageKey, number>; needsRework: number }) {
+  const order: StageKey[] = ["discovered", "qualified", "ready", "generating", "review", "published"]
   return (
-    <Link href="/opportunities" className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-secondary/40">
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{opportunity.title}</p>
-        <p className="mt-1 truncate text-[12.5px] text-muted-foreground">
-          {opportunity.topic}
-          {opportunity.targetIntent && <> · {opportunity.targetIntent}</>}
-        </p>
+    <section>
+      <SectionHeader eyebrow="Page factory" title="From opportunity to published page" href="/opportunities" />
+      <div className="relative mt-4">
+        <div className="flex items-stretch gap-0 overflow-x-auto rounded-xl border border-border bg-card [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {order.map((key, i) => {
+            const meta = STAGE_META[key]
+            const active = key === "generating" && counts.generating > 0
+            return (
+              <div key={key} className="flex shrink-0 items-stretch">
+                <div className="flex min-w-[86px] flex-col justify-center gap-1.5 px-3 py-4 sm:min-w-[100px] sm:px-4 lg:min-w-[122px] lg:px-5 lg:py-5">
+                  <span className="font-mono text-[8.5px] uppercase tracking-[0.1em] text-muted-foreground sm:text-[9px] sm:tracking-[0.12em]">{meta.label}</span>
+                  <span className={`text-xl font-semibold tabular-nums tracking-[-0.02em] sm:text-2xl ${meta.tone} ${active ? "animate-pulse" : ""}`}>{counts[key]}</span>
+                </div>
+                {i < order.length - 1 && (
+                  <div className="flex items-center px-0.5 text-border sm:px-1">
+                    <ChevronRight className="size-4" />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        {/* scroll affordance — a real cue, not decoration: this row can
+         * genuinely overflow on narrow viewports, and a silently
+         * truncated pipeline would undercut the very thing this page
+         * exists to show. */}
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-8 rounded-r-xl bg-gradient-to-l from-card to-transparent lg:hidden" aria-hidden="true" />
       </div>
-      <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">{opportunity.status.replaceAll("_", " ")}</span>
-      <span className="w-14 shrink-0 text-right">
-        <span className="block font-mono text-sm tabular-nums text-foreground">{opportunity.finalScore != null ? Math.round(opportunity.finalScore) : "—"}</span>
-        <span className="block font-mono text-[8px] uppercase tracking-[0.08em] text-muted-foreground">score</span>
-      </span>
-    </Link>
+      {needsRework > 0 && (
+        <p className="mt-3 text-[12.5px] text-muted-foreground">
+          <span className="text-warn">{needsRework}</span> page{needsRework === 1 ? "" : "s"} sent back for thin content — held by the real information-gain check, not published as-is.
+        </p>
+      )}
+    </section>
   )
 }
 
-const PAGE_STATUS_TONE: Record<Page["status"], string> = { draft: "text-muted-foreground", quality_rejected: "text-destructive", ready: "text-warn", published: "text-grow" }
-
-function PageRow({ page }: { page: Page }) {
+/* -------------------------------------------------------------- *
+ * OPPORTUNITY -> PAGE — the relationship made visible: one real,
+ * most-recently-touched pair, context bridging the two.
+ * -------------------------------------------------------------- */
+function OpportunityToPage({ opportunity, page }: { opportunity: Opportunity; page: Page }) {
   return (
-    <Link href={`/pages/${page.id}`} className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-secondary/40">
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{page.title ?? page.slug}</p>
-        <p className="mt-1 truncate text-[12.5px] text-muted-foreground">/{page.slug}</p>
+    <section>
+      <SectionHeader eyebrow="From context to page" title="How an opportunity becomes a page" />
+      <div className="mt-4 grid items-center gap-3 rounded-xl border border-border bg-card p-5 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+        <Link href="/opportunities" className="min-w-0 rounded-lg border border-border/60 bg-background/40 p-4 transition-colors hover:border-primary/40">
+          <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground">Opportunity</p>
+          <p className="mt-2 truncate text-sm font-medium">{opportunity.title}</p>
+          <p className="mt-1 truncate text-[12.5px] text-muted-foreground">
+            {opportunity.topic}
+            {opportunity.targetIntent && <> · {opportunity.targetIntent}</>}
+          </p>
+        </Link>
+
+        <div className="flex items-center justify-center py-2 text-muted-foreground sm:py-0">
+          <div className="hidden h-px w-8 bg-border sm:block" />
+          <ArrowRight className="size-4 shrink-0 rotate-90 sm:rotate-0" />
+          <div className="hidden h-px w-8 bg-border sm:block" />
+        </div>
+
+        <Link href={`/pages/${page.id}`} className="min-w-0 rounded-lg border border-border/60 bg-background/40 p-4 transition-colors hover:border-primary/40">
+          <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground">Page</p>
+          <p className="mt-2 truncate text-sm font-medium">{page.title ?? page.slug}</p>
+          <p className="mt-1 truncate text-[12.5px] text-muted-foreground">/{page.slug} · {STAGE_META[page.status === "draft" ? "generating" : page.status === "ready" ? "review" : "published"]?.label ?? page.status}</p>
+        </Link>
       </div>
-      <span className={`shrink-0 font-mono text-[9px] uppercase tracking-[0.1em] ${PAGE_STATUS_TONE[page.status]}`}>{page.status.replaceAll("_", " ")}</span>
-      {page.qualityScore != null && (
-        <span className="w-14 shrink-0 text-right">
-          <span className="block font-mono text-sm tabular-nums text-foreground">{Math.round(page.qualityScore)}</span>
-          <span className="block font-mono text-[8px] uppercase tracking-[0.08em] text-muted-foreground">quality</span>
-        </span>
-      )}
-    </Link>
+    </section>
+  )
+}
+
+function StreamRow({ event }: { event: StreamEvent }) {
+  const meta = event.stage === "rejected" ? { label: "Needs rework", tone: "text-destructive" } : STAGE_META[event.stage]
+  return (
+    <li>
+      <Link href={event.href} className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-secondary/40">
+        <span className={`size-1.5 shrink-0 rounded-full ${meta.tone.replace("text-", "bg-")}`} />
+        <span className={`w-24 shrink-0 font-mono text-[9px] uppercase tracking-[0.1em] ${meta.tone}`}>{meta.label}</span>
+        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{event.title}</span>
+        <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">{timeAgo(event.at)}</span>
+      </Link>
+    </li>
   )
 }
 
@@ -333,13 +455,14 @@ function PerformanceTile({ label, value, detail }: { label: string; value: strin
 }
 
 /* -------------------------------------------------------------- *
- * NEXT ACTION — the single most important component (§5 of the
- * brief). Real Decision -> real ActionPlan -> real PolicyEngine
- * read, and Approve & Execute drives the same real
- * decisions/:id -> decisions/:id/execute chain the rest of the app
- * uses — never a mock interaction.
+ * NEXT ACTION — one contextual, singular primary action. Real
+ * Decision -> real ActionPlan -> real PolicyEngine read; the button
+ * drives the same real decisions/:id -> decisions/:id/execute chain
+ * the rest of the app uses — never a mock interaction. Kept compact
+ * (a single row, not a detail card) so it reads as the one thing to
+ * do next, not another report panel.
  * -------------------------------------------------------------- */
-function NextActionPanel({ nextAction, onActed }: { nextAction: NextAction; onActed: () => void }) {
+function NextActionBanner({ nextAction, onActed }: { nextAction: NextAction; onActed: () => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { decision, plan, policy } = nextAction
@@ -360,30 +483,27 @@ function NextActionPanel({ nextAction, onActed }: { nextAction: NextAction; onAc
     }
   }
 
+  const verb = NEXT_ACTION_VERB[decision.action] ?? "Take this action"
+
   return (
-    <section className="rounded-xl border border-primary/25 bg-card px-6 py-6 sm:px-7">
-      <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-primary">What to do next</p>
-      <h2 className="mt-2 text-xl font-semibold tracking-[-0.01em]">{decision.action.replaceAll("_", " ")}</h2>
-      <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-muted-foreground">{decision.reason}</p>
-      <p className="mt-3 text-[13px] leading-relaxed text-muted-foreground">{decision.expectedImpact}</p>
-
-      <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-[12.5px] text-muted-foreground">
-        <span>Confidence <strong className="font-medium text-foreground">{Math.round(decision.confidence * 100)}%</strong></span>
-        <span>Risk <strong className={`font-medium capitalize ${RISK_TONE[decision.risk]}`}>{decision.risk}</strong></span>
-        <span>Based on <strong className="font-medium text-foreground">{decision.evidenceIds.length}</strong> real signal{decision.evidenceIds.length === 1 ? "" : "s"}</span>
+    <section className="flex flex-col gap-3 rounded-xl border border-primary/25 bg-card px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <div className="min-w-0">
+        <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-primary">Next</p>
+        <p className="mt-1 truncate text-sm text-foreground">{decision.reason}</p>
       </div>
-
-      {plan.status === "unsupported" ? (
-        <p className="mt-5 text-[13px] text-warn">Not yet automatable: {plan.unsupportedReason}</p>
-      ) : (
-        <div className="mt-5 flex items-center gap-3">
-          <button onClick={approveAndExecute} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
-            {busy ? "Working…" : "Approve & create"} <ArrowUpRight className="size-3.5" />
-          </button>
-          {!policy.allowed && <span className="text-[12.5px] text-muted-foreground">{policy.reason}</span>}
-        </div>
-      )}
-      {error && <p className="mt-3 flex items-center gap-2 text-[12.5px] text-destructive"><CircleAlert className="size-3.5 shrink-0" /> {error}</p>}
+      <div className="flex shrink-0 items-center gap-3">
+        {plan.status === "unsupported" ? (
+          <span className="text-[12.5px] text-warn">Not yet automatable: {plan.unsupportedReason}</span>
+        ) : (
+          <>
+            <button onClick={approveAndExecute} disabled={busy} className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-md bg-primary px-4 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
+              {busy ? "Working…" : verb} <ArrowUpRight className="size-3.5" />
+            </button>
+            {!policy.allowed && <span className="hidden text-[12px] text-muted-foreground lg:inline">{policy.reason}</span>}
+          </>
+        )}
+      </div>
+      {error && <p className="flex items-center gap-2 text-[12.5px] text-destructive sm:basis-full"><CircleAlert className="size-3.5 shrink-0" /> {error}</p>}
     </section>
   )
 }
