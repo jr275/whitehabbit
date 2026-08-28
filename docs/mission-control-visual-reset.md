@@ -87,4 +87,67 @@ Uma única coluna de leitura, mesma ordem: trilha (só o item mais recente, se e
 
 ---
 
-Próximo passo: aguardar aprovação do mockup visual antes de qualquer código.
+## Autocrítica honesta do "Dossiê Vivo"
+
+**O Dossiê Vivo resolveu o problema do dashboard, mas criou o problema da revista.** Tirar toda superfície de card resolveu a sensação de admin tool — mas o resultado é uma coisa sendo *lida*, quieta, parada no tempo, sem nenhum sinal de que existe um sistema real trabalhando por trás daquela página. A manchete + deck itálico + notas de margem é uma gramática editorial legítima, só que ela comunica "aqui está um artigo pronto", nunca "isto está sendo produzido agora". E o produto real não termina numa leitura — termina numa página publicada. Essa cadeia (Sinal → Oportunidade → Decisão → Produção → Página → Publicação → Resultado) não aparecia em lugar nenhum do Dossiê.
+
+| Versão | O que tentou ser | Por que falhou |
+|---|---|---|
+| V1 | Dashboard + grafo decorativo | Lia como SaaS genérico |
+| V2 | Object Inspector em tela cheia | Lia como ferramenta técnica, não produto |
+| V3 | Radar + Contexto + Relacionados | Dashboard disfarçado de arquitetura conceitual |
+| V3.1 | Duas superfícies, painéis conectados | Ainda composição de painéis com borda, só mais disciplinada |
+| V4 · Dossiê Vivo | Editorial (dossiê de inteligência) | Resolveu "parece admin tool"; criou "parece revista" — nada comunica sistema *trabalhando* |
+
+## V5 — Intelligence Production Room
+
+### Conceito
+
+O produto não é BI, não é CRM, não é knowledge graph visual, não é revista. É um **sistema de produção**: encontra oportunidades, entende contexto, conecta conhecimento, e transforma isso em páginas publicáveis. V5 precisa comunicar isso literalmente na composição — não com um fluxograma, com uma **linha de produção real**: um trilho horizontal com cinco pontos reais de estágio (Sinal · Oportunidade · Decisão · Produção · Publicado), sempre visível, onde o item em foco tem sua marca em destaque na posição real que ocupa hoje, e outros itens reais do sistema aparecem como marcas menores nos seus próprios estágios reais — a mesma peça central resolve três coisas de uma vez: mostra a cadeia do produto, prova que o sistema está vivo (várias marcas reais em estágios diferentes, não uma tela parada), e vira a navegação (clicar numa marca troca o foco). Nenhuma outra versão teve um elemento assim — é a peça nova, não um refinamento de nada anterior.
+
+Comparado à referência (RE/MAX Knowledge): o próprio produto de referência já usa exatamente esse princípio — "pipeline/processo real como grade de etapas com status individual" aparece identicamente em três telas diferentes dela (Expansão, Content Factory, Data Hub), conforme já documentado em `docs/remax-knowledge-design-reference.md`. V5 aplica o mesmo princípio à unidade central da tela, não a uma seção secundária.
+
+### Princípios
+
+1. A linha de produção é a espinha da tela — sempre visível, nunca uma seção que pode ser rolada para fora de vista.
+2. O item em foco não é "um artigo sendo lido" — é "um item sendo trabalhado", com registro real de em que estágio está agora.
+3. Voz do sistema, não voz editorial: a leitura explicável aparece rotulada como leitura do sistema, tipografia reta, nunca itálico de revista.
+4. Um único trilho substitui qualquer log separado de "outros casos" — outros itens reais aparecem nele, não em uma lista à parte.
+5. Densidade operacional nas propriedades (tira compacta, não lista de revista) — presença editorial só sobrevive no título do item em foco.
+6. Sem grafo, sem kanban de colunas — o trilho é uma linha só, nunca vira um quadro com colunas por estágio.
+7. Ação real continua sendo um selo (mantido do Dossiê — não estava errado).
+8. Nenhum dado inventado; estágio sem item real fica honestamente vazio no trilho, nunca preenchido para parecer mais cheio.
+9. 100% PT-BR, nomes de estágio reais e reconhecíveis (Sinal/Oportunidade/Decisão/Produção/Publicado).
+10. Mobile: mesmo trilho, rotacionado para vertical — mesma linha de produção, nunca colunas empilhadas.
+
+### Information hierarchy
+
+O trilho de produção domina o topo da tela (mais largo, sempre visível). O título do item em foco é a segunda maior presença tipográfica — menor que no Dossiê, porque a manchete deixa de ser o elemento que carrega toda a personalidade da página sozinha; agora ela divide esse papel com o trilho. Leitura do sistema, propriedades, conectado-a e evidências vêm depois, quietos, em registro operacional (mono/sans), nunca competindo com trilho ou título.
+
+### Interaction model
+
+Clicar numa marca do trilho — seja o item em foco ou outro item real — troca o foco: o painel abaixo do trilho recarrega no lugar, o trilho não se move, só a marca em destaque muda de posição. Não existe navegação de página nem modal. O trilho é, ao mesmo tempo, telemetria (mostra o que está acontecendo) e navegação (é como se troca de item) — uma peça só, não duas.
+
+### 1440px composition
+
+Masthead mínimo (nome + pulso do sistema ao vivo em uma linha + busca) → trilho de produção full-width (5 âncoras de estágio reais, marcas de outros itens reais distribuídas, marca do item em foco em destaque, conectada por uma linha vertical curta ao painel abaixo) → corpo em duas colunas assimétricas: esquerda (item em foco — selo de tipo/estágio/pontuação, título, leitura do sistema, tira de propriedades, conectado-a, selo de próxima ação), direita mais estreita (evidências reais, um log residual mínimo de 3-4 linhas para reforço textual do trilho).
+
+### 390px composition
+
+Mesmo trilho, rotacionado 90° — uma linha vertical fina do topo ao fundo da tela, âncoras de estágio de cima para baixo, marcas reais ao lado da linha — seguida pelo mesmo conteúdo do item em foco em coluna única, mesma ordem do desktop. Nunca os três blocos (trilho/foco/margem) viram "coluna 1 → coluna 2 → coluna 3" — o trilho vertical continua sendo a espinha, só muda de orientação.
+
+### Do's
+
+- Deixar o trilho ser a primeira coisa que o olho encontra, antes do título.
+- Marcar o item em foco no trilho com destaque real (tamanho/cor), os outros com marcas discretas.
+- Rotular a leitura do sistema como leitura do sistema, não como "editorial voice".
+
+### Don'ts
+
+- Não transformar o trilho em um quadro kanban com colunas/cards por estágio.
+- Não devolver o itálico de revista à leitura explicável.
+- Não recriar um log de "outros casos" separado do trilho — eles são a mesma coisa.
+
+---
+
+Próximo passo: aguardar aprovação do mockup visual (V5) antes de qualquer código.
