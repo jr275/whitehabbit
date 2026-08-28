@@ -13,6 +13,7 @@ import { getOpportunity } from "@/lib/opportunity/repo"
 import { computeInformationGainV2 } from "@/lib/opportunity/information-gain-v2"
 import { buildInformationGainV2Input } from "@/lib/opportunity/information-gain-v2-input"
 import { evaluateInformationGainGate } from "@/lib/opportunity/information-gain-gate"
+import { applyScoreAdjustment, computeScoreAdjustment } from "@/lib/intelligence/learning-loop"
 import { requireSession } from "@/lib/session"
 
 type Params = { params: Promise<{ id: string }> }
@@ -25,8 +26,10 @@ export async function GET(_req: Request, { params }: Params) {
     if (!opportunity) throw new NotFoundError()
 
     const { input, hasExistingSimilarPage } = await buildInformationGainV2Input(organizationId, opportunity.projectId, opportunity)
-    const result = computeInformationGainV2(input)
+    const rawResult = computeInformationGainV2(input)
+    const adjustment = await computeScoreAdjustment(organizationId, opportunity.projectId, "information_gain")
+    const result = applyScoreAdjustment(rawResult, adjustment)
     const gate = evaluateInformationGainGate(result, hasExistingSimilarPage, undefined, !!opportunity.primaryEntityId)
-    return NextResponse.json({ result, gate })
+    return NextResponse.json({ result, rawScore: rawResult.score, adjustment, gate })
   })
 }

@@ -47,6 +47,7 @@ import { buildInformationGainV2Input } from "@/lib/opportunity/information-gain-
 import { computeInformationGainV2 } from "@/lib/opportunity/information-gain-v2"
 import { evaluateInformationGainGate } from "@/lib/opportunity/information-gain-gate"
 import { logAgentDecision } from "@/lib/intelligence/agent-decision-log"
+import { applyScoreAdjustment, computeScoreAdjustment } from "@/lib/intelligence/learning-loop"
 
 export const CONTENT_GENERATION_STEPS = ["research", "information_gain_gate", "outline", "draft", "seo", "geo", "quality", "decide_publish"] as const
 export type ContentGenerationStepName = (typeof CONTENT_GENERATION_STEPS)[number]
@@ -110,7 +111,14 @@ export async function dispatchContentGenerationStep(run: WorkflowRun, opportunit
       let gateReason = ""
       await runStep(run, 2, "information_gain_gate", null, async () => {
         const { input, hasExistingSimilarPage } = await buildInformationGainV2Input(orgId, projectId, opportunity)
-        const result = computeInformationGainV2(input)
+        const rawResult = computeInformationGainV2(input)
+        // §13 Learning Loop (ADR-034/035): a real, bounded correction
+        // from this project's own real predicted-vs-actual history —
+        // null (a true no-op) until MIN_CALIBRATION_SAMPLES real
+        // Outcomes exist, so a fresh project's gate behaves exactly as
+        // the uncalibrated model until real data justifies adjusting it.
+        const adjustment = await computeScoreAdjustment(orgId, projectId, "information_gain")
+        const result = applyScoreAdjustment(rawResult, adjustment)
         const gate = evaluateInformationGainGate(result, hasExistingSimilarPage, undefined, !!opportunity.primaryEntityId)
         gateAllowed = gate.allowed
         gateReason = gate.reason
@@ -125,7 +133,7 @@ export async function dispatchContentGenerationStep(run: WorkflowRun, opportunit
           confidence: result.score / 100,
           approvalRequired: false,
         })
-        return { output: { score: result.score, action: gate.action, allowed: gate.allowed, missingRequirements: result.missingRequirements } }
+        return { output: { score: result.score, rawScore: rawResult.score, action: gate.action, allowed: gate.allowed, missingRequirements: result.missingRequirements } }
       })
       if (!gateAllowed) throw new ContentGenerationBlockedError(gateReason)
       return { outcome: { kind: "advance", nextStep: "outline" } }
