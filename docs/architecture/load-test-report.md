@@ -20,11 +20,11 @@ below, not hand-written estimates. Run again after any change to
 | Metric | Value |
 |---|---|
 | Backlog size | 4000 jobs |
-| Tick p50 latency | 8.1ms |
-| Tick p95 latency | 14.7ms |
-| Tick p99 latency | 14.7ms |
+| Tick p50 latency | 7.9ms |
+| Tick p95 latency | 13.7ms |
+| Tick p99 latency | 13.7ms |
 | Jobs (steps) admitted per tick | 10 |
-| Implied throughput (p50-based) | ~1233.4 jobs/sec per worker tick |
+| Implied throughput (p50-based) | ~1266.6 jobs/sec per worker tick |
 
 ## Before/after: what Phase 5A's step-level queueing actually costs and buys (§45)
 
@@ -33,18 +33,18 @@ or content_generation run executed start-to-finish inline). Phase 5A
 dequeues one job per **step** — the same `dequeue()` query, same measured
 latency above, but each pipeline now needs multiple sequential job
 dispatches (4 for website_discovery,
-7 for content_generation) to reach a terminal
+8 for content_generation) to reach a terminal
 state instead of one.
 
 | | Phase 4 (whole-pipeline jobs) | Phase 5A (step-level jobs) |
 |---|---|---|
 | Jobs dequeued/tick at measured throughput | 10.0 | 10 |
-| **Whole pipelines completed**/tick-equivalent | 10.0 | ~1.82 (avg 5.5 steps/pipeline) |
+| **Whole pipelines completed**/tick-equivalent | 10.0 | ~1.67 (avg 6 steps/pipeline) |
 | Crash mid-pipeline | loses all progress since the last checkpoint *boundary the whole job crossed* — Phase 4 already checkpointed steps within one job, but a killed worker still had to be re-invoked as one unit | recoverable at the exact step (lease expiry + reapExpiredLeases(), proven in tests/integration/step-execution.test.ts) |
 | HTTP request behavior | ran the whole pipeline inline (bounded by a serverless timeout) | enqueues one job, returns immediately — never runs a step inline (§8 acceptance criterion) |
 
 **Real, honest trade-off**: per-tick *pipeline completion* throughput drops
-by roughly the average step count (~5.5x fewer whole pipelines
+by roughly the average step count (~6x fewer whole pipelines
 finish per tick at the same jobs/tick rate) in exchange for the durability
 property this phase exists to deliver — genuine crash recovery at step
 granularity and an HTTP contract that never blocks on a whole pipeline.
@@ -54,13 +54,13 @@ This is the real, named cost of Objective A, not a hidden regression.
 
 Target: 10 tenants / 100 projects / 10,000 opportunities / 100,000 pages / 1,000,000 workflow events.
 
-- At the measured ~1233.4 jobs/sec/tick, and
-  7 step jobs needed per completed page
+- At the measured ~1266.6 jobs/sec/tick, and
+  8 step jobs needed per completed page
   (Phase 5A — up from 1 whole-pipeline job in Phase 4), draining a backlog
   large enough to produce 100,000 pages would need on the
-  order of 70,000 ticks — at a 5-minute cron
+  order of 80,000 ticks — at a 5-minute cron
   cadence (this repo's `vercel.json`) that is
-  **244 days**
+  **278 days**
   of continuous draining with zero new work arriving, worker-throughput
   alone. This is the real, named reason a single 5-minute-cron worker tick
   is a Phase-5-scale mechanism, not a target-scale one — closing this gap
@@ -88,26 +88,56 @@ Target: 10 tenants / 100 projects / 10,000 opportunities / 100,000 pages / 1,000
 | Metric | Value |
 |---|---|
 | Backlog size | 4000 events |
-| Tick p50 latency | 3.7ms |
-| Tick p95 latency | 4.8ms |
-| Tick p99 latency | 4.8ms |
+| Tick p50 latency | 3.2ms |
+| Tick p95 latency | 3.8ms |
+| Tick p99 latency | 3.8ms |
 | Events admitted per tick | 20 |
-| Implied throughput (p50-based) | ~5425.1 events/sec per worker tick |
+| Implied throughput (p50-based) | ~6293.1 events/sec per worker tick |
 
 At the measured rate and this repo's 5-minute cron cadence
 (`vercel.json`), one worker alone drains roughly
-**1,627,524 events per tick window** —
+**1,887,939 events per tick window** —
 comfortably ahead of any single tenant's real write rate today, but the
 same "single cron tick" ceiling named for the job queue above applies
 here identically: this is a Phase-6-scale mechanism, not validated at
 thousands of concurrent tenants writing simultaneously.
+
+## Decision -> Action Bridge Queue (Phase 7, ADR-038/039)
+
+- **2000 real queued Actions** (backed by 2000 real
+  Decisions, both real FK-constrained rows) seeded across the same
+  10 tenants.
+- **20 claim ticks**, each the exact transactional
+  `FOR UPDATE SKIP LOCKED` + same-transaction status flip
+  `lib/intelligence/action-executor.ts#processActionQueue()` uses —
+  deliberately excludes real dispatch cost (starting a real
+  WorkflowRun, running real Deep Research — data- and I/O-dependent,
+  not backlog-dependent; covered separately by
+  `tests/integration/decision-action-bridge.test.ts`), isolating the
+  part that scales with queue depth: claiming real rows under
+  contention.
+
+| Metric | Value |
+|---|---|
+| Backlog size | 2000 actions |
+| Tick p50 latency | 1.9ms |
+| Tick p95 latency | 2.7ms |
+| Tick p99 latency | 2.7ms |
+| Actions admitted per tick | 10 |
+| Implied throughput (p50-based) | ~5305.7 actions/sec per worker tick |
+
+Real, honest limitation carried over from the job-queue measurement
+above: this is claim-only throughput. A real workflow-backed action's
+end-to-end completion is bounded by the SAME content-generation step
+budget already measured (avg 6 steps/pipeline) —
+the two numbers compose, they are not independent ceilings.
 
 ## Named bottlenecks (found by building this harness, not assumed)
 
 1. **Per-candidate `countActiveRuns()` query inside `dequeue()`** — the
    real query above shows this is one extra round-trip per *admitted*
    candidate, not batched. At today's over-fetch multiplier (`limit * 4`)
-   and small tenant counts this is invisible (sub-15ms p95 above); at
+   and small tenant counts this is invisible (sub-14ms p95 above); at
    hundreds of concurrent tenants with deep backlogs this becomes the
    dominant per-tick cost. The fix is mechanical (one aggregated
    `GROUP BY org_id, pipeline` query instead of N individual ones) and is

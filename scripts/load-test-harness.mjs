@@ -184,8 +184,88 @@ async function main() {
   const eventThroughputPerSec = eventsPerTick / (eventP50 / 1000)
   console.log(`[load-test] ${eventTicks} intelligence-event ticks against a ${totalEvents}-event backlog: p50=${eventP50.toFixed(1)}ms p95=${eventP95.toFixed(1)}ms`)
 
+  // ---- Phase 7: the intelligence_actions drain (migrations/0011) —
+  // same real transactional claim shape lib/intelligence/action-
+  // executor.ts#processActionQueue() uses (FOR UPDATE SKIP LOCKED +
+  // an immediate status flip inside the SAME transaction, not a bare
+  // pre-transaction SELECT — see that file's own comment on why a
+  // lock outside a transaction is not a real guard). Deliberately
+  // does NOT run real dispatch (starting a real WorkflowRun, real
+  // Deep Research) — that cost is data-dependent, covered by
+  // tests/integration/decision-action-bridge.test.ts; this isolates
+  // the part that scales with backlog size: claiming real rows under
+  // contention.
+  const ACTIONS_PER_TENANT = 200
+  console.log(`[load-test] seeding ${ACTIONS_PER_TENANT} real decisions+actions/tenant...`)
+  const decisionIds = []
+  for (const orgId of orgIds) {
+    const projectRow = await pool.query("SELECT id FROM projects WHERE org_id = $1 LIMIT 1", [orgId])
+    const projectId = projectRow.rows[0].id
+    const decisionValues = []
+    const decisionParams = []
+    const tenantDecisionIds = []
+    for (let d = 0; d < ACTIONS_PER_TENANT; d++) {
+      const id = `dec_loadtest_${randomUUID()}`
+      tenantDecisionIds.push(id)
+      const base = decisionParams.length
+      decisionValues.push(`($${base + 1}, $${base + 2}, $${base + 3}, 'MONITOR', 'entity', $${base + 4}, 'load test', '[]'::jsonb, 'load test', '{}'::jsonb, 'low', 0.5, 'approved', $${base + 5}, $${base + 5})`)
+      decisionParams.push(id, orgId, projectId, `entity_loadtest_${randomUUID()}`, now)
+    }
+    await pool.query(
+      `INSERT INTO intelligence_decisions (id, org_id, project_id, action, subject_type, subject_id, reason, evidence_ids, expected_impact, estimated_cost, risk, confidence, status, created_at, updated_at) VALUES ${decisionValues.join(",")}`,
+      decisionParams,
+    )
+    decisionIds.push(...tenantDecisionIds)
+    const actionValues = []
+    const actionParams = []
+    for (const decisionId of tenantDecisionIds) {
+      const id = `act_loadtest_${randomUUID()}`
+      const base = actionParams.length
+      actionValues.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, 'queued', $${base + 5})`)
+      actionParams.push(id, orgId, projectId, decisionId, now)
+    }
+    await pool.query(`INSERT INTO intelligence_actions (id, org_id, project_id, decision_id, status, created_at) VALUES ${actionValues.join(",")}`, actionParams)
+  }
+  const totalActions = TENANTS * ACTIONS_PER_TENANT
+  console.log(`[load-test] seeded ${totalActions} real queued actions.`)
+
+  const actionTickLatenciesMs = []
+  const actionTicks = 20
+  const perActionTickLimit = 10
+  for (let i = 0; i < actionTicks; i++) {
+    const start = performance.now()
+    const client = await pool.connect()
+    try {
+      await client.query("BEGIN")
+      const claimed = await client.query(
+        `SELECT id, org_id FROM intelligence_actions WHERE status = 'queued' ORDER BY created_at ASC LIMIT $1 FOR UPDATE SKIP LOCKED`,
+        [perActionTickLimit],
+      )
+      const ids = claimed.rows.map((r) => r.id)
+      if (ids.length) {
+        await client.query(`UPDATE intelligence_actions SET status = 'running', started_at = $1 WHERE id = ANY($2)`, [Date.now(), ids])
+      }
+      await client.query("COMMIT")
+    } catch (err) {
+      await client.query("ROLLBACK")
+      throw err
+    } finally {
+      client.release()
+    }
+    actionTickLatenciesMs.push(performance.now() - start)
+  }
+  actionTickLatenciesMs.sort((a, b) => a - b)
+  const actionP50 = percentile(actionTickLatenciesMs, 50)
+  const actionP95 = percentile(actionTickLatenciesMs, 95)
+  const actionP99 = percentile(actionTickLatenciesMs, 99)
+  const actionsPerTick = perActionTickLimit
+  const actionThroughputPerSec = actionsPerTick / (actionP50 / 1000)
+  console.log(`[load-test] ${actionTicks} action-claim ticks against a ${totalActions}-action backlog: p50=${actionP50.toFixed(1)}ms p95=${actionP95.toFixed(1)}ms`)
+
   // ---- cleanup: this harness's own rows only, never touches anything
   // it didn't create.
+  await pool.query("DELETE FROM intelligence_actions WHERE org_id = ANY($1::text[])", [orgIds])
+  await pool.query("DELETE FROM intelligence_decisions WHERE org_id = ANY($1::text[])", [orgIds])
   await pool.query("DELETE FROM intelligence_event_queue WHERE org_id = ANY($1::text[])", [orgIds])
   await pool.query("DELETE FROM jobs WHERE org_id = ANY($1::text[])", [orgIds])
   await pool.query("DELETE FROM projects WHERE org_id = ANY($1::text[])", [orgIds])
@@ -193,7 +273,7 @@ async function main() {
   await pool.end()
 
   const WEBSITE_DISCOVERY_STEP_COUNT = 4 // crawl, extract_entities, build_profile, discover_opportunities
-const CONTENT_GENERATION_STEP_COUNT = 7 // research, outline, draft, seo, geo, quality, decide_publish
+const CONTENT_GENERATION_STEP_COUNT = 8 // research, information_gain_gate, outline, draft, seo, geo, quality, decide_publish (Phase 6D added information_gain_gate)
 const avgStepsPerPipeline = (WEBSITE_DISCOVERY_STEP_COUNT + CONTENT_GENERATION_STEP_COUNT) / 2
 const pipelinesPerTickBefore = jobsPerTick // Phase 4: one dequeued job = one whole pipeline
 const pipelinesPerTickAfter = jobsPerTick / avgStepsPerPipeline // Phase 5A: one dequeued job = one step
@@ -301,6 +381,36 @@ comfortably ahead of any single tenant's real write rate today, but the
 same "single cron tick" ceiling named for the job queue above applies
 here identically: this is a Phase-6-scale mechanism, not validated at
 thousands of concurrent tenants writing simultaneously.
+
+## Decision -> Action Bridge Queue (Phase 7, ADR-038/039)
+
+- **${totalActions} real queued Actions** (backed by ${totalActions} real
+  Decisions, both real FK-constrained rows) seeded across the same
+  ${TENANTS} tenants.
+- **${actionTicks} claim ticks**, each the exact transactional
+  \`FOR UPDATE SKIP LOCKED\` + same-transaction status flip
+  \`lib/intelligence/action-executor.ts#processActionQueue()\` uses —
+  deliberately excludes real dispatch cost (starting a real
+  WorkflowRun, running real Deep Research — data- and I/O-dependent,
+  not backlog-dependent; covered separately by
+  \`tests/integration/decision-action-bridge.test.ts\`), isolating the
+  part that scales with queue depth: claiming real rows under
+  contention.
+
+| Metric | Value |
+|---|---|
+| Backlog size | ${totalActions} actions |
+| Tick p50 latency | ${actionP50.toFixed(1)}ms |
+| Tick p95 latency | ${actionP95.toFixed(1)}ms |
+| Tick p99 latency | ${actionP99.toFixed(1)}ms |
+| Actions admitted per tick | ${actionsPerTick} |
+| Implied throughput (p50-based) | ~${actionThroughputPerSec.toFixed(1)} actions/sec per worker tick |
+
+Real, honest limitation carried over from the job-queue measurement
+above: this is claim-only throughput. A real workflow-backed action's
+end-to-end completion is bounded by the SAME content-generation step
+budget already measured (avg ${avgStepsPerPipeline} steps/pipeline) —
+the two numbers compose, they are not independent ceilings.
 
 ## Named bottlenecks (found by building this harness, not assumed)
 
