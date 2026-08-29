@@ -3,6 +3,7 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 import { AppShell } from "@/components/pocket2/app-shell"
 import { EmptyState } from "@/components/pocket2/empty-state"
+import { ItemRow } from "@/components/pocket2/item-row"
 import { UnauthenticatedError, UnauthorizedOrgError } from "@/lib/session"
 import { requireTenant } from "@/lib/pocket2/tenancy"
 import { getLibraryPage, getShellData } from "@/lib/pocket2/services/library-service"
@@ -106,25 +107,11 @@ export default async function LibraryPage(props: {
             />
           )
         ) : (
-          /* Cards land in Phase 3. Until then this lists what is really
-           * in the database rather than pretending the grid exists. */
-          <ul className="mt-6 flex flex-col">
-            {page.items.map((item) => (
-              <li key={item.id} className="flex items-center gap-3 py-3" style={{ borderTop: "1px solid var(--p2-line)" }}>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate" style={{ fontSize: "0.9375rem", fontWeight: 530, color: "var(--p2-ink-strong)" }}>
-                    {item.title ?? item.canonicalUrl}
-                  </p>
-                  <p className="p2-meta truncate">
-                    {item.domain}
-                    {item.ingestStatus !== "ready" && <> · <span style={{ color: "var(--p2-warn)" }}>fetching details…</span></>}
-                  </p>
-                </div>
-                <a href={item.url} target="_blank" rel="noopener noreferrer nofollow" className="p2-btn p2-btn-ghost p2-btn-sm">
-                  Open original
-                </a>
-              </li>
-            ))}
+          /* The full card system (grid / list / compact) is Phase 3.
+           * This lists what is really in the database, with each item's
+           * real ingestion state. */
+          <ul className="mt-5 flex flex-col">
+            {page.items.map((item) => <ItemRow key={item.id} item={item} />)}
           </ul>
         )}
       </div>

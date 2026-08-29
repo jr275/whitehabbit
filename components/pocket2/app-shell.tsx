@@ -1,9 +1,10 @@
 import Link from "next/link"
-import type { ReactNode } from "react"
-import { Archive, Bookmark, Home, FolderClosed, Plus, Search, Star, Tag } from "lucide-react"
+import { Suspense, type ReactNode } from "react"
+import { Archive, Bookmark, Home, FolderClosed, Search, Star, Tag } from "lucide-react"
 import { BrandLockup } from "@/components/pocket2/brand"
 import { ThemeToggle } from "@/components/pocket2/theme-toggle"
 import { AccountMenu } from "@/components/pocket2/account-menu"
+import { SaveLauncher } from "@/components/pocket2/save-launcher"
 import { POCKET2_ROUTES } from "@/lib/pocket2/routes"
 
 /* ================================================================== *
@@ -103,10 +104,11 @@ export function AppShell({
           <div className="ml-auto flex items-center gap-1.5">
             {/* The primary action is present on every screen, and is the
               * only accent-coloured control in the chrome. */}
-            <Link href={`${POCKET2_ROUTES.library}?save=1`} className="p2-btn p2-btn-primary p2-btn-sm">
-              <Plus size={14} aria-hidden="true" />
-              <span className="hidden sm:inline">Save</span>
-            </Link>
+            {/* useSearchParams inside SaveLauncher needs a boundary so
+              * the rest of the shell can still be prerendered. */}
+            <Suspense fallback={<span className="p2-btn p2-btn-primary p2-btn-sm" aria-hidden="true">Save</span>}>
+              <SaveLauncher />
+            </Suspense>
             <ThemeToggle />
             <AccountMenu email={email} workspaceName={workspaceName} />
           </div>
