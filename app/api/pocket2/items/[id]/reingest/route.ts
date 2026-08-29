@@ -8,10 +8,14 @@ import { NextResponse } from "next/server"
 import { NotFoundError, withApiHandler } from "@/lib/api-error"
 import { enforceRateLimit } from "@/lib/rate-limit"
 import { requireTenant } from "@/lib/pocket2/tenancy"
+import { assertSameOrigin } from "@/lib/pocket2/http/origin"
 import { reingest } from "@/lib/pocket2/services/save-service"
 
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   return withApiHandler("pocket2.items.reingest", async () => {
+    // Second CSRF layer: SameSite=Lax already stops a cross-site
+    // POST carrying cookies; this rejects one that somehow does.
+    assertSameOrigin(req)
     const ctx = await requireTenant()
     await enforceRateLimit("pocket2_reingest", ctx.orgId)
     const { id } = await params

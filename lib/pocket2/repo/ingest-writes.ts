@@ -7,7 +7,7 @@ import "server-only"
  * dropped. */
 
 import { randomUUID } from "node:crypto"
-import { withTransaction } from "@/lib/db/client"
+import { tenantClient } from "@/lib/pocket2/repo/tenant-db"
 import type { ContentType, ExtractionFailureReason, ReaderStatus } from "@/lib/pocket2/domain/types"
 import { toSlug } from "@/lib/pocket2/domain/validate"
 import type { ExtractedSegment } from "@/lib/pocket2/ingest/extract"
@@ -73,7 +73,10 @@ export async function applyIngestResult(
 ): Promise<void> {
   const now = Date.now()
 
-  await withTransaction(async (client) => {
+  // Runs inside the caller's withTenant() transaction, so the whole
+  // ingestion result still commits or rolls back as one unit.
+  const client = tenantClient()
+  {
     await client.query(
       `UPDATE saved_items SET
          -- curated value wins; otherwise keep what is stored;
@@ -173,7 +176,7 @@ export async function applyIngestResult(
       [`ev_${randomUUID()}`, orgId, itemId,
        JSON.stringify({ contentType: patch.contentType, readerStatus: patch.readerStatus }), now],
     )
-  })
+  }
 }
 
 /**
@@ -191,7 +194,10 @@ export async function recordIngestFailure(
   failureReason: ExtractionFailureReason | null = null,
 ): Promise<void> {
   const now = Date.now()
-  await withTransaction(async (client) => {
+  // Runs inside the caller's withTenant() transaction, so the whole
+  // ingestion result still commits or rolls back as one unit.
+  const client = tenantClient()
+  {
     await client.query(
       `UPDATE saved_items SET
          ingest_status = $3, ingest_error = $4, reader_status = 'not_available', updated_at = $5
@@ -214,5 +220,5 @@ export async function recordIngestFailure(
        VALUES ($1,$2,$3,'ingest_failed',$4::jsonb,$5)`,
       [`ev_${randomUUID()}`, orgId, itemId, JSON.stringify({ message: message.slice(0, 200), terminal }), now],
     )
-  })
+  }
 }

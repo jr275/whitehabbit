@@ -15,19 +15,18 @@ export function SaveLauncher() {
   const params = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
-  const [open, setOpen] = useState(false)
+  const [openedHere, setOpenedHere] = useState(false)
 
-  // ?save=1 opens the dialog, then the parameter is removed so a
-  // refresh or a shared link does not reopen it forever.
-  useEffect(() => {
-    if (params.get("save") !== null) {
-      setOpen(true)
-      const next = new URLSearchParams(params)
-      next.delete("save")
-      const query = next.toString()
-      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
-    }
-  }, [params, pathname, router])
+  /* Openness is DERIVED, not synchronised.
+   *
+   * ?save=1 is a real way to open the dialog — it is what makes a
+   * bookmarklet, a share target or a browser extension work with no
+   * new code. Previously an effect noticed the parameter and called
+   * setState, which is an extra render on every navigation and the
+   * kind of effect-driven state React 19 warns about. Reading it
+   * directly needs neither. */
+  const openedByUrl = params.get("save") !== null
+  const open = openedHere || openedByUrl
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -37,19 +36,29 @@ export function SaveLauncher() {
       if (target?.isContentEditable) return
       if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return
       event.preventDefault()
-      setOpen(true)
+      setOpenedHere(true)
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
   }, [])
 
-  const close = useCallback(() => setOpen(false), [])
+  const close = useCallback(() => {
+    setOpenedHere(false)
+    // Clear the parameter as part of closing, so a refresh does not
+    // reopen the dialog forever.
+    if (openedByUrl) {
+      const next = new URLSearchParams(params)
+      next.delete("save")
+      const query = next.toString()
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+    }
+  }, [openedByUrl, params, pathname, router])
 
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => setOpenedHere(true)}
         className="p2-btn p2-btn-primary p2-btn-sm"
         title="Save a link (s)"
       >

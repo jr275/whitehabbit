@@ -10,6 +10,7 @@ import { after, NextResponse } from "next/server"
 import { withApiHandler, ValidationError } from "@/lib/api-error"
 import { enforceRateLimit } from "@/lib/rate-limit"
 import { requireTenant } from "@/lib/pocket2/tenancy"
+import { assertSameOrigin } from "@/lib/pocket2/http/origin"
 import { parseLibraryQuery, requireString } from "@/lib/pocket2/domain/validate"
 import { getLibraryPage } from "@/lib/pocket2/services/library-service"
 import { saveUrl } from "@/lib/pocket2/services/save-service"
@@ -27,6 +28,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   return withApiHandler("pocket2.items.save", async () => {
+    // Second CSRF layer: SameSite=Lax already stops a cross-site
+    // POST carrying cookies; this rejects one that somehow does.
+    assertSameOrigin(req)
     const ctx = await requireTenant()
     // Per workspace, not per user: the limit protects the ingestion
     // queue and the sites it fetches, which are shared resources.

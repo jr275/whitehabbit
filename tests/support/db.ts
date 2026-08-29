@@ -2,9 +2,27 @@
  * INTEGRATION TEST HARNESS — real PostgreSQL, real migrations.
  *
  * These tests deliberately do NOT mock the database. Tenant isolation
- * is enforced by SQL predicates and composite foreign keys; a mocked
- * client would happily "pass" a test for a constraint that does not
- * exist in the real schema, which is worse than no test at all.
+ * is enforced by SQL predicates, composite foreign keys and row-level
+ * security; a mocked client would happily "pass" a test for a
+ * constraint that does not exist in the real schema, which is worse
+ * than no test at all.
+ *
+ * TWO CONNECTIONS, ON PURPOSE:
+ *
+ *   DATABASE_URL      the APPLICATION's connection. Points at the
+ *                     non-superuser pocket2_app role, so code under
+ *                     test runs with row-level security actually in
+ *                     force — exactly as it will in production.
+ *
+ *   adminPool()       the HARNESS's connection, as superuser. Used to
+ *                     create and tear down tenants and to assert on
+ *                     raw stored state. A superuser bypasses RLS, so
+ *                     this can see everything and verify what the
+ *                     application could and could not reach.
+ *
+ * If the harness used one connection for both, either setup would be
+ * blocked by the policies or the application would bypass them — and
+ * the suite would prove nothing about isolation.
  * ================================================================== */
 
 import { Pool } from "pg"
@@ -13,11 +31,30 @@ import path from "node:path"
 
 export const hasDatabase = Boolean(process.env.DATABASE_URL)
 
+/** Superuser connection for setup, teardown and raw-state assertions.
+ * Falls back to DATABASE_URL when no separate admin URL is configured
+ * (a database with no RLS, or a developer running everything as one
+ * role). */
+const ADMIN_URL = process.env.ADMIN_DATABASE_URL ?? process.env.DATABASE_URL
+
 let pool: Pool | null = null
 
 export function testPool(): Pool {
-  if (!pool) pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 4 })
+  if (!pool) pool = new Pool({ connectionString: ADMIN_URL, max: 4 })
   return pool
+}
+
+/** Explicit alias — reads better at call sites that are deliberately
+ * reaching past the application's own permissions. */
+export const adminPool = testPool
+
+let appPoolInstance: Pool | null = null
+
+/** A connection with exactly the application's own privileges. Use
+ * this to prove what the application CANNOT do. */
+export function appPool(): Pool {
+  if (!appPoolInstance) appPoolInstance = new Pool({ connectionString: process.env.DATABASE_URL, max: 4 })
+  return appPoolInstance
 }
 
 /** Applies migrations/*.sql to whatever DATABASE_URL points at, using
@@ -67,4 +104,5 @@ export async function createTenant(label: string, role = "owner"): Promise<Tenan
 
 export async function closePool(): Promise<void> {
   if (pool) { await pool.end(); pool = null }
+  if (appPoolInstance) { await appPoolInstance.end(); appPoolInstance = null }
 }

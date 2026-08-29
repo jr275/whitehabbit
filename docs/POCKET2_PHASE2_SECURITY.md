@@ -4,8 +4,13 @@ Adversarial audit of the ingestion surface added in Phase 2, performed before an
 feature work. Every attack below was actually executed against a live PostgreSQL 16 database
 and a running production build — none is theoretical.
 
-**Result: 9 findings. 8 fixed and regression-tested. 1 open (accepted, needs authorization).**
-Tests went from 142 to **301**.
+**Result: 9 findings, all fixed and regression-tested. The three conditions attached to the
+original verdict are also closed.** Tests went from 142 to **317**.
+
+> **Update after authorization.** This document first reported DB-03 (no row-level security) as
+> open, because fixing it was not a localized change. That work is now done, along with the
+> CSRF `Origin` check and the ESLint gate. Sections 5, 6 and 12 record the closed state; the
+> findings themselves are left as written so the audit trail stays honest about what was found.
 
 ---
 
@@ -118,9 +123,9 @@ re-executed after the fix to confirm the attack is blocked.
 
 ## 5. Vulnerabilities open
 
-### DB-03 — No row-level security — **OPEN, HIGH (defence in depth)**
+### DB-03 — No row-level security — **CLOSED** (was OPEN/HIGH)
 
-**This is the one finding not fixed, and it is deliberate.**
+*Recorded as it was found, then closed on authorization. Implementation below.*
 
 - **Confirmed:** `relrowsecurity = false` and `relforcerowsecurity = false` on all 12 tenant
   tables. A raw `SELECT text FROM reader_segments WHERE id = 'seg_a'` returns another tenant's
@@ -146,23 +151,85 @@ re-executed after the fix to confirm the attack is blocked.
      `USING (org_id = current_setting('pocket2.org_id', true))`.
   4. Invert the assertion in `tests/integration/tenant-schema.test.ts` that currently records
      RLS as absent.
-- **Tracked in code:** the test named *"known limitation: reads are enforced in the repository,
-  not by RLS"* fails the moment RLS is enabled, so this cannot be forgotten.
+**How it was closed**
 
-### Accepted, not fixed
+1. `lib/pocket2/repo/tenant-db.ts` — `withTenant(orgId, fn)` opens a transaction and issues
+   `set_config('pocket2.org_id', orgId, true)`. Transaction-local is essential: a session-level
+   `SET` on a pooled connection would outlive the request and hand the next one another tenant's
+   scope — worse than no RLS. AsyncLocalStorage carries the connection so repository functions
+   keep their signatures; a function that forgets the wrapper throws
+   `MissingTenantScopeError` rather than silently falling back to an unscoped connection.
+2. All ~20 repository functions migrated onto `tquery`/`tqueryOne`; services and the worker
+   supply the scope.
+3. `migrations/0004_pocket2_rls.sql` — `ENABLE` **and** `FORCE ROW LEVEL SECURITY` on all 12
+   tenant tables, each with `USING` **and** `WITH CHECK` on
+   `org_id = current_setting('pocket2.org_id', true)`. `current_setting(..., true)` is NULL when
+   unset and `org_id = NULL` is not true, so an undeclared statement is denied by construction.
+4. `ingest_jobs` additionally accepts a worker scope, because the queue is cross-tenant by
+   nature — a worker must see that org B has work before it can act for org B. That scope is
+   accepted by **that table alone** and is tested: a worker-scoped transaction reads zero rows
+   from saved_items, reader_documents, reader_segments, tags, collections and item_events.
+
+**The deployment requirement this creates**
+
+RLS does not apply to superusers. Migration 0004 creates a `pocket2_app` role (NOLOGIN by
+default); `DATABASE_URL` must point at it. Connecting as `postgres` leaves every policy inert.
+`assertRlsIsEffective()` asks the database directly so the misconfiguration is loud, `.env.example`
+documents it, and a test asserts the application role is not a superuser.
+
+**Proof** — `tests/integration/tenant-schema.test.ts`, all issued as the application role with
+**no `org_id` predicate in the SQL at all**:
+
+| Attempt | Result |
+|---|---|
+| `SELECT` with no organization declared | 0 rows (default deny) |
+| `SELECT` while acting for the wrong organization | 0 rows |
+| `SELECT` while acting for the right organization | the rows, so this is isolation not breakage |
+| `INSERT` labelled with another tenant's org_id | refused by `WITH CHECK` |
+| `UPDATE` relabelling one's own row into another org | refused |
+| `DELETE FROM saved_items` as the wrong tenant | 0 rows deleted; owner's data intact |
+| Worker scope reading content tables | 0 rows from every one |
+| Tenant scope surviving onto a pooled connection | not set — transaction-local confirmed |
+
+### CSRF-01 — **CLOSED** (was LOW, accepted)
+
+`SameSite=Lax` was the only layer. `lib/pocket2/http/origin.ts` adds a second: a mutating request
+must carry either no `Origin` (a non-browser client, which has no ambient cookie to abuse) or one
+matching the host it was sent to. Compared against the request's own host rather than a
+configured allowlist, so it needs no per-environment setting and cannot drift.
+
+Verified live: `Origin: https://evil.test` → **400**, same-origin → 401 (the auth layer,
+unchanged), no Origin → 401. Six unit tests, including the `app.test.evil.test` suffix trick and
+a differing port.
+
+### Audit item #10 (ESLint) — **CLOSED**
+
+`eslint.config.mjs` added; `pnpm lint` runs. Scoped deliberately: **errors** on Pocket2's own
+code (including `no-explicit-any`, `no-floating-promises`, `no-misused-promises` under
+type-aware checking), **warnings** on the pre-existing product, whose ~20 React 19 hook
+violations belong to its owner rather than to this checkpoint.
+
+It immediately paid for itself in Pocket2 code:
+- `String(form.get("email"))` on a `FormData` value — a field submitted as a file would have
+  become `"[object File]"` instead of failing validation.
+- Six async event handlers passed where a void return was expected, so a rejection would have
+  been invisible.
+- Two `setState`-inside-effect patterns, now genuinely fixed rather than suppressed: the theme
+  toggle uses `useSyncExternalStore` with a real server snapshot, and the save launcher derives
+  its open state from the URL instead of synchronising it.
+- Two dead type assertions.
+
+Current state: **0 errors, 46 warnings**, every warning inherited and deliberately visible.
+
+### Still accepted, not fixed
 
 - **SSRF-05 (INFO):** `POST /api/pocket2/items` accepts `http://169.254.169.254/` and creates
   the item; the fetch is then refused. By design — save-time validation is synchronous and does
   no DNS, and a DNS check there would be a TOCTOU anyway. No request is ever made.
-- **CSRF-01 (LOW):** the session cookie is `HttpOnly; SameSite=Lax`, so a cross-site `POST`
-  carries no cookie (**verified: 401**). `SameSite` is the *only* layer — there is no `Origin`
-  check. Recommend adding one as defence in depth.
-- **Audit item #10 (INFO):** no ESLint config exists in the repository; `next lint` was removed
-  in Next.js 16. Lint could not be run.
 
 ---
 
-## 6. Multi-tenancy — **STRONG for writes, application-enforced for reads**
+## 6. Multi-tenancy — **STRONG, enforced by the database for reads and writes**
 
 - Every one of the 12 tenant tables carries `org_id` (asserted by test).
 - Every FK between tenant-owned rows is now composite on `org_id` (asserted by test — this is
@@ -172,7 +239,11 @@ re-executed after the fix to confirm the attack is blocked.
   untouched.
 - Live IDOR against a real second tenant: `GET` 404, `reingest` 404, list 0 items, search 0 hits
   — and **identical to a nonexistent id**, so probing reveals nothing. Owner still gets 200.
-- **Gap:** DB-03 above.
+- Row-level security is `ENABLE`d and `FORCE`d on all 12 tables, with `USING` and `WITH CHECK`
+  policies. A raw `SELECT` as the application role, with no predicate, returns nothing for the
+  wrong organization and nothing at all when none is declared.
+- The application connects as a non-superuser, asserted by test — without which none of the
+  above would apply.
 
 ## 7. SSRF protection — **STRONG**
 
@@ -215,30 +286,41 @@ with no request context at all.
 
 ## 11. Tests
 
-**301 passing** (from 142), 12 files. Typecheck 0 errors. Build succeeds. E2E re-run after all
-fixes: sign-in, save, live ingestion against a real public page, and the metadata endpoint
-correctly refused with the honest message.
+**317 passing** (from 142), 13 files. Typecheck 0 errors. **Lint 0 errors.** Build succeeds.
 
-Lint could not be run — no ESLint configuration exists (audit item #10).
+E2E re-run against the running build with the app connected as the non-superuser role: sign-in,
+theme toggle (including persistence across reload), `?save=1`, keyboard shortcut, save, and live
+ingestion of a real public page — all under RLS, with zero tenant-scope errors in the log.
+
+The fail-closed design caught one of my own misses during that run: `GET /api/pocket2/items/:id`
+called the repository directly rather than through a service, so it threw
+`MissingTenantScopeError` instead of quietly running unscoped. Fixed by routing it through
+`getSavedItem()`.
 
 ---
 
 ## 12. Verdict
 
-### READY WITH CONDITIONS
+### READY
 
-The Phase 2 ingestion surface is sound for continued development. Eight findings — including one
-HIGH SSRF gap, a stored-content issue, two schema-level tenancy gaps and a self-sustaining queue
-DoS — were found, fixed, and locked behind regression tests.
+All nine findings are fixed and regression-tested, and the three conditions attached to the
+original verdict are closed:
 
-**Conditions before production exposure:**
+| Condition | State |
+|---|---|
+| DB-03 — row-level security | **Closed.** ENABLE + FORCE on 12 tables, USING + WITH CHECK, proven by raw-SQL reads as the application role |
+| CSRF-01 — Origin check | **Closed.** Second layer added and verified live |
+| Audit item #10 — ESLint | **Closed.** `pnpm lint` at 0 errors; found four real defects in Pocket2 code on its first run |
 
-1. **DB-03 (RLS)** — decide explicitly. Either authorize the `withTenant` + RLS work, or accept
-   in writing that cross-tenant read isolation is application-enforced. It should not remain
-   undecided.
-2. **CSRF-01** — add an `Origin` check to the mutating Pocket2 routes as a second layer.
-3. **Audit item #10** — add ESLint; a lint gate could not be run in this checkpoint.
-4. **`POCKET2_CRON_SECRET`** must be set in every deployed environment. Without it the tick
-   endpoint refuses all requests (fail-closed, correct) and the queue never drains.
+**Two operational requirements remain, and they are deployment configuration rather than code:**
 
-Stopping here as instructed. No Phase 2 feature work has resumed.
+1. **`DATABASE_URL` must connect as a non-superuser** (`pocket2_app`, created by migration 0004
+   and NOLOGIN until credentials are granted). A superuser bypasses RLS entirely, which would
+   make every policy decorative. Run migrations as an administrative role; run the application
+   as `pocket2_app`. `assertRlsIsEffective()` exists to surface this loudly — wire it into a
+   health check.
+2. **`POCKET2_CRON_SECRET` must be set** in every environment. Without it the tick endpoint
+   refuses all requests (fail-closed, correct) and the queue never drains.
+
+Phase 2 feature work has NOT resumed. Remaining Phase 2 scope is UI polish on the save flow;
+Phase 3 is cards, filters and the search palette.

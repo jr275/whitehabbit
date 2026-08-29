@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { closePool, createTenant, hasDatabase, migrate, resetPocket2, testPool, type Tenant } from "../support/db"
-import { deleteItem, getItem, getLibraryFacets, listItems, saveItem, updateItemState } from "@/lib/pocket2/repo/items"
+import { deleteItem, getItem, getLibraryFacets, listItems, saveItem, updateItemState } from "../support/scoped-repo"
 
 /* ================================================================== *
  * MULTI-TENANCY — the tests that matter most.

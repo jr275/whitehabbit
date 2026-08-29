@@ -9,13 +9,13 @@ import "server-only"
 import { NextResponse } from "next/server"
 import { NotFoundError, withApiHandler } from "@/lib/api-error"
 import { requireTenant } from "@/lib/pocket2/tenancy"
-import { getItem } from "@/lib/pocket2/repo/items"
+import { getSavedItem } from "@/lib/pocket2/services/library-service"
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   return withApiHandler("pocket2.items.get", async () => {
     const ctx = await requireTenant()
     const { id } = await params
-    const item = await getItem(ctx.orgId, ctx.userId, id)
+    const item = await getSavedItem(ctx, id)
     if (!item) throw new NotFoundError()
     return NextResponse.json({ item })
   })

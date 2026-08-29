@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
-import { closePool, createTenant, hasDatabase, migrate, resetPocket2, testPool, type Tenant } from "../support/db"
-import { saveItem } from "@/lib/pocket2/repo/items"
+import { adminPool, appPool, closePool, createTenant, hasDatabase, migrate, resetPocket2, testPool, type Tenant } from "../support/db"
+import { saveItem, withTenant } from "../support/scoped-repo"
+import { tquery } from "@/lib/pocket2/repo/tenant-db"
 
 /* ================================================================== *
  * TENANT ISOLATION AT THE STORAGE LAYER
@@ -170,33 +171,168 @@ describeDb("the database refuses cross-tenant attachment", () => {
   })
 })
 
-describeDb("known limitation: reads are enforced in the repository, not by RLS", () => {
+describeDb("reads are enforced by the database, not only by the repository (DB-03 closed)", () => {
   beforeAll(async () => { await migrate() })
   afterAll(async () => { await closePool() })
 
-  it("records that row-level security is not enabled on the tenant tables", async () => {
-    /* This test documents the CURRENT, HONEST state rather than
-     * asserting a property we have. See finding DB-03 in
-     * docs/POCKET2_PHASE2_SECURITY.md.
-     *
-     * Composite foreign keys make cross-tenant WRITES impossible at
-     * the storage layer (proved above). Cross-tenant READS are
-     * prevented by every repository function taking orgId and
-     * filtering on it — an application-layer guarantee. Enabling RLS
-     * would move that guarantee into the database too, but requires
-     * every Pocket2 query to run inside a transaction that sets a
-     * tenant session variable, which is a change to the whole
-     * data-access layer and is deliberately not being made inside a
-     * security checkpoint.
-     *
-     * When RLS is implemented, this test should be inverted. */
-    const { rows } = await testPool().query<{ relname: string; relrowsecurity: boolean }>(
-      `SELECT c.relname, c.relrowsecurity FROM pg_class c
-         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname='public' AND c.relname = ANY($1::text[])`,
+  it("has row-level security ENABLED and FORCED on every tenant table", async () => {
+    // This assertion is the inverse of the one that stood here while
+    // DB-03 was open. FORCE matters as much as ENABLE: without it the
+    // table's owner bypasses every policy.
+    const { rows } = await testPool().query<{ relname: string; rls: boolean; forced: boolean }>(
+      `SELECT c.relname, c.relrowsecurity AS rls, c.relforcerowsecurity AS forced
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = ANY($1::text[])`,
       [TENANT_TABLES],
     )
-    const withRls = rows.filter((r) => r.relrowsecurity).map((r) => r.relname)
-    expect(withRls, "RLS appears to be enabled — invert this test and close DB-03").toEqual([])
+    expect(rows).toHaveLength(TENANT_TABLES.length)
+    expect(rows.filter((r) => !r.rls).map((r) => r.relname), "RLS not enabled").toEqual([])
+    expect(rows.filter((r) => !r.forced).map((r) => r.relname), "RLS not FORCEd").toEqual([])
+  })
+
+  it("gives every tenant table a policy that keys on the acting organization", async () => {
+    const { rows } = await testPool().query<{ tablename: string; qual: string | null; with_check: string | null }>(
+      `SELECT tablename, qual, with_check FROM pg_policies
+        WHERE schemaname = 'public' AND policyname = 'tenant_isolation'`,
+    )
+    expect(rows.map((r) => r.tablename).sort()).toEqual([...TENANT_TABLES].sort())
+    for (const row of rows) {
+      // USING governs reads; WITH CHECK governs writes. USING alone
+      // would let a tenant UPDATE its own row to another org_id.
+      expect(row.qual, `${row.tablename} USING`).toContain("pocket2.org_id")
+      expect(row.with_check, `${row.tablename} WITH CHECK`).toContain("pocket2.org_id")
+    }
+  })
+
+  it("the application role is NOT a superuser, or none of this applies", async () => {
+    // A superuser bypasses RLS entirely, so connecting the application
+    // as one would make every policy above decorative.
+    const { rows } = await appPool().query<{ is_superuser: boolean; who: string }>(
+      "SELECT rolsuper AS is_superuser, current_user AS who FROM pg_roles WHERE rolname = current_user",
+    )
+    expect(rows[0].is_superuser, `application connects as ${rows[0].who}`).toBe(false)
+  })
+})
+
+describeDb("row-level security blocks cross-tenant READS (DB-03 regression)", () => {
+  let a: Tenant
+  let b: Tenant
+  let itemA: string
+
+  beforeAll(async () => { await migrate() })
+  afterAll(async () => { await resetPocket2(); await closePool() })
+
+  beforeEach(async () => {
+    await resetPocket2()
+    a = await createTenant("rlsA")
+    b = await createTenant("rlsB")
+    itemA = (await saveItem(a.orgId, a.userId, "https://example.com/confidential")).item.id
+    await withTenant(a.orgId, async () => {
+      await tquery(
+        `INSERT INTO reader_documents (id,item_id,org_id,extraction_status,extractor_version,text,extracted_at)
+         VALUES ('rdoc_rls',$1,$2,'ok','v','the confidential body text',1)`, [itemA, a.orgId])
+    })
+  })
+
+  /** A raw statement issued with the APPLICATION's own privileges —
+   * no repository, no predicate, nothing but SQL and whatever scope
+   * the transaction declares. */
+  const asRole = async (orgId: string | null, sql: string, params: unknown[] = []) => {
+    const client = await appPool().connect()
+    try {
+      await client.query("BEGIN")
+      if (orgId) await client.query("SELECT set_config('pocket2.org_id', $1, true)", [orgId])
+      const result = await client.query(sql, params)
+      await client.query("COMMIT")
+      return result.rows
+    } catch (error) {
+      // Several of these statements are SUPPOSED to fail. Without this
+      // rollback the connection returns to the pool inside an aborted
+      // transaction and poisons every later test with
+      // "current transaction is aborted".
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  it("returns nothing for a statement that never declared an organization", async () => {
+    // Default deny: current_setting(...) is NULL, and `org_id = NULL`
+    // is not true. This is the case a forgotten WHERE clause hits.
+    expect(await asRole(null, "SELECT id FROM saved_items")).toEqual([])
+    expect(await asRole(null, "SELECT text FROM reader_documents")).toEqual([])
+    expect(await asRole(null, "SELECT id FROM tags")).toEqual([])
+  })
+
+  it("returns nothing when acting for the WRONG organization", async () => {
+    // The decisive test. No org_id predicate anywhere in this SQL —
+    // the database alone decides what is visible.
+    expect(await asRole(b.orgId, "SELECT id FROM saved_items")).toEqual([])
+    expect(await asRole(b.orgId, "SELECT text FROM reader_documents")).toEqual([])
+    expect(await asRole(b.orgId, "SELECT id FROM saved_items WHERE id = $1", [itemA])).toEqual([])
+  })
+
+  it("returns the rows for the RIGHT organization, so this is isolation and not breakage", async () => {
+    const rows = await asRole(a.orgId, "SELECT id FROM saved_items")
+    expect(rows.map((r) => (r as { id: string }).id)).toEqual([itemA])
+    expect(await asRole(a.orgId, "SELECT text FROM reader_documents")).toHaveLength(1)
+  })
+
+  it("refuses a cross-tenant WRITE even with a correct-looking org_id", async () => {
+    // WITH CHECK: acting as B, inserting a row labelled A is refused.
+    // Without WITH CHECK, USING alone would permit this.
+    await expect(asRole(b.orgId,
+      `INSERT INTO tags (id,org_id,name,slug,created_at) VALUES ('t_evil',$1,'X','x',1)`,
+      [a.orgId])).rejects.toThrow(/row-level security/i)
+  })
+
+  it("refuses relabelling one's own row into another organization", async () => {
+    await asRole(b.orgId, `INSERT INTO tags (id,org_id,name,slug,created_at) VALUES ('t_own',$1,'X','x',1)`, [b.orgId])
+    await expect(asRole(b.orgId, "UPDATE tags SET org_id = $1 WHERE id = 't_own'", [a.orgId]))
+      .rejects.toThrow(/row-level security/i)
+  })
+
+  it("cannot delete another tenant's rows", async () => {
+    expect(await asRole(b.orgId, "DELETE FROM saved_items RETURNING id")).toEqual([])
+    // still there for its owner
+    expect(await asRole(a.orgId, "SELECT id FROM saved_items")).toHaveLength(1)
+  })
+
+  it("keeps the worker scope confined to the job queue", async () => {
+    const client = await appPool().connect()
+    try {
+      await client.query("BEGIN")
+      await client.query("SELECT set_config('pocket2.worker', 'on', true)")
+      // The worker CAN see the queue — it must, to find pending work.
+      const jobs = await client.query("SELECT id FROM ingest_jobs")
+      expect(jobs.rows.length).toBeGreaterThan(0)
+      // …and can see nothing else. This is what stops the worker scope
+      // from being a general-purpose bypass.
+      for (const table of ["saved_items", "reader_documents", "reader_segments", "tags", "collections", "item_events"]) {
+        const { rows } = await client.query(`SELECT * FROM ${table}`)
+        expect(rows, `worker scope leaked ${table}`).toEqual([])
+      }
+      await client.query("COMMIT")
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
+    } finally {
+      client.release()
+    }
+  })
+
+  it("does not let a tenant scope leak onto the next user of a pooled connection", async () => {
+    // set_config(..., true) is transaction-local. A session-level SET
+    // would survive the connection returning to the pool and hand the
+    // next request another tenant's scope.
+    await withTenant(a.orgId, () => tquery("SELECT 1"))
+    const client = await appPool().connect()
+    try {
+      const { rows } = await client.query("SELECT current_setting('pocket2.org_id', true) AS org")
+      expect(rows[0].org === null || rows[0].org === "").toBe(true)
+    } finally {
+      client.release()
+    }
   })
 })

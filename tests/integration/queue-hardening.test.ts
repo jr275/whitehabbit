@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { closePool, createTenant, hasDatabase, migrate, resetPocket2, testPool, type Tenant } from "../support/db"
-import { getItem, saveItem } from "@/lib/pocket2/repo/items"
-import { claimJobs, completeJob, failJob, reapAbandonedJobs } from "@/lib/pocket2/repo/jobs"
+import { getItem, saveItem } from "../support/scoped-repo"
+import { claimJobs, completeJob, failJob, reapAbandonedJobs } from "../support/scoped-repo"
 import { runIngestTick } from "@/lib/pocket2/ingest/worker"
 import { MAX_SEGMENTS, segmentArticle } from "@/lib/pocket2/ingest/extract"
 import type { PageFetcher, RobotsChecker } from "@/lib/pocket2/ingest/pipeline"
@@ -74,7 +74,10 @@ describeDb("queue: a crashing job cannot loop forever (QUEUE-01)", () => {
       await testPool().query("UPDATE ingest_jobs SET next_attempt_at = $1 WHERE id = $2", [Date.now() - 1, job.id])
     }
     expect(runs).toBe(4) // exactly max_attempts, then terminal
-    const { rows } = await testPool().query("SELECT status FROM ingest_jobs")
+    // Scoped to this tenant: an unscoped SELECT here would pick up any
+    // row left behind by another suite or by manual testing.
+    const { rows } = await testPool().query("SELECT status FROM ingest_jobs WHERE org_id = $1", [t.orgId])
+    expect(rows).toHaveLength(1)
     expect(rows[0].status).toBe("failed")
   })
 
@@ -94,7 +97,8 @@ describeDb("queue: a crashing job cannot loop forever (QUEUE-01)", () => {
     // Disjoint claims: between them they process each job exactly once.
     expect(one.claimed + two.claimed).toBe(8)
 
-    const { rows } = await testPool().query<{ n: number }>("SELECT count(*)::int AS n FROM ingest_jobs WHERE status <> 'done'")
+    const { rows } = await testPool().query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM ingest_jobs WHERE org_id = $1 AND status <> 'done'", [t.orgId])
     expect(rows[0].n).toBe(0)
     // and exactly one reader document per item — no double-processing
     const docs = await testPool().query<{ n: number }>(

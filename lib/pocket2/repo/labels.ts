@@ -4,11 +4,11 @@ import "server-only"
  * orgId first and every statement filters on it — there is no
  * unscoped read. */
 
-import { query } from "@/lib/db/client"
+import { tquery } from "@/lib/pocket2/repo/tenant-db"
 import type { Collection, Tag } from "@/lib/pocket2/domain/types"
 
 export async function listCollections(orgId: string): Promise<Collection[]> {
-  const rows = await query<{
+  const rows = await tquery<{
     id: string; org_id: string; created_by: string | null; name: string; slug: string
     description: string | null; color: string | null; icon: string | null
     item_count: number; position: number; created_at: string; updated_at: string
@@ -29,7 +29,7 @@ export async function listCollections(orgId: string): Promise<Collection[]> {
 /** Ordered by real usage, so the sidebar surfaces the tags this
  * library actually leans on rather than alphabetical trivia. */
 export async function listTags(orgId: string, limit = 50): Promise<Tag[]> {
-  const rows = await query<{
+  const rows = await tquery<{
     id: string; org_id: string; name: string; slug: string
     color: string | null; usage_count: number; created_at: string
   }>(

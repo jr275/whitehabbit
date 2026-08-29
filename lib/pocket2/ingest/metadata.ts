@@ -193,7 +193,7 @@ export function extractMetadata(html: string, pageUrl: string): PageMetadata {
     siteName: clean(metaContent(document, ['meta[property="og:site_name"]']), 120),
     declaredType:
       clean(metaContent(document, ['meta[property="og:type"]']), 80) ??
-      clean(typeof jsonLd[0]?.["@type"] === "string" ? (jsonLd[0]["@type"] as string) : null, 80),
+      clean(typeof jsonLd[0]?.["@type"] === "string" ? jsonLd[0]["@type"] : null, 80),
     language: clean(document.querySelector("html")?.getAttribute("lang"), 20),
     noArchive: robotsMeta.includes("noarchive") || robotsMeta.includes("none"),
   }

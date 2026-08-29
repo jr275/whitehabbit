@@ -15,6 +15,14 @@ import { useState } from "react"
 import { AuthShell, Field, FormError } from "@/components/pocket2/auth-shell"
 import { POCKET2_HOME } from "@/lib/pocket2/routes"
 
+/** FormData.get() returns `string | File | null`. Coercing a File with
+ * String() yields "[object File]", so a field submitted as a file
+ * would silently become nonsense instead of failing validation. */
+function text(form: FormData, field: string): string {
+  const value = form.get(field)
+  return typeof value === "string" ? value : ""
+}
+
 export default function Pocket2SignupPage() {
   const router = useRouter()
   const [submitting, setSubmitting] = useState(false)
@@ -23,9 +31,9 @@ export default function Pocket2SignupPage() {
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    const email = String(form.get("email") ?? "")
-    const password = String(form.get("password") ?? "")
-    const workspaceName = String(form.get("workspaceName") ?? "").trim()
+    const email = text(form, "email")
+    const password = text(form, "password")
+    const workspaceName = text(form, "workspaceName").trim()
 
     setSubmitting(true)
     setError(null)
@@ -64,7 +72,7 @@ export default function Pocket2SignupPage() {
       subtitle="Save your first link in under a minute."
       footer={<>Already have an account? <Link href="/pocket2/login" className="p2-link">Sign in</Link></>}
     >
-      <form onSubmit={onSubmit} className="mt-6 flex flex-col gap-4">
+      <form onSubmit={(event) => void onSubmit(event)} className="mt-6 flex flex-col gap-4">
         <Field label="Email" name="email" type="email" required autoComplete="email" autoFocus placeholder="you@example.com" />
         <Field
           label="Password" name="password" type="password" required minLength={8}

@@ -12,7 +12,7 @@ import "server-only"
  * ================================================================== */
 
 import { randomUUID } from "node:crypto"
-import { queryOne } from "@/lib/db/client"
+import { tqueryOne, withTenant, withWorkerScope } from "@/lib/pocket2/repo/tenant-db"
 import { logger, newRequestId } from "@/lib/observability/logger"
 import { claimJobs, completeJob, failJob, reapAbandonedJobs, type IngestJob } from "@/lib/pocket2/repo/jobs"
 import { pruneExpiredRateLimits } from "@/lib/db/repo"
@@ -40,47 +40,54 @@ export interface TickOptions {
 
 async function runOne(job: IngestJob, requestId: string, options: TickOptions): Promise<"ok" | "retry" | "failed"> {
   if (!job.itemId) {
-    await failJob(job.id, "Job has no item.", { retryable: false, attempts: job.attempts, maxAttempts: job.maxAttempts })
+    await withWorkerScope(() => failJob(job.id, "Job has no item.", { retryable: false, attempts: job.attempts, maxAttempts: job.maxAttempts }))
     return "failed"
   }
 
   // Read the item inside its own org — the job row carries org_id, and
   // this query filters on it, so a corrupted job cannot make the
   // worker fetch another tenant's item.
-  const item = await queryOne<{ url: string; canonical_url: string; domain: string }>(
-    "SELECT url, canonical_url, domain FROM saved_items WHERE id = $1 AND org_id = $2",
-    [job.itemId, job.orgId],
-  )
+  // Act as the job's own organization from here on. The predicate is
+  // still explicit, but row-level security is now the thing that makes
+  // it impossible for a corrupted job row to reach another tenant's
+  // item — not the predicate alone.
+  const item = await withTenant(job.orgId, () =>
+    tqueryOne<{ url: string; canonical_url: string; domain: string }>(
+      "SELECT url, canonical_url, domain FROM saved_items WHERE id = $1 AND org_id = $2",
+      [job.itemId, job.orgId],
+    ))
   if (!item) {
     // Deleted between enqueue and claim. Not an error worth retrying.
-    await completeJob(job.id)
+    await withWorkerScope(() => completeJob(job.id))
     return "ok"
   }
 
   const lastAttempt = job.attempts >= job.maxAttempts
+  // Captured so the null-check above still narrows inside the closure.
+  const itemId = job.itemId
 
   try {
-    const outcome = await runMetadataIngest({
+    const outcome = await withTenant(job.orgId, () => runMetadataIngest({
       orgId: job.orgId,
-      itemId: job.itemId,
+      itemId,
       url: item.canonical_url,
       domain: item.domain,
       lastAttempt,
       requestId,
       fetcher: options.fetcher,
       robotsChecker: options.robotsChecker,
-    })
+    }))
 
     if (outcome.status === "ready") {
-      await completeJob(job.id)
+      await withWorkerScope(() => completeJob(job.id))
       return "ok"
     }
 
-    const { willRetry } = await failJob(job.id, outcome.reason ?? "ingest_failed", {
+    const { willRetry } = await withWorkerScope(() => failJob(job.id, outcome.reason ?? "ingest_failed", {
       retryable: outcome.retryable,
       attempts: job.attempts,
       maxAttempts: job.maxAttempts,
-    })
+    }))
     return willRetry ? "retry" : "failed"
   } catch (error) {
     // An unexpected throw is a bug, not an expected outcome — it is
@@ -88,9 +95,9 @@ async function runOne(job: IngestJob, requestId: string, options: TickOptions): 
     // land on a different instance or a fixed deploy.
     const message = error instanceof Error ? error.message : String(error)
     logger.error("pocket2_ingest_unhandled", { requestId, jobId: job.id, itemId: job.itemId, message })
-    const { willRetry } = await failJob(job.id, message, {
+    const { willRetry } = await withWorkerScope(() => failJob(job.id, message, {
       retryable: true, attempts: job.attempts, maxAttempts: job.maxAttempts,
-    })
+    }))
     return willRetry ? "retry" : "failed"
   }
 }
@@ -103,9 +110,9 @@ export async function runIngestTick(batch = DEFAULT_BATCH, options: TickOptions 
   // Give a terminal state to anything a crashed worker abandoned,
   // before claiming new work. Cheap: it touches only rows whose lease
   // has already expired.
-  await reapAbandonedJobs().catch(() => 0)
+  await withWorkerScope(() => reapAbandonedJobs()).catch(() => 0)
 
-  const jobs = await claimJobs(batch, workerId)
+  const jobs = await withWorkerScope(() => claimJobs(batch, workerId))
   if (jobs.length === 0) {
     // Piggyback the rate-limit table's cleanup on the tick. The
     // function existed but nothing ever called it, so

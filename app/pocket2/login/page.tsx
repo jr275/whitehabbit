@@ -15,6 +15,14 @@ import { Suspense, useState } from "react"
 import { AuthShell, Field, FormError } from "@/components/pocket2/auth-shell"
 import { POCKET2_HOME } from "@/lib/pocket2/routes"
 
+/** FormData.get() returns `string | File | null`. Coercing a File with
+ * String() yields "[object File]", so a field submitted as a file
+ * would silently become nonsense instead of failing validation. */
+function text(form: FormData, field: string): string {
+  const value = form.get(field)
+  return typeof value === "string" ? value : ""
+}
+
 function SignInForm() {
   const router = useRouter()
   const params = useSearchParams()
@@ -28,8 +36,8 @@ function SignInForm() {
     setError(null)
 
     const result = await signIn("credentials", {
-      email: String(form.get("email") ?? ""),
-      password: String(form.get("password") ?? ""),
+      email: text(form, "email"),
+      password: text(form, "password"),
       redirect: false,
     })
 
@@ -55,7 +63,7 @@ function SignInForm() {
       subtitle="Sign in to your library."
       footer={<>New here? <Link href="/pocket2/signup" className="p2-link">Create an account</Link></>}
     >
-      <form onSubmit={onSubmit} className="mt-6 flex flex-col gap-4">
+      <form onSubmit={(event) => void onSubmit(event)} className="mt-6 flex flex-col gap-4">
         <Field label="Email" name="email" type="email" required autoComplete="email" autoFocus placeholder="you@example.com" />
         <Field label="Password" name="password" type="password" required autoComplete="current-password" placeholder="••••••••" />
         <FormError>{error}</FormError>

@@ -9,19 +9,18 @@ import "server-only"
  * cannot accidentally reach another tenant's row, because no function
  * signature lets them ask for one.
  *
- * This mirrors the convention lib/db/repo.ts already established for
- * Workers, and reuses that layer's pooled client, parameterized
- * `query`/`queryOne` helpers and `withTransaction` rather than
- * standing up a second data-access stack.
- *
- * Belt and braces: the database ALSO enforces this. Every child table
- * references saved_items(id, org_id) as a composite foreign key, so a
- * cross-tenant row cannot be written even if a predicate here were
- * ever dropped. See migrations/0002_pocket2.sql.
+ * Belt and braces, in two independent layers below this code:
+ *   - Composite foreign keys mean a cross-tenant row cannot be WRITTEN
+ *     even if a predicate here were dropped (migrations/0002, 0003).
+ *   - Row-level security means a cross-tenant row cannot be READ
+ *     either: every statement runs inside withTenant(), which declares
+ *     the acting organization to PostgreSQL (migration 0004). A
+ *     forgotten `WHERE org_id` now returns nothing rather than
+ *     somebody else's library.
  * ================================================================== */
 
 import { randomUUID } from "node:crypto"
-import { query, queryOne, withTransaction } from "@/lib/db/client"
+import { tenantClient, tquery, tqueryOne } from "@/lib/pocket2/repo/tenant-db"
 import {
   DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE,
   type ContentType, type IngestStatus, type ItemStatus, type LibraryQuery,
@@ -166,7 +165,10 @@ export async function saveItem(
   const now = Date.now()
   const id = `item_${randomUUID()}`
 
-  return withTransaction(async (client) => {
+  // Already inside withTenant()'s transaction — this needs the live
+  // client, not a second BEGIN.
+  const client = tenantClient()
+  {
     const inserted = await client.query<ItemRow>(
       `INSERT INTO saved_items (
          id, org_id, created_by, url, canonical_url, url_hash, domain,
@@ -214,7 +216,7 @@ export async function saveItem(
     )
 
     return { item, duplicate: false }
-  })
+  }
 }
 
 /* ---- read --------------------------------------------------------- */
@@ -223,7 +225,7 @@ export async function saveItem(
  * from one that does not exist. The route layer turns null into 404,
  * so cross-tenant probing cannot confirm a resource exists. */
 export async function getItem(orgId: string, userId: string, itemId: string): Promise<SavedItemView | null> {
-  const row = await queryOne<ItemRow>(
+  const row = await tqueryOne<ItemRow>(
     `SELECT ${ITEM_COLUMNS} FROM saved_items i WHERE i.id = $1 AND i.org_id = $2`,
     [itemId, orgId],
   )
@@ -241,11 +243,11 @@ async function decorate(orgId: string, userId: string, items: SavedItem[]): Prom
   const ids = items.map((i) => i.id)
 
   const [states, labels] = await Promise.all([
-    query<StateRow>(
+    tquery<StateRow>(
       `SELECT * FROM saved_item_states WHERE org_id = $1 AND user_id = $2 AND item_id = ANY($3::text[])`,
       [orgId, userId, ids],
     ),
-    query<{ item_id: string; kind: string; id: string; name: string; slug: string }>(
+    tquery<{ item_id: string; kind: string; id: string; name: string; slug: string }>(
       `SELECT sit.item_id, 'tag' AS kind, t.id, t.name, t.slug
          FROM saved_item_tags sit JOIN tags t ON t.id = sit.tag_id AND t.org_id = sit.org_id
         WHERE sit.org_id = $1 AND sit.item_id = ANY($2::text[])
@@ -385,7 +387,7 @@ export async function listItems(orgId: string, userId: string, q: LibraryQuery):
     ? `${rankExpr} DESC, ${sort.expr} ${sort.dir}, i.id ${sort.dir}`
     : `${sort.expr} ${sort.dir}, i.id ${sort.dir}`
 
-  const rows = await query<ItemRow & { cursor_value: string }>(
+  const rows = await tquery<ItemRow & { cursor_value: string }>(
     `SELECT ${ITEM_COLUMNS}, (${sort.expr})::text AS cursor_value
        FROM saved_items i
        ${joins.join("\n       ")}
@@ -432,7 +434,7 @@ export async function updateItemState(
   patch: StatePatch,
 ): Promise<SavedItemState | null> {
   const now = Date.now()
-  const rows = await query<StateRow>(
+  const rows = await tquery<StateRow>(
     `INSERT INTO saved_item_states (
        item_id, user_id, org_id, status, is_favorite, read_at, archived_at,
        favorited_at, reading_progress, reading_segment_id, created_at, updated_at
@@ -471,7 +473,7 @@ export async function updateItemState(
  * (state, tags, collections, reader document, audio) are removed by
  * ON DELETE CASCADE rather than by hand. */
 export async function deleteItem(orgId: string, itemId: string): Promise<boolean> {
-  const rows = await query<{ id: string }>(
+  const rows = await tquery<{ id: string }>(
     "DELETE FROM saved_items WHERE id = $1 AND org_id = $2 RETURNING id",
     [itemId, orgId],
   )
@@ -489,7 +491,7 @@ export async function getLibraryFacets(orgId: string, userId: string): Promise<{
   topDomains: { domain: string; count: number }[]
 }> {
   const [totals, byType, topDomains] = await Promise.all([
-    queryOne<{ total: string; unread: string; favorites: string; archived: string }>(
+    tqueryOne<{ total: string; unread: string; favorites: string; archived: string }>(
       `SELECT count(*) FILTER (WHERE coalesce(s.status,'unread') <> 'archived')                   AS total,
               count(*) FILTER (WHERE coalesce(s.status,'unread') = 'unread')                      AS unread,
               count(*) FILTER (WHERE s.is_favorite AND coalesce(s.status,'unread') <> 'archived') AS favorites,
@@ -499,7 +501,7 @@ export async function getLibraryFacets(orgId: string, userId: string): Promise<{
         WHERE i.org_id = $1`,
       [orgId, userId],
     ),
-    query<{ content_type: string; count: string }>(
+    tquery<{ content_type: string; count: string }>(
       `SELECT i.content_type, count(*) AS count
          FROM saved_items i
          LEFT JOIN saved_item_states s ON s.item_id = i.id AND s.org_id = i.org_id AND s.user_id = $2
@@ -507,7 +509,7 @@ export async function getLibraryFacets(orgId: string, userId: string): Promise<{
         GROUP BY i.content_type ORDER BY count DESC`,
       [orgId, userId],
     ),
-    query<{ domain: string; count: string }>(
+    tquery<{ domain: string; count: string }>(
       `SELECT i.domain, count(*) AS count FROM saved_items i
         WHERE i.org_id = $1 GROUP BY i.domain ORDER BY count DESC, i.domain ASC LIMIT 12`,
       [orgId],

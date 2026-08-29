@@ -12,7 +12,9 @@
     "migrate": "node scripts/migrate.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -44,10 +46,13 @@
     "@types/react-dom": "^19",
     "@types/sanitize-html": "^2.16.1",
     "dotenv": "^17.4.2",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "16.3.0",
     "playwright": "^1.62.1",
     "postcss": "^8.5",
     "tailwindcss": "^4.3.3",
     "typescript": "5.7.3",
+    "typescript-eslint": "^8.68.0",
     "vitest": "^3.2.7"
   },
   "pnpm": {

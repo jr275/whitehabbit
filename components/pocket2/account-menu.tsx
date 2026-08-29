@@ -72,7 +72,7 @@ export function AccountMenu({ email, workspaceName }: { email: string; workspace
           <div style={{ borderTop: "1px solid var(--p2-line)" }} className="my-1" />
           <button
             role="menuitem" type="button"
-            onClick={() => signOut({ callbackUrl: POCKET2_BASE })}
+            onClick={() => void signOut({ callbackUrl: POCKET2_BASE })}
             className="p2-focusable flex w-full items-center gap-2.5 rounded-[var(--p2-r-md)] px-2.5 py-1.5 text-left"
             style={{ fontSize: "0.8125rem", color: "var(--p2-muted)" }}
           >

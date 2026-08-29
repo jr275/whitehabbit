@@ -16,6 +16,7 @@ import { ValidationError } from "@/lib/api-error"
 import type { TenantContext } from "@/lib/pocket2/domain/authz"
 import { getItem, saveItem } from "@/lib/pocket2/repo/items"
 import { enqueueJob } from "@/lib/pocket2/repo/jobs"
+import { withTenant } from "@/lib/pocket2/repo/tenant-db"
 import type { SavedItemView } from "@/lib/pocket2/domain/types"
 
 export interface SaveOutcome {
@@ -37,7 +38,10 @@ export async function saveUrl(ctx: TenantContext, rawUrl: string, title?: string
     throw error
   }
 
-  const { item, duplicate } = await saveItem(ctx.orgId, ctx.userId, rawUrl, { title: title ?? null })
+  // The insert, the per-user state row, the ingestion job and the
+  // activity event all commit together inside one tenant scope.
+  const { item, duplicate } = await withTenant(ctx.orgId, () =>
+    saveItem(ctx.orgId, ctx.userId, rawUrl, { title: title ?? null }))
 
   logger.info(duplicate ? "pocket2_save_duplicate" : "pocket2_save_created", {
     organizationId: ctx.orgId, userId: ctx.userId, itemId: item.id, domain: item.domain,
@@ -45,7 +49,7 @@ export async function saveUrl(ctx: TenantContext, rawUrl: string, title?: string
 
   // getItem returns the decorated view (state, tags, collections) the
   // card actually renders, so the client needs no second request.
-  const view = await getItem(ctx.orgId, ctx.userId, item.id)
+  const view = await withTenant(ctx.orgId, () => getItem(ctx.orgId, ctx.userId, item.id))
   if (!view) throw new Error("Saved item disappeared immediately after being written.")
   return { item: view, duplicate }
 }
@@ -58,10 +62,11 @@ export async function saveUrl(ctx: TenantContext, rawUrl: string, title?: string
  * "no" is exactly what a well-behaved fetcher must not do.
  */
 export async function reingest(ctx: TenantContext, itemId: string): Promise<SavedItemView | null> {
-  const item = await getItem(ctx.orgId, ctx.userId, itemId)
+  const item = await withTenant(ctx.orgId, () => getItem(ctx.orgId, ctx.userId, itemId))
   if (!item) return null
 
-  await enqueueJob(ctx.orgId, "metadata", item.id, { url: item.canonicalUrl, manual: true })
+  await withTenant(ctx.orgId, () =>
+    enqueueJob(ctx.orgId, "metadata", item.id, { url: item.canonicalUrl, manual: true }))
   logger.info("pocket2_reingest_requested", { organizationId: ctx.orgId, itemId, domain: item.domain })
   return item
 }

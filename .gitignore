@@ -18,3 +18,6 @@ node_modules
 # Local SQLite persistence
 data/
 *.sqlite3
+
+# Local test database wiring (machine-specific)
+.env.test

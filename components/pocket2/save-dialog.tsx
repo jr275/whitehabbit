@@ -92,7 +92,10 @@ export function SaveDialog({ open, onClose }: { open: boolean; onClose: () => vo
     const deadline = Date.now() + WATCH_TIMEOUT_MS
     let cancelled = false
 
-    const timer = setInterval(async () => {
+    // setInterval discards the promise an async callback returns, so
+    // a rejection inside it would be invisible. The work is wrapped in
+    // a named async function and explicitly voided instead.
+    async function poll() {
       if (cancelled || Date.now() > deadline) { clearInterval(timer); return }
       try {
         const response = await fetch(`/api/pocket2/items/${itemId}`)
@@ -109,7 +112,9 @@ export function SaveDialog({ open, onClose }: { open: boolean; onClose: () => vo
       } catch {
         clearInterval(timer)
       }
-    }, WATCH_INTERVAL_MS)
+    }
+
+    const timer = setInterval(() => void poll(), WATCH_INTERVAL_MS)
 
     return () => { cancelled = true; clearInterval(timer) }
   }, [phase])
@@ -175,7 +180,7 @@ export function SaveDialog({ open, onClose }: { open: boolean; onClose: () => vo
           boxShadow: "var(--p2-shadow-lg)",
         }}
       >
-        <form onSubmit={submit} className="p-4 pt-12">
+        <form onSubmit={(event) => void submit(event)} className="p-4 pt-12">
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <Link2
@@ -203,7 +208,7 @@ export function SaveDialog({ open, onClose }: { open: boolean; onClose: () => vo
               />
             </div>
             <button
-              type="button" onClick={pasteFromClipboard}
+              type="button" onClick={() => void pasteFromClipboard()}
               className="p2-btn p2-btn-secondary p2-btn-icon" style={{ height: "3rem", width: "3rem" }}
               aria-label="Paste from clipboard" title="Paste from clipboard"
             >

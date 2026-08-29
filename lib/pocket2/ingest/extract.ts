@@ -301,7 +301,9 @@ export function extractArticle(html: string, pageUrl: string): ExtractionResult 
   try {
     // Readability mutates the document it is given; it already has a
     // private copy here because parseHTML built this one for us.
-    article = new Readability(document as unknown as Document, {
+    // linkedom's Document is structurally compatible with the DOM one,
+    // so no cast is needed.
+    article = new Readability(document, {
       charThreshold: MIN_ARTICLE_CHARS,
       keepClasses: false,
     }).parse()

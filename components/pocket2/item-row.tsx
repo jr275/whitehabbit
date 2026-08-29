@@ -108,7 +108,7 @@ export function ItemRow({ item }: { item: SavedItemView }) {
 
       <div className="flex shrink-0 items-center gap-1">
         {failed && (
-          <button type="button" onClick={retry} disabled={retrying} className="p2-btn p2-btn-ghost p2-btn-sm" title="Try fetching the details again">
+          <button type="button" onClick={() => void retry()} disabled={retrying} className="p2-btn p2-btn-ghost p2-btn-sm" title="Try fetching the details again">
             {retrying ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : <RotateCw size={13} aria-hidden="true" />}
             <span className="hidden sm:inline">Retry</span>
           </button>

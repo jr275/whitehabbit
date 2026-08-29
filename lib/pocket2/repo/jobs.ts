@@ -3,6 +3,14 @@ import "server-only"
 /* ================================================================== *
  * INGESTION JOB QUEUE — Postgres as the queue.
  *
+ * SCOPING: claimJobs/reapAbandonedJobs/queueDepth run under
+ * withWorkerScope() — the queue is deliberately cross-tenant, because
+ * a worker must see that org B has pending work before it can act for
+ * org B. Row-level security accepts that scope for `ingest_jobs`
+ * ALONE (migration 0004), so a worker-scoped transaction still cannot
+ * read one row of anybody's saved items or reader documents.
+ * enqueueJob runs under the saving tenant's own scope.
+ *
  * Chosen over adding a broker because the database is already the
  * consistency boundary, and `FOR UPDATE SKIP LOCKED` is a correct,
  * well-understood claim primitive: two serverless instances ticking
@@ -14,7 +22,7 @@ import "server-only"
  * ================================================================== */
 
 import { randomUUID } from "node:crypto"
-import { query, queryOne } from "@/lib/db/client"
+import { tquery, tqueryOne } from "@/lib/pocket2/repo/tenant-db"
 
 export type JobKind = "metadata" | "extract" | "tts" | "reindex"
 
@@ -48,7 +56,7 @@ export function backoffMs(attempts: number): number {
  */
 export async function claimJobs(limit: number, workerId: string): Promise<IngestJob[]> {
   const now = Date.now()
-  const rows = await query<{
+  const rows = await tquery<{
     id: string; item_id: string | null; org_id: string; kind: string
     attempts: number; max_attempts: number; payload: Record<string, unknown>
   }>(
@@ -92,7 +100,7 @@ export async function claimJobs(limit: number, workerId: string): Promise<Ingest
 }
 
 export async function completeJob(jobId: string): Promise<void> {
-  await query(
+  await tquery(
     "UPDATE ingest_jobs SET status = 'done', locked_by = NULL, locked_until = NULL, last_error = NULL, updated_at = $2 WHERE id = $1",
     [jobId, Date.now()],
   )
@@ -113,7 +121,7 @@ export async function failJob(
 ): Promise<{ willRetry: boolean }> {
   const willRetry = opts.retryable && opts.attempts < opts.maxAttempts
   const now = Date.now()
-  await query(
+  await tquery(
     `UPDATE ingest_jobs SET
        status = $2, locked_by = NULL, locked_until = NULL,
        last_error = $3, next_attempt_at = $4, updated_at = $5
@@ -134,7 +142,7 @@ export async function enqueueJob(
   runAt = Date.now(),
 ): Promise<string> {
   const id = `job_${randomUUID()}`
-  await query(
+  await tquery(
     `INSERT INTO ingest_jobs (id, item_id, org_id, kind, status, next_attempt_at, payload, created_at, updated_at)
      VALUES ($1,$2,$3,$4,'queued',$5,$6::jsonb,$7,$7)`,
     [id, itemId, orgId, kind, runAt, JSON.stringify(payload), Date.now()],
@@ -154,7 +162,7 @@ export async function enqueueJob(
  */
 export async function reapAbandonedJobs(): Promise<number> {
   const now = Date.now()
-  const rows = await query<{ id: string }>(
+  const rows = await tquery<{ id: string }>(
     `UPDATE ingest_jobs SET
        status = 'failed',
        locked_by = NULL,
@@ -171,7 +179,7 @@ export async function reapAbandonedJobs(): Promise<number> {
 }
 
 export async function queueDepth(): Promise<{ queued: number; processing: number; failed: number }> {
-  const row = await queryOne<{ queued: string; processing: string; failed: string }>(
+  const row = await tqueryOne<{ queued: string; processing: string; failed: string }>(
     `SELECT count(*) FILTER (WHERE status = 'queued')     AS queued,
             count(*) FILTER (WHERE status = 'processing') AS processing,
             count(*) FILTER (WHERE status = 'failed')     AS failed

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { closePool, createTenant, hasDatabase, migrate, resetPocket2, testPool, type Tenant } from "../support/db"
-import { getLibraryFacets, listItems, saveItem, updateItemState } from "@/lib/pocket2/repo/items"
+import { getLibraryFacets, listItems, saveItem, updateItemState } from "../support/scoped-repo"
 import type { ContentType } from "@/lib/pocket2/domain/types"
 
 /* Exercises the combined filter/sort/pagination statement in

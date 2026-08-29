@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { closePool, createTenant, hasDatabase, migrate, resetPocket2, testPool, type Tenant } from "../support/db"
-import { getItem, saveItem } from "@/lib/pocket2/repo/items"
-import { backoffMs, claimJobs, enqueueJob } from "@/lib/pocket2/repo/jobs"
+import { getItem, saveItem } from "../support/scoped-repo"
+import { backoffMs, claimJobs, enqueueJob } from "../support/scoped-repo"
 import { runIngestTick } from "@/lib/pocket2/ingest/worker"
 import { fetchForIngest, type FetchResult } from "@/lib/pocket2/ingest/fetch"
 import type { PageFetcher, RobotsChecker } from "@/lib/pocket2/ingest/pipeline"
@@ -246,7 +246,7 @@ describeDb("ingestion pipeline", () => {
   it("makes an item searchable by its ingested content", async () => {
     const { item } = await saveItem(t.orgId, t.userId, "https://example.com/searchable")
     await processOne(serving(htmlPage({ title: "Photosynthesis explained", description: "How leaves work." })))
-    const { listItems } = await import("@/lib/pocket2/repo/items")
+    const { listItems } = await import("../support/scoped-repo")
     const found = await listItems(t.orgId, t.userId, { search: "photosynthesis" })
     expect(found.items.map((i) => i.id)).toEqual([item.id])
   })
@@ -299,7 +299,8 @@ describeDb("ingest job queue", () => {
 
     // Both were processed, and each document is filed under its own org.
     const docs = await testPool().query(
-      "SELECT org_id, item_id FROM reader_documents ORDER BY org_id")
+      "SELECT org_id, item_id FROM reader_documents WHERE org_id = ANY($1::text[]) ORDER BY org_id",
+      [[a.orgId, b.orgId]])
     expect(docs.rows).toHaveLength(2)
     const mineDoc = docs.rows.find((r) => r.item_id === mine.item.id)
     expect(mineDoc.org_id).toBe(a.orgId)
@@ -330,7 +331,7 @@ describeDb("ingestion is all-or-nothing", () => {
   beforeEach(async () => { await resetPocket2(); t = await createTenant("atomic") })
 
   it("writes nothing at all when persistence fails part-way", async () => {
-    const { applyIngestResult } = await import("@/lib/pocket2/repo/ingest-writes")
+    const { applyIngestResult } = await import("../support/scoped-repo")
     const { item } = await saveItem(t.orgId, t.userId, "https://example.com/atomic")
 
     await expect(applyIngestResult(
