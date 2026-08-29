@@ -156,6 +156,12 @@ async function readCapped(response: Response, limit: number): Promise<{ text: st
   return { text, bytes }
 }
 
+/** The transport. Exists as a seam ONLY so the redirect-chain
+ * security tests can drive hop-by-hop behaviour deterministically —
+ * proving that the SSRF check runs on every hop, not merely on the URL
+ * the user submitted. Production always uses global fetch. */
+export type FetchImpl = (url: URL, init: RequestInit) => Promise<Response>
+
 /**
  * Fetch a page for ingestion.
  *
@@ -163,7 +169,11 @@ async function readCapped(response: Response, limit: number): Promise<{ text: st
  * 404 and a timeout are all normal outcomes of pointing at the open
  * web, and each returns a typed failure the pipeline records honestly.
  */
-export async function fetchForIngest(rawUrl: string, requestId?: string): Promise<FetchResult> {
+export async function fetchForIngest(
+  rawUrl: string,
+  requestId?: string,
+  fetchImpl: FetchImpl = (url, init) => fetch(url, init),
+): Promise<FetchResult> {
   const deadline = Date.now() + TOTAL_TIMEOUT_MS
   let current = rawUrl
 
@@ -188,7 +198,7 @@ export async function fetchForIngest(rawUrl: string, requestId?: string): Promis
 
     let response: Response
     try {
-      response = await fetch(safeUrl, {
+      response = await fetchImpl(safeUrl, {
         redirect: "manual",
         signal: AbortSignal.timeout(remaining),
         headers: {

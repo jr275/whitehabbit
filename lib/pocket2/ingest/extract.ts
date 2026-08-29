@@ -34,6 +34,19 @@ export const EXTRACTOR_VERSION = "readability-0.6+sanitize-2.17/1"
  * opens to two sentences and a "subscribe" prompt. */
 const MIN_ARTICLE_CHARS = 400
 
+/** FINDING RES-01: segments are the pipeline's one unbounded
+ * multiplier. Each becomes a database row, and an 880KB page was
+ * measured producing 60,000 of them — at the 5MB fetch ceiling that is
+ * roughly 350,000 rows, and five parallel arrays of that size held in
+ * memory for a single INSERT, from ONE saved URL.
+ *
+ * 4,000 blocks is far beyond any real article (a long book chapter is
+ * a few hundred paragraphs), so the cap costs nothing legitimate. When
+ * it bites, the extraction is recorded as 'partial' rather than 'ok',
+ * because a document whose later positions are not addressable is
+ * genuinely not fully processed. */
+export const MAX_SEGMENTS = 4_000
+
 export interface ExtractedSegment {
   ordinal: number
   kind: SegmentKind
@@ -108,21 +121,85 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
   // Anything the tag list does not cover is removed WITH its contents,
   // so a stripped <script> cannot leave its source code as visible text.
   nonTextTags: ["style", "script", "textarea", "option", "noscript", "iframe", "object", "embed", "form", "template"],
-  transformTags: {
-    // Every outbound link opens away from the app and carries no
-    // referrer or ranking signal.
-    a: (tagName, attribs) => ({
-      tagName,
-      attribs: { ...attribs, target: "_blank", rel: "noopener noreferrer nofollow" },
-    }),
-    // Images in a saved article are third-party and lazy by default.
-    img: (tagName, attribs) => ({ tagName, attribs: { ...attribs, loading: "lazy" } }),
-  },
+  // transformTags is supplied per call by sanitizeArticleHtml(), which
+  // needs to close over the page URL to resolve relative links.
   disallowedTagsMode: "discard",
 }
 
-export function sanitizeArticleHtml(html: string): string {
-  return sanitizeHtml(html, SANITIZE_OPTIONS)
+/** Resolves a URL found inside extracted article HTML against the page
+ * it came from, and refuses anything that is not http(s).
+ *
+ * Returns null when the value must be dropped. Relative URLs MUST be
+ * resolved: left alone they resolve against Pocket2's own origin, so a
+ * publisher's `<img src="/logo.png">` becomes a credentialed
+ * same-origin request from the reader's browser to an arbitrary path
+ * of our application, and `<a href="/x">` navigates into our app
+ * instead of to the publisher. */
+function absolutize(value: string | undefined, base: string | null): string | null {
+  if (!value) return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  try {
+    const resolved = base ? new URL(trimmed, base) : new URL(trimmed)
+    if (resolved.protocol !== "http:" && resolved.protocol !== "https:") return null
+    return resolved.toString()
+  } catch {
+    return null
+  }
+}
+
+/** srcset is a comma-separated list of "url descriptor" pairs; every
+ * URL in it needs the same treatment as a bare src. */
+function absolutizeSrcset(value: string | undefined, base: string | null): string | null {
+  if (!value) return null
+  const parts = value
+    .split(",")
+    .map((candidate) => {
+      const [url, ...descriptors] = candidate.trim().split(/\s+/)
+      const resolved = absolutize(url, base)
+      return resolved ? [resolved, ...descriptors].join(" ") : null
+    })
+    .filter((candidate): candidate is string => candidate !== null)
+  return parts.length ? parts.join(", ") : null
+}
+
+/**
+ * Sanitize extracted article HTML.
+ *
+ * `pageUrl` is the address the article was fetched from. When given,
+ * every href/src/srcset is resolved against it — see absolutize() for
+ * why leaving them relative is not merely a cosmetic problem.
+ */
+export function sanitizeArticleHtml(html: string, pageUrl: string | null = null): string {
+  return sanitizeHtml(html, {
+    ...SANITIZE_OPTIONS,
+    transformTags: {
+      a: (tagName, attribs) => {
+        const href = absolutize(attribs.href, pageUrl)
+        const next: Record<string, string> = { ...attribs, target: "_blank", rel: "noopener noreferrer nofollow" }
+        if (href) next.href = href
+        else delete next.href
+        return { tagName, attribs: next }
+      },
+      img: (tagName, attribs) => {
+        const next: Record<string, string> = { ...attribs, loading: "lazy" }
+        const src = absolutize(attribs.src, pageUrl)
+        if (src) next.src = src
+        else delete next.src
+        const srcset = absolutizeSrcset(attribs.srcset, pageUrl)
+        if (srcset) next.srcset = srcset
+        else delete next.srcset
+        return { tagName, attribs: next }
+      },
+      source: (tagName, attribs) => {
+        const next: Record<string, string> = { ...attribs }
+        const srcset = absolutizeSrcset(attribs.srcset, pageUrl)
+        if (srcset) next.srcset = srcset
+        else delete next.srcset
+        return { tagName, attribs: next }
+      },
+    },
+  })
 }
 
 /* ---- segmentation -------------------------------------------------- */
@@ -144,7 +221,13 @@ const BLOCK_TO_KIND: Record<string, SegmentKind> = {
  * thing. Reading position is stored as a segment, not a scroll offset,
  * so it survives re-extraction and moves between a phone and a laptop.
  */
-export function segmentArticle(sanitized: string): { segments: ExtractedSegment[]; text: string } {
+export function segmentArticle(sanitized: string): {
+  segments: ExtractedSegment[]
+  text: string
+  /** true when the block count hit MAX_SEGMENTS and the tail was not
+   * indexed — surfaced as extraction_status 'partial', never hidden. */
+  truncated: boolean
+} {
   const { document } = parseHTML(`<body>${sanitized}</body>`)
   const segments: ExtractedSegment[] = []
   const parts: string[] = []
@@ -165,9 +248,11 @@ export function segmentArticle(sanitized: string): { segments: ExtractedSegment[
     segments.push({ ordinal: ordinal++, kind, text, charStart, charEnd })
     parts.push(text)
     cursor = charEnd + 1 // the "\n" that will join them
+
+    if (segments.length >= MAX_SEGMENTS) return { segments, text: parts.join("\n"), truncated: true }
   }
 
-  return { segments, text: parts.join("\n") }
+  return { segments, text: parts.join("\n"), truncated: false }
 }
 
 /* ---- extraction ---------------------------------------------------- */
@@ -226,8 +311,8 @@ export function extractArticle(html: string, pageUrl: string): ExtractionResult 
 
   if (!article?.content) return { ok: false, reason: "not_readable" }
 
-  const sanitized = sanitizeArticleHtml(article.content)
-  const { segments, text } = segmentArticle(sanitized)
+  const sanitized = sanitizeArticleHtml(article.content, pageUrl)
+  const { segments, text, truncated } = segmentArticle(sanitized)
 
   const gate = detectGate(text)
   if (gate) return { ok: false, reason: gate }
@@ -240,9 +325,10 @@ export function extractArticle(html: string, pageUrl: string): ExtractionResult 
 
   return {
     ok: true,
-    // "partial" is recorded honestly when the body is real but thin —
-    // the Reader can then say so instead of implying a full article.
-    status: wordCount < 150 ? "partial" : "ok",
+    // "partial" is recorded honestly when the body is real but thin,
+    // or when segmentation hit its ceiling — the Reader can then say
+    // so instead of implying a complete article.
+    status: truncated || wordCount < 150 ? "partial" : "ok",
     title: article.title?.trim() || null,
     author: article.byline?.trim() || null,
     excerpt: article.excerpt?.trim() || null,

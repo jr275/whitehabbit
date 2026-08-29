@@ -10,6 +10,8 @@ import { NextResponse } from "next/server"
 import { DatabaseNotConfiguredError } from "@/lib/db/client"
 import { logger, newRequestId } from "@/lib/observability/logger"
 import { UnauthenticatedError, UnauthorizedOrgError } from "@/lib/session"
+import { FieldError } from "@/lib/pocket2/domain/validate"
+import { ForbiddenError } from "@/lib/pocket2/domain/authz"
 
 export class RateLimitedError extends Error {
   constructor(message = "Too many requests — try again shortly.") {
@@ -46,6 +48,19 @@ export function withApiHandler(routeName: string, handler: (requestId: string) =
     }
     if (err instanceof ValidationError) {
       return NextResponse.json({ error: err.message }, { status: 400 })
+    }
+    /* FINDING API-01: FieldError is what lib/pocket2/domain/validate.ts
+     * throws, and it was not handled here — so every malformed request
+     * body ("url": 12345, an over-long URL, a missing field) came back
+     * as 500 "Something went wrong" AND was written to the error log as
+     * an unhandled route error. That misreports a client mistake as a
+     * server fault, hides real faults in the noise, and lets anyone
+     * fill the error log with one-line requests. */
+    if (err instanceof FieldError) {
+      return NextResponse.json({ error: err.message, field: err.field }, { status: 400 })
+    }
+    if (err instanceof ForbiddenError) {
+      return NextResponse.json({ error: err.message }, { status: 403 })
     }
     if (err instanceof RateLimitedError) {
       return NextResponse.json({ error: err.message }, { status: 429 })

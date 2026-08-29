@@ -76,7 +76,7 @@ export type PageFetcher = (url: string, requestId?: string) => Promise<FetchResu
 
 /** Same seam, same reason: robots is asked over the network, and the
  * pipeline's decision logic should be testable without it. */
-export type RobotsChecker = (url: string) => Promise<{ allowed: boolean; unknown: boolean }>
+export type RobotsChecker = (url: string) => Promise<{ allowed: boolean; unknown: boolean; unsafe?: boolean }>
 
 export interface IngestInput {
   orgId: string
@@ -99,6 +99,14 @@ export async function runMetadataIngest(input: IngestInput): Promise<IngestOutco
 
   // ---- 1. ask before fetching -------------------------------------
   const robots = await askRobots(url)
+  if (robots.unsafe) {
+    // The SSRF guard refused the address while fetching robots.txt.
+    // Report it as such: saying "this site asks automated tools not to
+    // fetch this page" would attribute our own refusal to a publisher.
+    logger.warn("pocket2_ingest_blocked_url", { ...log, stage: "robots" })
+    await recordIngestFailure(orgId, itemId, "That address can't be fetched safely.", true, "fetch_failed")
+    return { status: "failed", retryable: false, reason: "blocked_unsafe_url" }
+  }
   if (!robots.allowed && !robots.unknown) {
     logger.info("pocket2_ingest_robots_disallowed", log)
     await recordIngestFailure(orgId, itemId,

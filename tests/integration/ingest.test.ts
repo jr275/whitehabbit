@@ -170,6 +170,30 @@ describeDb("ingestion pipeline", () => {
     expect(after!.ingestError).toMatch(/asks automated tools not to fetch/i)
   })
 
+  it("reports an SSRF-refused address as our refusal, not as the publisher's", async () => {
+    // REGRESSION: checkRobots() fetches robots.txt from the same
+    // origin, so the SSRF guard fired there first and the pipeline
+    // reported "this site asks automated tools not to fetch this page"
+    // about an address the publisher has never heard of.
+    const { checkRobots } = await import("@/lib/pocket2/ingest/robots")
+    const verdict = await checkRobots("http://169.254.169.254/latest/meta-data/")
+    expect(verdict.allowed).toBe(false)
+    expect(verdict.unsafe).toBe(true)
+
+    const { item } = await saveItem(t.orgId, t.userId, "http://169.254.169.254/latest/meta-data/")
+    let fetched = false
+    await runIngestTick(5, {
+      fetcher: async (url) => { fetched = true; return serving(htmlPage())(url) },
+      robotsChecker: checkRobots,
+    })
+    expect(fetched, "the internal address must never be requested").toBe(false)
+
+    const after = await getItem(t.orgId, t.userId, item.id)
+    expect(after!.ingestStatus).toBe("failed")
+    expect(after!.ingestError).toMatch(/can't be fetched safely/i)
+    expect(after!.ingestError).not.toMatch(/asks automated tools/i)
+  })
+
   it("classifies a video host as a video even with no article body", async () => {
     const { item } = await saveItem(t.orgId, t.userId, "https://www.youtube.com/watch?v=abc123")
     await processOne(serving(htmlPage({ title: "A talk", body: "<p>short</p>" })))
@@ -287,5 +311,96 @@ describeDb("ingest job queue", () => {
   it("does nothing, harmlessly, when the queue is empty", async () => {
     const tick = await runIngestTick(5, { fetcher: serving(htmlPage()), robotsChecker: robotsAllow })
     expect(tick).toMatchObject({ claimed: 0, succeeded: 0, failed: 0, retrying: 0 })
+  })
+})
+
+
+/* ================================================================== *
+ * ADDED BY THE PHASE 2 SECURITY CHECKPOINT - FOCUS 3.
+ *
+ * The question these answer is: can a failure part-way through
+ * ingestion leave the database describing something that never
+ * happened?
+ * ================================================================== */
+
+describeDb("ingestion is all-or-nothing", () => {
+  let t: Tenant
+  beforeAll(async () => { await migrate() })
+  afterAll(async () => { await resetPocket2(); await closePool() })
+  beforeEach(async () => { await resetPocket2(); t = await createTenant("atomic") })
+
+  it("writes nothing at all when persistence fails part-way", async () => {
+    const { applyIngestResult } = await import("@/lib/pocket2/repo/ingest-writes")
+    const { item } = await saveItem(t.orgId, t.userId, "https://example.com/atomic")
+
+    await expect(applyIngestResult(
+      t.orgId, item.id,
+      { title: "Should not persist", description: null, author: null, contentType: "article",
+        imageUrl: null, faviconUrl: null, publishedAt: null, wordCount: 100,
+        readingTimeSeconds: 60, readerStatus: "available", metadata: {} },
+      { extractionStatus: "ok", extractorVersion: "v", failureReason: null, heroImageUrl: null,
+        html: "<p>x</p>", text: "x", language: "en", wordCount: 1,
+        // An invalid segment kind violates the CHECK constraint, so the
+        // segment INSERT fails after the item UPDATE has already run.
+        segments: [{ ordinal: 0, kind: "not_a_valid_kind" as never, text: "x", charStart: 0, charEnd: 1 }] },
+      ["ai"],
+    )).rejects.toThrow()
+
+    // The item must be untouched: no title, still pending, no reader
+    // document, no tag. A half-applied ingestion would claim we had
+    // extracted an article we do not hold.
+    const after = await getItem(t.orgId, t.userId, item.id)
+    expect(after!.title).not.toBe("Should not persist")
+    expect(after!.ingestStatus).toBe("pending")
+    expect(after!.readerStatus).toBe("not_available")
+    for (const table of ["reader_documents", "reader_segments", "saved_item_tags"]) {
+      const { rows } = await testPool().query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM ${table} WHERE org_id = $1`, [t.orgId])
+      expect(rows[0].n, table).toBe(0)
+    }
+  })
+
+  it("handles empty, tiny and structurally broken pages without corrupting anything", async () => {
+    const pages = ["", "<html>", "<!doctype html>", "not html at all",
+                   "<html><head><title></title></head><body></body></html>",
+                   "<p>" + "\uFFFD ".repeat(500) + "</p>"]
+    for (const [index, html] of pages.entries()) {
+      const { item } = await saveItem(t.orgId, t.userId, `https://example.com/edge-${index}`)
+      await processOne(serving(html))
+      const after = await getItem(t.orgId, t.userId, item.id)
+      // Always resolves to a definite state, never left pending.
+      expect(["ready", "failed"], `page ${index}`).toContain(after!.ingestStatus)
+      // And never claims a reader copy it does not have.
+      if (after!.readerStatus === "available") {
+        const { rows } = await testPool().query<{ n: number }>(
+          "SELECT count(*)::int AS n FROM reader_documents WHERE item_id = $1 AND html IS NOT NULL", [item.id])
+        expect(rows[0].n, `page ${index}`).toBe(1)
+      }
+    }
+  })
+
+  it("prefers OpenGraph when a page declares the same field three ways", async () => {
+    const { item } = await saveItem(t.orgId, t.userId, "https://example.com/dupe-meta")
+    await processOne(serving(`<!doctype html><html><head>
+      <title>Title tag</title>
+      <meta name="twitter:title" content="Twitter title">
+      <meta property="og:title" content="OpenGraph title">
+      <script type="application/ld+json">{"headline":"JSON-LD title"}</script>
+    </head><body><article>${PROSE}</article></body></html>`))
+    expect((await getItem(t.orgId, t.userId, item.id))!.title).toBe("OpenGraph title")
+  })
+
+  it("does not let a declared charset corrupt the stored text", async () => {
+    const { item } = await saveItem(t.orgId, t.userId, "https://example.com/charset")
+    // A page claiming an encoding it is not actually in must not throw
+    // or produce a row that fails to store.
+    await processOne(async (url) => ({
+      ok: true, finalUrl: url, status: 200, contentType: "text/html; charset=iso-8859-15",
+      html: htmlPage({ title: "Caf\u00e9 na\u00efve", description: "\u00dcn\u00efcode" }),
+      noArchive: false, bytes: 100,
+    }))
+    const after = await getItem(t.orgId, t.userId, item.id)
+    expect(after!.ingestStatus).toBe("ready")
+    expect(after!.title).toContain("Caf")
   })
 })

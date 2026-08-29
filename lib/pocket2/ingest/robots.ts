@@ -99,6 +99,15 @@ export interface RobotsVerdict {
    * unreachable robots.txt means "no restrictions stated", which is
    * the standard's own default — it is not treated as a denial. */
   unknown: boolean
+  /** true when the URL itself is not safe to fetch (SSRF guard).
+   *
+   * Distinguished from `allowed: false` deliberately. Both stop the
+   * fetch, but they mean opposite things: one is the PUBLISHER
+   * declining, the other is US refusing an address. Collapsing them
+   * made Pocket2 tell users "this site asks automated tools not to
+   * fetch this page" about an address the publisher has never heard
+   * of — blaming a third party for our own refusal. */
+  unsafe?: boolean
 }
 
 export async function checkRobots(pageUrl: string): Promise<RobotsVerdict> {
@@ -106,7 +115,7 @@ export async function checkRobots(pageUrl: string): Promise<RobotsVerdict> {
   try {
     target = new URL(pageUrl)
   } catch {
-    return { allowed: false, unknown: false }
+    return { allowed: false, unknown: false, unsafe: true }
   }
 
   const robotsUrl = new URL("/robots.txt", target.origin).toString()
@@ -129,7 +138,9 @@ export async function checkRobots(pageUrl: string): Promise<RobotsVerdict> {
     const rules = parseRobots(text, AGENT_TOKEN)
     return { allowed: isAllowedByRules(rules, target.pathname + target.search), unknown: false }
   } catch (error) {
-    if (error instanceof UnsafeUrlError) return { allowed: false, unknown: false }
+    // The address itself is refused — report that as OUR decision, not
+    // as the publisher's.
+    if (error instanceof UnsafeUrlError) return { allowed: false, unknown: false, unsafe: true }
     return { allowed: false, unknown: true }
   }
 }

@@ -173,3 +173,145 @@ describe("extractArticle — never claims success it did not have", () => {
     }
   })
 })
+
+/* ================================================================== *
+ * ADDED DURING THE PHASE 2 SECURITY CHECKPOINT.
+ *
+ * Payload classes not covered by the first pass: MathML, SVG animation,
+ * DOM clobbering, srcset, encoded and nested schemes, and the
+ * relative-URL handling that a security review found was missing.
+ * ================================================================== */
+
+const LIVE_MARKUP = /<(script|iframe|object|embed|form|svg|math|style|link|meta|base)\b/i
+
+describe("sanitizeArticleHtml — payloads beyond the obvious", () => {
+  it.each([
+    ["MathML wrapping a style block", `<math><mtext><style><img src=x onerror=alert(1)></style></mtext></math>`],
+    ["MathML annotation-xml", `<math><annotation-xml encoding="text/html"><img src=x onerror=alert(1)></annotation-xml></math>`],
+    ["MathML maction xlink", `<math><maction xlink:href="javascript:alert(1)">x</maction></math>`],
+    ["SVG animate on href", `<svg><a><animate attributeName="href" values="javascript:alert(1)"/><text>x</text></a></svg>`],
+    ["SVG foreignObject iframe", `<svg><foreignObject><iframe src="javascript:alert(1)"></iframe></foreignObject></svg>`],
+    ["SVG set onload", `<svg><set attributeName="onload" to="alert(1)"/></svg>`],
+    ["marquee onstart", `<marquee onstart=alert(1)>x</marquee>`],
+    ["details ontoggle", `<details ontoggle=alert(1) open>x</details>`],
+    ["autofocus onfocus", `<input autofocus onfocus=alert(1)>`],
+    ["video source onerror", `<video><source onerror="alert(1)"></video>`],
+    ["button formaction", `<button formaction="javascript:alert(1)">x</button>`],
+    ["link stylesheet", `<link rel="stylesheet" href="javascript:alert(1)">`],
+    ["style @import", `<style>@import url("javascript:alert(1)")</style><p>x</p>`],
+    ["body background", `<body background="javascript:alert(1)">`],
+    ["table background", `<table background="javascript:alert(1)"><tr><td>x</td></tr></table>`],
+    ["noscript escape", `<noscript><p title="</noscript><img src=x onerror=alert(1)>">x</p></noscript>`],
+    ["template", `<template><img src=x onerror=alert(1)></template>`],
+    ["custom element via is=", `<p is="evil-element">x</p>`],
+  ])("neutralizes %s", (_label, payload) => {
+    const out = sanitizeArticleHtml(payload)
+    expect(out).not.toMatch(LIVE_MARKUP)
+    expect(out).not.toMatch(/\son\w+\s*=/i)
+    expect(out).not.toMatch(/javascript\s*:/i)
+  })
+
+  it.each([
+    ["tab inside the scheme", `<a href="java\tscript:alert(1)">x</a>`],
+    ["newline inside the scheme", `<a href="java\nscript:alert(1)">x</a>`],
+    ["null byte inside the scheme", `<a href="java\0script:alert(1)">x</a>`],
+    ["leading whitespace", `<a href="  javascript:alert(1)">x</a>`],
+    ["hex entities", `<a href="&#x6a;&#x61;&#x76;&#x61;&#x73;&#x63;&#x72;&#x69;&#x70;&#x74;:alert(1)">x</a>`],
+    ["decimal entities", `<a href="&#106;avascript:alert(1)">x</a>`],
+    ["vbscript", `<a href="vbscript:msgbox(1)">x</a>`],
+  ])("strips an href using %s", (_label, payload) => {
+    const out = sanitizeArticleHtml(payload)
+    expect(out).not.toMatch(/href="[^"]*(javascript|vbscript)/i)
+  })
+
+  it("drops a javascript: URL hidden in srcset", () => {
+    for (const payload of [
+      `<img srcset="javascript:alert(1) 1x" src="https://a.test/b.png">`,
+      `<picture><source srcset="javascript:alert(1) 2x"><img src="https://a.test/b.png"></picture>`,
+    ]) {
+      expect(sanitizeArticleHtml(payload)).not.toMatch(/javascript/i)
+    }
+  })
+
+  it("resists DOM clobbering of names the app might read", () => {
+    // An attribute like name="body" or id="getElementById" can shadow a
+    // real DOM property for scripts running on the page.
+    const out = sanitizeArticleHtml(
+      `<img name="body" src="https://a.test/x.png"><div id="attributes">x</div><a id="getElementById" href="https://a.test/">y</a><form id="config"><input name="isAdmin" value="1"></form>`,
+    )
+    expect(out).not.toMatch(/\sname=/i)
+    expect(out).not.toMatch(/\sid=/i)
+    expect(out).not.toMatch(/<form|<input/i)
+  })
+
+  it("removes tracking attributes that are not needed to read an article", () => {
+    expect(sanitizeArticleHtml(`<a href="https://a.test/" ping="https://evil.test/track">x</a>`))
+      .not.toMatch(/ping=/i)
+  })
+})
+
+describe("target=_blank never yields an exploitable window.opener", () => {
+  it("always emits rel=noopener alongside target=_blank", () => {
+    const out = sanitizeArticleHtml(`<a href="https://a.test/">x</a>`)
+    expect(out).toContain('target="_blank"')
+    expect(out).toMatch(/rel="[^"]*noopener/)
+  })
+
+  it("cannot be defeated by the publisher supplying its own rel", () => {
+    // rel="opener" explicitly re-enables window.opener; ours must win.
+    for (const attrs of [`rel="opener"`, `rel="noreferrer"`, `rel=""`, `rel="opener noopener"`, `REL="opener"`]) {
+      const out = sanitizeArticleHtml(`<a href="https://a.test/" ${attrs}>x</a>`)
+      expect(out, attrs).toMatch(/rel="[^"]*noopener/)
+      expect(out, attrs).not.toMatch(/rel="[^"]*\bopener\b(?![^"]*noopener)/)
+    }
+  })
+
+  it("cannot be defeated by the publisher supplying its own target", () => {
+    for (const attrs of [`target="_self"`, `target="_top"`, `target="myframe"`, `TARGET="_parent"`]) {
+      expect(sanitizeArticleHtml(`<a href="https://a.test/" ${attrs}>x</a>`), attrs).toContain('target="_blank"')
+    }
+  })
+})
+
+describe("relative URLs are resolved against the source page", () => {
+  const PAGE_URL = "https://publisher.test/posts/story"
+
+  it("absolutizes links and images so they point at the publisher", () => {
+    const out = sanitizeArticleHtml(
+      `<p><a href="/local/page">l</a><a href="../up">u</a></p><p><img src="/img/a.png"><img src="b.png"></p>`,
+      PAGE_URL,
+    )
+    expect(out).toContain('href="https://publisher.test/local/page"')
+    expect(out).toContain('href="https://publisher.test/up"')
+    expect(out).toContain('src="https://publisher.test/img/a.png"')
+    expect(out).toContain('src="https://publisher.test/posts/b.png"')
+  })
+
+  it("leaves absolute URLs alone", () => {
+    const out = sanitizeArticleHtml(`<a href="https://other.test/x">o</a><img src="https://cdn.test/i.png">`, PAGE_URL)
+    expect(out).toContain('href="https://other.test/x"')
+    expect(out).toContain('src="https://cdn.test/i.png"')
+  })
+
+  it("absolutizes every candidate in a srcset", () => {
+    const out = sanitizeArticleHtml(`<img src="/a.png" srcset="/a.png 1x, /a@2x.png 2x">`, PAGE_URL)
+    expect(out).toContain("https://publisher.test/a.png 1x")
+    expect(out).toContain("https://publisher.test/a@2x.png 2x")
+  })
+
+  it("drops rather than resolves a non-http scheme", () => {
+    const out = sanitizeArticleHtml(`<a href="javascript:alert(1)">x</a><img src="data:image/svg+xml,x">`, PAGE_URL)
+    expect(out).not.toMatch(/javascript|data:/i)
+  })
+
+  it("does not leave a relative URL that would resolve against Pocket2's own origin", () => {
+    // This is the actual risk: an unresolved "/admin/thing" becomes a
+    // credentialed same-origin request from the reader's browser.
+    const out = sanitizeArticleHtml(`<img src="/admin/thing"><a href="/settings">s</a>`, PAGE_URL)
+    expect(out).not.toMatch(/(src|href)="\//)
+  })
+
+  it("still functions when no page URL is available", () => {
+    expect(() => sanitizeArticleHtml(`<a href="/x">x</a>`)).not.toThrow()
+  })
+})

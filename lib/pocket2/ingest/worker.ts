@@ -14,7 +14,7 @@ import "server-only"
 import { randomUUID } from "node:crypto"
 import { queryOne } from "@/lib/db/client"
 import { logger, newRequestId } from "@/lib/observability/logger"
-import { claimJobs, completeJob, failJob, type IngestJob } from "@/lib/pocket2/repo/jobs"
+import { claimJobs, completeJob, failJob, reapAbandonedJobs, type IngestJob } from "@/lib/pocket2/repo/jobs"
 import { pruneExpiredRateLimits } from "@/lib/db/repo"
 import { runMetadataIngest, type PageFetcher, type RobotsChecker } from "./pipeline"
 
@@ -99,6 +99,11 @@ export async function runIngestTick(batch = DEFAULT_BATCH, options: TickOptions 
   const requestId = newRequestId()
   const workerId = `w_${randomUUID().slice(0, 8)}`
   const started = Date.now()
+
+  // Give a terminal state to anything a crashed worker abandoned,
+  // before claiming new work. Cheap: it touches only rows whose lease
+  // has already expired.
+  await reapAbandonedJobs().catch(() => 0)
 
   const jobs = await claimJobs(batch, workerId)
   if (jobs.length === 0) {

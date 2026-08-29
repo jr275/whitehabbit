@@ -61,6 +61,14 @@ export async function claimJobs(limit: number, workerId: string): Promise<Ingest
      WHERE id IN (
        SELECT id FROM ingest_jobs
         WHERE next_attempt_at <= $3
+          -- FINDING QUEUE-01: without this the reclaim branch below is
+          -- unbounded. A job whose worker dies BEFORE it can report a
+          -- failure never reaches failJob(), so its status stays
+          -- 'processing' and it was handed out again on every tick
+          -- forever — a page that reliably crashes the worker became a
+          -- permanent drain on a queue slot. Confirmed at 12 claims
+          -- against max_attempts = 4 before this guard.
+          AND attempts < max_attempts
           AND (status = 'queued'
                -- reclaim a job whose worker died mid-flight
                OR (status = 'processing' AND locked_until < $3))
@@ -132,6 +140,34 @@ export async function enqueueJob(
     [id, itemId, orgId, kind, runAt, JSON.stringify(payload), Date.now()],
   )
   return id
+}
+
+/**
+ * Mark abandoned jobs as failed.
+ *
+ * The claim guard stops a crash-looping job being retried forever, but
+ * on its own it would leave that job sitting in 'processing'
+ * indefinitely — invisible rather than merely unproductive. This gives
+ * such a job a terminal state and a real reason, so it shows up as a
+ * failure the user can retry deliberately rather than as a job that
+ * quietly stopped existing.
+ */
+export async function reapAbandonedJobs(): Promise<number> {
+  const now = Date.now()
+  const rows = await query<{ id: string }>(
+    `UPDATE ingest_jobs SET
+       status = 'failed',
+       locked_by = NULL,
+       locked_until = NULL,
+       last_error = coalesce(last_error, 'Processing was interrupted repeatedly and did not complete.'),
+       updated_at = $1
+     WHERE status = 'processing'
+       AND locked_until < $1
+       AND attempts >= max_attempts
+     RETURNING id`,
+    [now],
+  )
+  return rows.length
 }
 
 export async function queueDepth(): Promise<{ queued: number; processing: number; failed: number }> {
