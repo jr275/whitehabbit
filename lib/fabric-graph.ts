@@ -197,8 +197,8 @@ export function stepPhysics(graph: Graph, visibleCount: number) {
     const a = active[i]
     for (let j = i + 1; j < active.length; j++) {
       const b = active[j]
-      let dx = a.x - b.x
-      let dy = a.y - b.y
+      const dx = a.x - b.x
+      const dy = a.y - b.y
       let d2 = dx * dx + dy * dy
       if (d2 < 1) d2 = 1
       const d = Math.sqrt(d2)
@@ -218,8 +218,8 @@ export function stepPhysics(graph: Graph, visibleCount: number) {
     const a = idx.get(e.a)
     const b = idx.get(e.b)
     if (!a || !b) continue
-    let dx = b.x - a.x
-    let dy = b.y - a.y
+    const dx = b.x - a.x
+    const dy = b.y - a.y
     const d = Math.hypot(dx, dy) || 1
     const stretch = d - e.rest
     const f = stretch * e.strength

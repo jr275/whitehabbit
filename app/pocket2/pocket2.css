@@ -1,0 +1,359 @@
+/* ==================================================================
+ * POCKET2 DESIGN SYSTEM — tokens and primitives.
+ *
+ * Scoped entirely under [data-pocket2]. Two reasons:
+ *
+ *  1. The existing product's tokens in app/globals.css are dark-only
+ *     and internally inconsistent (`:root` defines a signature blue
+ *     palette that the prefers-color-scheme block then overrides with
+ *     a different neutral one, so there is no working light theme to
+ *     extend). Building on them would inherit that bug.
+ *  2. Scoping means Pocket2 can ship a complete light+dark system
+ *     without changing a single pixel of the other product.
+ *
+ * Design language: premium, minimal, editorial, calm. Paper and ink,
+ * one restrained accent, hairline structure, near-flat elevation.
+ * Density comes from removing decoration, never from tightening type.
+ * ================================================================== */
+
+[data-pocket2] {
+  /* ---- ground & surface (warm paper, not clinical white) -------- */
+  --p2-paper:        oklch(0.988 0.0035 92);
+  --p2-surface:      oklch(1 0 0);
+  --p2-surface-sunk: oklch(0.968 0.004 92);
+  --p2-surface-hover:oklch(0.975 0.004 92);
+
+  /* ---- ink (warm near-black, never pure #000) ------------------- */
+  --p2-ink:        oklch(0.235 0.012 72);
+  --p2-ink-strong: oklch(0.16 0.014 72);
+  --p2-muted:      oklch(0.525 0.012 72);
+  --p2-faint:      oklch(0.66 0.010 72);
+
+  /* ---- structure: hairlines, never boxes ------------------------ */
+  --p2-line:        oklch(0.235 0.012 72 / 9%);
+  --p2-line-strong: oklch(0.235 0.012 72 / 16%);
+
+  /* ---- accent: one colour, used only for primary action + active
+   * state. A deep library green — editorial rather than the
+   * saturated blue/indigo every SaaS dashboard reaches for. -------- */
+  --p2-accent:       oklch(0.505 0.098 168);
+  --p2-accent-hover: oklch(0.445 0.098 168);
+  --p2-accent-ink:   oklch(0.99 0.01 168);
+  --p2-accent-soft:  oklch(0.505 0.098 168 / 10%);
+  --p2-accent-line:  oklch(0.505 0.098 168 / 28%);
+
+  /* ---- feedback ------------------------------------------------- */
+  --p2-danger:      oklch(0.545 0.185 27);
+  --p2-danger-soft: oklch(0.545 0.185 27 / 10%);
+  --p2-warn:        oklch(0.62 0.13 75);
+  --p2-good:        oklch(0.53 0.11 155);
+
+  /* ---- elevation: one soft shadow, reserved for genuinely
+   * floating surfaces (modal, mini-player, command palette) ------- */
+  --p2-shadow-sm: 0 1px 2px oklch(0.2 0.02 72 / 5%);
+  --p2-shadow-md: 0 4px 12px oklch(0.2 0.02 72 / 7%), 0 1px 3px oklch(0.2 0.02 72 / 5%);
+  --p2-shadow-lg: 0 16px 48px oklch(0.2 0.02 72 / 12%), 0 2px 8px oklch(0.2 0.02 72 / 6%);
+
+  /* ---- geometry ------------------------------------------------- */
+  --p2-r-sm: 6px;
+  --p2-r-md: 10px;
+  --p2-r-lg: 14px;
+  --p2-r-xl: 20px;
+
+  /* ---- type ----------------------------------------------------- */
+  --p2-font-ui:      var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --p2-font-reading: var(--font-p2-serif), Charter, "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --p2-font-mono:    var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* ---- motion: short, ease-out, opacity+transform only ---------- */
+  --p2-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --p2-fast: 130ms;
+  --p2-base: 190ms;
+
+  color-scheme: light;
+  background: var(--p2-paper);
+  color: var(--p2-ink);
+  font-family: var(--p2-font-ui);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Dark is a peer theme with a complete palette of its own, not the
+ * light palette with inverted lightness. The ground goes cool where
+ * the light ground is warm, which keeps text from glowing. */
+[data-pocket2][data-theme="dark"] {
+  --p2-paper:        oklch(0.178 0.008 250);
+  --p2-surface:      oklch(0.215 0.009 250);
+  --p2-surface-sunk: oklch(0.155 0.008 250);
+  --p2-surface-hover:oklch(0.245 0.010 250);
+
+  --p2-ink:        oklch(0.945 0.004 250);
+  --p2-ink-strong: oklch(0.99 0.003 250);
+  --p2-muted:      oklch(0.685 0.011 250);
+  --p2-faint:      oklch(0.545 0.012 250);
+
+  --p2-line:        oklch(1 0 0 / 9%);
+  --p2-line-strong: oklch(1 0 0 / 16%);
+
+  --p2-accent:       oklch(0.735 0.115 168);
+  --p2-accent-hover: oklch(0.795 0.115 168);
+  --p2-accent-ink:   oklch(0.17 0.03 168);
+  --p2-accent-soft:  oklch(0.735 0.115 168 / 14%);
+  --p2-accent-line:  oklch(0.735 0.115 168 / 34%);
+
+  --p2-danger: oklch(0.68 0.17 27);
+  --p2-warn:   oklch(0.78 0.13 75);
+  --p2-good:   oklch(0.72 0.12 155);
+
+  --p2-shadow-sm: 0 1px 2px oklch(0 0 0 / 30%);
+  --p2-shadow-md: 0 4px 14px oklch(0 0 0 / 38%);
+  --p2-shadow-lg: 0 18px 52px oklch(0 0 0 / 52%);
+
+  color-scheme: dark;
+}
+
+/* The default "system" setting stamps no attribute, so only the media
+ * query separates light from dark there. Guarded with :not so an
+ * explicit light choice still wins on a dark OS. */
+@media (prefers-color-scheme: dark) {
+  [data-pocket2]:not([data-theme="light"]) {
+    --p2-paper:        oklch(0.178 0.008 250);
+    --p2-surface:      oklch(0.215 0.009 250);
+    --p2-surface-sunk: oklch(0.155 0.008 250);
+    --p2-surface-hover:oklch(0.245 0.010 250);
+    --p2-ink:        oklch(0.945 0.004 250);
+    --p2-ink-strong: oklch(0.99 0.003 250);
+    --p2-muted:      oklch(0.685 0.011 250);
+    --p2-faint:      oklch(0.545 0.012 250);
+    --p2-line:        oklch(1 0 0 / 9%);
+    --p2-line-strong: oklch(1 0 0 / 16%);
+    --p2-accent:       oklch(0.735 0.115 168);
+    --p2-accent-hover: oklch(0.795 0.115 168);
+    --p2-accent-ink:   oklch(0.17 0.03 168);
+    --p2-accent-soft:  oklch(0.735 0.115 168 / 14%);
+    --p2-accent-line:  oklch(0.735 0.115 168 / 34%);
+    --p2-danger: oklch(0.68 0.17 27);
+    --p2-warn:   oklch(0.78 0.13 75);
+    --p2-good:   oklch(0.72 0.12 155);
+    --p2-shadow-sm: 0 1px 2px oklch(0 0 0 / 30%);
+    --p2-shadow-md: 0 4px 14px oklch(0 0 0 / 38%);
+    --p2-shadow-lg: 0 18px 52px oklch(0 0 0 / 52%);
+    color-scheme: dark;
+  }
+}
+
+/* ================================================================== *
+ * TYPE SCALE — a modular scale, applied through named classes so the
+ * hierarchy is a design decision recorded in one place rather than
+ * ad-hoc sizes scattered across components.
+ * ================================================================== */
+
+.p2-display { font-size: clamp(2.25rem, 1.4rem + 3.6vw, 4rem); line-height: 1.04; letter-spacing: -0.032em; font-weight: 560; }
+.p2-h1      { font-size: clamp(1.75rem, 1.3rem + 1.8vw, 2.5rem); line-height: 1.12; letter-spacing: -0.024em; font-weight: 560; }
+.p2-h2      { font-size: 1.375rem; line-height: 1.25; letter-spacing: -0.018em; font-weight: 560; }
+.p2-h3      { font-size: 1.0625rem; line-height: 1.35; letter-spacing: -0.012em; font-weight: 560; }
+.p2-body    { font-size: 0.9375rem; line-height: 1.6; letter-spacing: -0.003em; }
+.p2-small   { font-size: 0.8125rem; line-height: 1.5; }
+.p2-meta    { font-size: 0.75rem;  line-height: 1.45; color: var(--p2-muted); font-variant-numeric: tabular-nums; }
+.p2-label   { font-size: 0.6875rem; line-height: 1.2; font-weight: 560; letter-spacing: 0.055em; text-transform: uppercase; color: var(--p2-faint); }
+
+.p2-lead { font-size: clamp(1.0625rem, 0.95rem + 0.5vw, 1.25rem); line-height: 1.55; color: var(--p2-muted); letter-spacing: -0.008em; }
+
+/* Prevents a two-word orphan on the second line of a headline. */
+.p2-balance { text-wrap: balance; }
+.p2-pretty  { text-wrap: pretty; }
+
+/* ================================================================== *
+ * PRIMITIVES
+ * ================================================================== */
+
+.p2-surface {
+  background: var(--p2-surface);
+  border: 1px solid var(--p2-line);
+  border-radius: var(--p2-r-lg);
+}
+
+/* Focus is never removed, only restyled — every interactive element
+ * shows this ring on keyboard focus. */
+.p2-focusable:focus-visible,
+.p2-btn:focus-visible,
+.p2-field:focus-visible,
+.p2-chip:focus-visible {
+  outline: 2px solid var(--p2-accent);
+  outline-offset: 2px;
+}
+
+/* ---- buttons ----------------------------------------------------- */
+.p2-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4375rem;
+  border: 1px solid transparent;
+  border-radius: var(--p2-r-md);
+  padding: 0 0.875rem;
+  height: 2.25rem;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 520;
+  letter-spacing: -0.006em;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--p2-fast) var(--p2-ease),
+              border-color var(--p2-fast) var(--p2-ease),
+              color var(--p2-fast) var(--p2-ease),
+              opacity var(--p2-fast) var(--p2-ease);
+}
+.p2-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.p2-btn > svg { width: 1rem; height: 1rem; flex: none; }
+
+.p2-btn-primary { background: var(--p2-accent); color: var(--p2-accent-ink); }
+.p2-btn-primary:hover:not(:disabled) { background: var(--p2-accent-hover); }
+
+.p2-btn-secondary { background: var(--p2-surface); color: var(--p2-ink); border-color: var(--p2-line-strong); }
+.p2-btn-secondary:hover:not(:disabled) { background: var(--p2-surface-hover); border-color: var(--p2-line-strong); }
+
+.p2-btn-ghost { background: transparent; color: var(--p2-muted); }
+.p2-btn-ghost:hover:not(:disabled) { background: var(--p2-surface-hover); color: var(--p2-ink); }
+
+.p2-btn-lg { height: 2.75rem; padding: 0 1.25rem; font-size: 0.9375rem; border-radius: var(--p2-r-md); }
+.p2-btn-sm { height: 1.875rem; padding: 0 0.625rem; font-size: 0.8125rem; }
+.p2-btn-icon { width: 2.25rem; padding: 0; }
+
+/* ---- fields ------------------------------------------------------ */
+.p2-field {
+  width: 100%;
+  height: 2.5rem;
+  padding: 0 0.75rem;
+  border: 1px solid var(--p2-line-strong);
+  border-radius: var(--p2-r-md);
+  background: var(--p2-surface);
+  color: var(--p2-ink);
+  font-family: inherit;
+  font-size: 0.9375rem;
+  transition: border-color var(--p2-fast) var(--p2-ease), box-shadow var(--p2-fast) var(--p2-ease);
+}
+.p2-field::placeholder { color: var(--p2-faint); }
+.p2-field:hover:not(:focus-visible) { border-color: var(--p2-line-strong); }
+.p2-field:focus-visible {
+  outline: none;
+  border-color: var(--p2-accent);
+  box-shadow: 0 0 0 3px var(--p2-accent-soft);
+}
+.p2-field[aria-invalid="true"] { border-color: var(--p2-danger); }
+.p2-field-lg { height: 3rem; font-size: 1rem; padding: 0 1rem; }
+
+/* ---- chips / badges ---------------------------------------------- */
+.p2-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  height: 1.75rem;
+  padding: 0 0.625rem;
+  border: 1px solid var(--p2-line);
+  border-radius: 999px;
+  background: var(--p2-surface);
+  color: var(--p2-muted);
+  font-size: 0.78125rem;
+  font-weight: 480;
+  cursor: pointer;
+  transition: background-color var(--p2-fast) var(--p2-ease), color var(--p2-fast) var(--p2-ease), border-color var(--p2-fast) var(--p2-ease);
+}
+.p2-chip:hover { background: var(--p2-surface-hover); color: var(--p2-ink); }
+.p2-chip[data-active="true"] {
+  background: var(--p2-accent-soft);
+  border-color: var(--p2-accent-line);
+  color: var(--p2-accent);
+  font-weight: 540;
+}
+
+.p2-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 1.375rem;
+  padding: 0 0.4375rem;
+  border-radius: var(--p2-r-sm);
+  background: var(--p2-surface-sunk);
+  color: var(--p2-muted);
+  font-size: 0.6875rem;
+  font-weight: 560;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ---- links ------------------------------------------------------- */
+.p2-link { color: var(--p2-accent); text-decoration: none; text-underline-offset: 3px; }
+.p2-link:hover { text-decoration: underline; }
+
+/* ---- skeletons: a calm pulse, never a shimmer sweep -------------- */
+.p2-skeleton {
+  background: var(--p2-surface-sunk);
+  border-radius: var(--p2-r-sm);
+  animation: p2-pulse 1.6s var(--p2-ease) infinite;
+}
+@keyframes p2-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+.p2-enter { animation: p2-enter var(--p2-base) var(--p2-ease) both; }
+@keyframes p2-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ---- scrollbars -------------------------------------------------- */
+[data-pocket2] ::-webkit-scrollbar { width: 10px; height: 10px; }
+[data-pocket2] ::-webkit-scrollbar-thumb {
+  background: var(--p2-line-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+[data-pocket2] ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---- reading surface --------------------------------------------
+ * The Reader's typography contract. Defined here in Phase 1 so the
+ * measure, rhythm and scale are a system decision rather than
+ * something invented later inside a component. */
+.p2-prose {
+  font-family: var(--p2-font-reading);
+  font-size: 1.1875rem;
+  line-height: 1.72;
+  letter-spacing: -0.003em;
+  color: var(--p2-ink);
+  max-width: 68ch; /* ~66-72 characters: the comfortable measure */
+}
+.p2-prose > * + * { margin-top: 1.35em; }
+.p2-prose h2 { font-family: var(--p2-font-ui); font-size: 1.5rem; line-height: 1.25; letter-spacing: -0.02em; font-weight: 580; margin-top: 2.2em; }
+.p2-prose h3 { font-family: var(--p2-font-ui); font-size: 1.1875rem; line-height: 1.3; letter-spacing: -0.014em; font-weight: 580; margin-top: 1.9em; }
+.p2-prose a { color: var(--p2-accent); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.p2-prose blockquote {
+  border-left: 2px solid var(--p2-accent-line);
+  padding-left: 1.125em;
+  color: var(--p2-muted);
+  font-style: italic;
+}
+.p2-prose img { border-radius: var(--p2-r-md); width: 100%; height: auto; }
+.p2-prose figcaption { font-family: var(--p2-font-ui); font-size: 0.8125rem; color: var(--p2-muted); margin-top: 0.6em; }
+.p2-prose pre {
+  font-family: var(--p2-font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  background: var(--p2-surface-sunk);
+  border-radius: var(--p2-r-md);
+  padding: 1rem;
+  overflow-x: auto;
+}
+.p2-prose code { font-family: var(--p2-font-mono); font-size: 0.875em; }
+.p2-prose ul, .p2-prose ol { padding-left: 1.4em; }
+.p2-prose li + li { margin-top: 0.5em; }
+
+/* Wide content never makes the PAGE scroll sideways — it scrolls
+ * inside its own container. */
+.p2-scroll-x { overflow-x: auto; max-width: 100%; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-pocket2] *,
+  [data-pocket2] *::before,
+  [data-pocket2] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
