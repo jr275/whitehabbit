@@ -125,14 +125,14 @@ describe("extraction ladder", () => {
     }
   }
 
-  it("ends on an in-process tier", () => {
+  it("puts graby first and the in-process tiers last", () => {
     assert.deepEqual(
       EXTRACTION_LADDER.map((t) => t.id),
-      ["readability", "metadata"],
+      ["graby", "readability", "metadata"],
       "ladder order is the extraction policy; changing it is a deliberate act",
     )
-    // The last tier must be in-process, or a future sidecar outage
-    // becomes an ingestion outage.
+    // The last tier must be in-process, or a sidecar outage becomes an
+    // ingestion outage.
     assert.equal(EXTRACTION_LADDER[EXTRACTION_LADDER.length - 1]?.id, "metadata")
   })
 

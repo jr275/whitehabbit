@@ -1,8 +1,9 @@
 /* ================================================================== *
  * EXTRACTION TIER LADDER
  *
- *   tier 1  (reserved)     the graby sidecar lands here next, carrying
- *                           Wallabag's per-domain XPath site-config corpus
+ *   tier 1  graby sidecar   services/extractor — Wallabag's ~1,960-rule
+ *                           per-domain XPath site-config corpus. Remote,
+ *                           optional; absent in dev and in tests.
  *   tier 2  readability     content-density heuristic, in-process
  *   tier 3  metadata        title/excerpt/cover, no body, in-process
  *
@@ -24,6 +25,7 @@
  * ================================================================== */
 
 import { countWords, htmlToText, sanitizeHtml } from "./sanitize.ts"
+import { grabyExtractor } from "./graby.ts"
 import { metadataExtractor, readabilityExtractor } from "./local.ts"
 import {
   ExtractionError,
@@ -35,10 +37,15 @@ import {
 
 export * from "./types.ts"
 export { sanitizeHtml, htmlToText, countWords, readingTimeSeconds } from "./sanitize.ts"
+export { grabyExtractor, extractorUrl } from "./graby.ts"
 export { readabilityExtractor, metadataExtractor, LOCAL_EXTRACTOR_VERSION } from "./local.ts"
 
 /** Best first. Order is the policy; everything else here is mechanism. */
-export const EXTRACTION_LADDER: readonly ContentExtractor[] = [readabilityExtractor, metadataExtractor]
+export const EXTRACTION_LADDER: readonly ContentExtractor[] = [
+  grabyExtractor,
+  readabilityExtractor,
+  metadataExtractor,
+]
 
 /** The tiers that need no network. Used when re-extracting in a context
  * that must not depend on the sidecar being up. */

@@ -1,0 +1,21 @@
+{
+  "name": "whitehabbit/extractor",
+  "description": "Content extraction service. Wraps j0k3r/graby and its site-config corpus behind a minimal HTTP contract.",
+  "license": "MIT",
+  "require": {
+    "php": ">=8.2",
+    "ext-dom": "*",
+    "ext-libxml": "*",
+    "ext-mbstring": "*",
+    "ext-iconv": "*",
+    "j0k3r/graby": "^2.4",
+    "j0k3r/graby-site-config": "^1.0",
+    "php-http/curl-client": "^2.0",
+    "guzzlehttp/psr7": "^2.0",
+    "http-interop/http-factory-guzzle": "^1.0"
+  },
+  "config": {
+    "allow-plugins": false,
+    "optimize-autoloader": true
+  }
+}

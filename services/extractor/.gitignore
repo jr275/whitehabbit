@@ -1,0 +1,4 @@
+# Installed by `composer install` at image build time. Never committed:
+# composer.lock pins the exact versions, and the vendor tree is ~40 MB
+# dominated by the site-config corpus.
+vendor/
