@@ -2,17 +2,16 @@
 
 import {
   ArrowRight,
-  Compass,
+  BookOpen,
   CornerDownLeft,
-  FolderPlus,
-  Headphones,
   Heart,
+  Home,
+  Layers,
   Link2,
   Search,
-  Share2,
-  Sparkles,
   type LucideIcon,
 } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 
@@ -22,17 +21,17 @@ interface Command {
   hint: string
   icon: LucideIcon
   group: "Actions" | "Navigate"
+  href?: string
 }
 
+// Only real, wired destinations/actions — nothing that pretends to do
+// something we haven't built.
 const COMMANDS: Command[] = [
-  { id: "save", label: "Save URL", hint: "Add a link to your library", icon: Link2, group: "Actions" },
-  { id: "search", label: "Search knowledge", hint: "Find anything you've saved", icon: Search, group: "Actions" },
-  { id: "ask", label: "Ask AI", hint: "Query your own memory", icon: Sparkles, group: "Actions" },
-  { id: "collection", label: "Create collection", hint: "Group related pieces", icon: FolderPlus, group: "Actions" },
-  { id: "listen", label: "Listen", hint: "Play your reading queue", icon: Headphones, group: "Actions" },
-  { id: "research", label: "Research", hint: "Start a research thread", icon: Compass, group: "Actions" },
-  { id: "share", label: "Share", hint: "Share a collection", icon: Share2, group: "Actions" },
-  { id: "favorite", label: "Favorite", hint: "Mark current item", icon: Heart, group: "Actions" },
+  { id: "save", label: "Save a URL", hint: "Add a link to your library", icon: Link2, group: "Actions" },
+  { id: "nav-library", label: "Go to Library", hint: "All your saved knowledge", icon: BookOpen, group: "Navigate", href: "/knowledge/library" },
+  { id: "nav-favorites", label: "Go to Favorites", hint: "The ones you starred", icon: Heart, group: "Navigate", href: "/knowledge/favorites" },
+  { id: "nav-topics", label: "Go to Topics", hint: "Themes across your library", icon: Layers, group: "Navigate", href: "/knowledge/topics" },
+  { id: "nav-home", label: "Go to Home", hint: "Your library overview", icon: Home, group: "Navigate", href: "/knowledge" },
 ]
 
 interface CommandPaletteProps {
@@ -42,6 +41,7 @@ interface CommandPaletteProps {
 }
 
 export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
+  const router = useRouter()
   const [query, setQuery] = useState("")
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -67,6 +67,7 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
   function run(cmd: Command) {
     onClose()
     if (cmd.id === "save") onSave()
+    else if (cmd.href) router.push(cmd.href)
   }
 
   function onKeyDown(e: React.KeyboardEvent) {

@@ -18,7 +18,17 @@
 import "server-only"
 import { Pool, type QueryResultRow } from "pg"
 
-const DATABASE_URL = process.env.DATABASE_URL
+/* Prefer DATABASE_URL (the platform-injected value in production), but
+ * fall back to the Neon-provided connection strings that the Vercel/Neon
+ * integration exposes (NEON_DATABASE_URL is the pooled endpoint, correct
+ * for serverless app queries). This lets the same code run in local/dev
+ * environments where only the NEON_* vars are present, WITHOUT weakening
+ * the loud-failure guarantee below — if none are set we still throw. */
+const DATABASE_URL =
+  process.env.DATABASE_URL ||
+  process.env.NEON_DATABASE_URL ||
+  process.env.NEON_POSTGRES_URL ||
+  process.env.NEON_DATABASE_URL_UNPOOLED
 
 declare global {
   // eslint-disable-next-line no-var

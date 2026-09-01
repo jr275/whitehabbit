@@ -1,34 +1,49 @@
 "use client"
 
-import { Check, Link2, Loader2, Sparkles, X } from "lucide-react"
+import { AlertCircle, Check, Link2, Loader2, Sparkles, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { saveUrl } from "@/lib/knowledge/client"
 
 interface SaveDialogProps {
   open: boolean
   onClose: () => void
 }
 
-type Stage = "input" | "saving" | "done"
+type Stage = "input" | "saving" | "done" | "error"
 
 export function SaveDialog({ open, onClose }: SaveDialogProps) {
   const [url, setUrl] = useState("")
   const [stage, setStage] = useState<Stage>("input")
+  const [message, setMessage] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (open) {
       setUrl("")
       setStage("input")
+      setMessage(null)
       requestAnimationFrame(() => inputRef.current?.focus())
     }
   }, [open])
 
-  function handleSave() {
-    if (!url.trim()) return
+  async function handleSave() {
+    const trimmed = url.trim()
+    if (!trimmed) return
     setStage("saving")
-    // Front-end confirmation choreography only — no fabricated backend.
-    setTimeout(() => setStage("done"), 900)
-    setTimeout(() => onClose(), 2400)
+    setMessage(null)
+    try {
+      // Real POST /api/knowledge — persists the item and schedules
+      // background fetch + extraction on the server.
+      const item = await saveUrl(trimmed)
+      // Broadcast so the Library (a separate React tree) inserts the
+      // new card and starts polling its live processing state.
+      window.dispatchEvent(new CustomEvent("knowledge:saved", { detail: item }))
+      setStage("done")
+      setTimeout(() => onClose(), 1600)
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Something went wrong. Please try again.")
+      setStage("error")
+    }
   }
 
   if (!open) return null
@@ -56,7 +71,7 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
         </div>
 
         <div className="p-5">
-          {stage === "input" && (
+          {(stage === "input" || stage === "error") && (
             <>
               <label htmlFor="save-url" className="mb-2 block text-sm font-medium text-foreground">
                 Paste anything worth remembering
@@ -71,11 +86,19 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
                 }}
                 placeholder="https://…"
                 className="modal-input"
+                aria-invalid={stage === "error"}
               />
-              <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Sparkles className="size-3 text-[var(--kn-ai)]" />
-                We&apos;ll fetch it, summarize it and file it under the right topics.
-              </p>
+              {stage === "error" && message ? (
+                <p className="mt-2 flex items-center gap-1.5 text-xs text-destructive">
+                  <AlertCircle className="size-3" />
+                  {message}
+                </p>
+              ) : (
+                <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Sparkles className="size-3 text-[var(--kn-ai)]" />
+                  We&apos;ll fetch the page and pull out its title, author and readable text.
+                </p>
+              )}
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   onClick={onClose}
@@ -88,7 +111,7 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
                   disabled={!url.trim()}
                   className="h-9 rounded-lg bg-[var(--kn-ai)] px-4 text-sm font-medium text-[color:oklch(0.2_0.02_75)] transition-opacity disabled:opacity-40"
                 >
-                  Save
+                  {stage === "error" ? "Try again" : "Save"}
                 </button>
               </div>
             </>
@@ -109,7 +132,7 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
               <div>
                 <p className="text-sm font-medium text-foreground">Saved</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Fetching content and understanding it now — it&apos;ll be ready in your library shortly.
+                  Fetching the page and extracting its content now — your card will update as it progresses.
                 </p>
               </div>
             </div>

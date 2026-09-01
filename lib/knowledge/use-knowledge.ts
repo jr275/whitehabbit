@@ -124,14 +124,33 @@ export function useKnowledgeLibrary(opts: UseLibraryOptions = {}): LibraryState 
     }
   }, [nextOffset, loadingMore, filter, kind, pageSize])
 
-  const save = useCallback(async (url: string) => {
-    const item = await api.saveUrl(url)
+  const insert = useCallback((item: KnowledgeItem) => {
     // Prepend immediately — it arrives in `saved` state and polling
     // takes over from there.
     setItems((prev) => [item, ...prev.filter((p) => p.id !== item.id)])
     setTotal((t) => t + 1)
-    return item
   }, [])
+
+  const save = useCallback(
+    async (url: string) => {
+      const item = await api.saveUrl(url)
+      insert(item)
+      return item
+    },
+    [insert],
+  )
+
+  // The Save dialog lives in the shell (a separate React tree). When it
+  // completes a real save it broadcasts the new item; the Library picks
+  // it up here so the card appears and polling starts.
+  useEffect(() => {
+    function onSaved(e: Event) {
+      const detail = (e as CustomEvent<KnowledgeItem>).detail
+      if (detail && typeof detail.id === "string") insert(detail)
+    }
+    window.addEventListener("knowledge:saved", onSaved as EventListener)
+    return () => window.removeEventListener("knowledge:saved", onSaved as EventListener)
+  }, [insert])
 
   const toggleFavorite = useCallback(async (item: KnowledgeItem) => {
     const next = !item.favorite
@@ -175,5 +194,5 @@ export function useKnowledgeLibrary(opts: UseLibraryOptions = {}): LibraryState 
     }
   }, [])
 
-  return { items, status, error, total, hasMore, loadingMore, reload, loadMore, save, toggleFavorite, archive, remove, retry }
+  return { items, status, error, total, hasMore, loadingMore, reload, loadMore, save, insert, toggleFavorite, archive, remove, retry }
 }

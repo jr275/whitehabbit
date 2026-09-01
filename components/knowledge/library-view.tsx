@@ -1,21 +1,12 @@
 "use client"
 
-import { LayoutGrid, LayoutList, Rows3, TrendingUp } from "lucide-react"
-import { useMemo, useState } from "react"
+import { AlertCircle, LayoutGrid, LayoutList, Loader2, Rows3 } from "lucide-react"
+import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { openSaveDialog } from "@/lib/knowledge/config"
-import type {
-  Collection,
-  Insight,
-  KnowledgeItem,
-  KnowledgeKind,
-  PrimaryFilter,
-  Topic,
-  ViewMode,
-} from "@/lib/knowledge/types"
-import { AskLibrary } from "./ask-library"
+import { useKnowledgeLibrary } from "@/lib/knowledge/use-knowledge"
+import type { KnowledgeKind, PrimaryFilter, ViewMode } from "@/lib/knowledge/types"
 import { EmptyLibrary } from "./empty-state"
-import { CollectionsRail, DailyIntelligence, RecentInterests } from "./intelligence"
 import { KnowledgeCard } from "./knowledge-card"
 
 const PRIMARY_FILTERS: { id: PrimaryFilter; label: string }[] = [
@@ -41,108 +32,81 @@ const VIEWS: { id: ViewMode; label: string; icon: typeof LayoutGrid }[] = [
 ]
 
 interface LibraryViewProps {
-  items: KnowledgeItem[]
-  collections: Collection[]
-  topics: Topic[]
-  insights: Insight[]
-  savedThisWeek: number
+  /** Locks the primary filter (e.g. Favorites page) and hides the filter row. */
+  lockedFilter?: PrimaryFilter
+  title?: string
+  eyebrow?: string
+  subtitle?: string
 }
 
 export function LibraryView({
-  items,
-  collections,
-  topics,
-  insights,
-  savedThisWeek,
+  lockedFilter,
+  title = "Your Library",
+  eyebrow,
+  subtitle = "Your personal knowledge, organized automatically.",
 }: LibraryViewProps) {
   const [view, setView] = useState<ViewMode>("masonry")
-  const [primary, setPrimary] = useState<PrimaryFilter>("all")
+  const [primary, setPrimary] = useState<PrimaryFilter>(lockedFilter ?? "all")
   const [kind, setKind] = useState<KnowledgeKind | null>(null)
-  const [favorites, setFavorites] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(items.map((i) => [i.id, i.favorite])),
-  )
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [archived, setArchived] = useState<Set<string>>(new Set())
 
-  const enriched = useMemo(
-    () => items.map((i) => ({ ...i, favorite: favorites[i.id] ?? i.favorite })),
-    [items, favorites],
-  )
+  const {
+    items,
+    status,
+    error,
+    total,
+    hasMore,
+    loadingMore,
+    reload,
+    loadMore,
+    toggleFavorite,
+    archive,
+    remove,
+    retry,
+  } = useKnowledgeLibrary({ filter: primary, kind })
 
-  const filtered = useMemo(() => {
-    let list = enriched.filter((i) => !archived.has(i.id))
-    if (primary === "unread") list = list.filter((i) => i.readState === "unread")
-    if (primary === "read") list = list.filter((i) => i.readState === "read")
-    if (primary === "favorites") list = list.filter((i) => i.favorite)
-    if (primary === "recent")
-      list = [...list].sort((a, b) => b.savedAt.localeCompare(a.savedAt))
-    if (kind) list = list.filter((i) => i.kind === kind)
-    return list
-  }, [enriched, primary, kind, archived])
-
-  function toggleFavorite(id: string) {
-    setFavorites((f) => ({ ...f, [id]: !f[id] }))
-  }
-  function toggleSelect(id: string) {
-    setSelected((s) => {
-      const next = new Set(s)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
-  function archive(id: string) {
-    setArchived((s) => new Set(s).add(id))
-    setSelected((s) => {
-      const next = new Set(s)
-      next.delete(id)
-      return next
-    })
-  }
-
-  const topInterests = ["AI Agents", "Product", "Startups"]
+  const showFilters = !lockedFilter
 
   return (
     <div className="mx-auto max-w-[1500px] px-4 py-8 sm:px-6 lg:px-8">
       {/* ── Hero ─────────────────────────────────────────── */}
       <header className="flex flex-col gap-2">
-        <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
-          <TrendingUp className="size-3.5 text-grow" />
-          You saved {savedThisWeek} things this week
-        </div>
+        {eyebrow && (
+          <div className="font-mono text-[11px] uppercase tracking-[0.24em] text-muted-foreground">{eyebrow}</div>
+        )}
         <h1 className="text-balance font-serif text-4xl font-medium leading-[1.05] tracking-tight text-foreground sm:text-5xl">
-          Your Library
+          {title}
         </h1>
         <p className="max-w-xl text-pretty text-base leading-relaxed text-muted-foreground">
-          Your personal knowledge, organized automatically.
+          {subtitle}
+          {status === "ready" && total > 0 && (
+            <span className="text-foreground"> · {total} saved</span>
+          )}
         </p>
       </header>
-
-      {/* ── Intelligence row ─────────────────────────────── */}
-      <div className="mt-8 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-        <AskLibrary />
-        <RecentInterests topics={topInterests} count={7} />
-      </div>
 
       {/* ── Controls ─────────────────────────────────────── */}
       <div className="mt-10 flex flex-col gap-4 border-b border-[var(--kn-edge)] pb-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* primary filters */}
-          <div className="flex flex-wrap items-center gap-1">
-            {PRIMARY_FILTERS.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setPrimary(f.id)}
-                className={cn(
-                  "rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors",
-                  primary === f.id
-                    ? "bg-secondary text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+          {showFilters ? (
+            <div className="flex flex-wrap items-center gap-1">
+              {PRIMARY_FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => setPrimary(f.id)}
+                  className={cn(
+                    "rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors",
+                    primary === f.id
+                      ? "bg-secondary text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span />
+          )}
 
           {/* view switcher */}
           <div className="flex items-center gap-0.5 rounded-lg border border-[var(--kn-edge)] bg-card/50 p-0.5">
@@ -198,75 +162,80 @@ export function LibraryView({
         </div>
       </div>
 
-      {/* selection bar */}
-      {selected.size > 0 && (
-        <div className="mt-4 flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/10 px-4 py-2.5 text-sm">
-          <span className="font-medium text-foreground">{selected.size} selected</span>
-          <button className="text-muted-foreground hover:text-foreground">Add to collection</button>
-          <button className="text-muted-foreground hover:text-foreground">Archive</button>
-          <button onClick={() => setSelected(new Set())} className="ml-auto text-muted-foreground hover:text-foreground">
-            Clear
-          </button>
-        </div>
-      )}
-
       {/* ── Items ────────────────────────────────────────── */}
       <div className="mt-6">
-        {filtered.length === 0 ? (
+        {status === "loading" ? (
+          <LoadingGrid />
+        ) : status === "error" ? (
+          <div className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-destructive/40 bg-destructive/5 px-6 py-16 text-center">
+            <AlertCircle className="size-8 text-destructive" />
+            <div>
+              <p className="text-sm font-medium text-foreground">We couldn&apos;t load your library.</p>
+              <p className="mt-1 text-xs text-muted-foreground">{error}</p>
+            </div>
+            <button
+              onClick={reload}
+              className="h-9 rounded-lg border border-border px-4 text-sm text-foreground hover:bg-secondary"
+            >
+              Try again
+            </button>
+          </div>
+        ) : items.length === 0 ? (
           <EmptyLibrary onSave={openSaveDialog} />
-        ) : view === "masonry" ? (
-          <div className="kn-masonry">
-            {filtered.map((item, i) => (
-              <KnowledgeCard
-                key={item.id}
-                item={item}
-                view="masonry"
-                index={i}
-                selected={selected.has(item.id)}
-                onToggleFavorite={toggleFavorite}
-                onArchive={archive}
-                onSelect={toggleSelect}
-              />
-            ))}
-          </div>
-        ) : view === "grid" ? (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filtered.map((item, i) => (
-              <KnowledgeCard
-                key={item.id}
-                item={item}
-                view="grid"
-                index={i}
-                selected={selected.has(item.id)}
-                onToggleFavorite={toggleFavorite}
-                onArchive={archive}
-                onSelect={toggleSelect}
-              />
-            ))}
-          </div>
         ) : (
-          <div className="flex flex-col gap-3">
-            {filtered.map((item, i) => (
-              <KnowledgeCard
-                key={item.id}
-                item={item}
-                view="list"
-                index={i}
-                selected={selected.has(item.id)}
-                onToggleFavorite={toggleFavorite}
-                onArchive={archive}
-                onSelect={toggleSelect}
-              />
-            ))}
-          </div>
+          <>
+            <div
+              className={cn(
+                view === "masonry" && "kn-masonry",
+                view === "grid" && "grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+                view === "list" && "flex flex-col gap-3",
+              )}
+            >
+              {items.map((item, i) => (
+                <KnowledgeCard
+                  key={item.id}
+                  item={item}
+                  view={view}
+                  index={i}
+                  onToggleFavorite={toggleFavorite}
+                  onArchive={archive}
+                  onDelete={remove}
+                  onRetry={retry}
+                />
+              ))}
+            </div>
+
+            {hasMore && (
+              <div className="mt-8 flex justify-center">
+                <button
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="flex h-10 items-center gap-2 rounded-xl border border-border px-5 text-sm text-foreground hover:bg-secondary disabled:opacity-50"
+                >
+                  {loadingMore && <Loader2 className="size-4 animate-spin" />}
+                  {loadingMore ? "Loading…" : "Load more"}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
+    </div>
+  )
+}
 
-      {/* ── Daily intelligence + collections ─────────────── */}
-      <div className="mt-14 space-y-12">
-        <DailyIntelligence insights={insights} />
-        <CollectionsRail collections={collections} />
-      </div>
+function LoadingGrid() {
+  return (
+    <div className="kn-masonry">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div
+          key={i}
+          className="mb-5 overflow-hidden rounded-2xl border border-[var(--kn-edge)] bg-[var(--kn-paper)]"
+          style={{ height: 220 + (i % 3) * 60 }}
+        >
+          <div className="kn-shimmer h-full w-full" />
+        </div>
+      ))}
     </div>
   )
 }
