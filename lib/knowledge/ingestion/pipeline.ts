@@ -36,6 +36,23 @@ export interface IngestOutcome {
 }
 
 /**
+ * The network hop, injectable.
+ *
+ * Production ALWAYS uses the real safeFetch — the default below is the
+ * only value any caller passes. Tests substitute a stub so the rest of
+ * the pipeline (extraction, sanitization, persistence, state
+ * transitions, retry classification) can be exercised against a real
+ * database without depending on the public internet. Nothing about the
+ * SSRF boundary is weakened: safe-fetch.ts is tested directly, against
+ * real sockets, in tests/knowledge/ssrf.test.ts.
+ */
+export type Fetcher = (url: string) => Promise<Awaited<ReturnType<typeof safeFetch>>>
+
+export interface IngestDeps {
+  fetch?: Fetcher
+}
+
+/**
  * Compare-and-swap a status transition.
  * Returns false when another runner got there first.
  */
@@ -75,7 +92,7 @@ async function markPendingRetry(objectId: string, code: string, userMessage: str
  * retryable state, because an unhandled throw here would leave the job
  * 'active' until the reaper noticed.
  */
-export async function runIngestJob(job: ClaimedJob): Promise<IngestOutcome> {
+export async function runIngestJob(job: ClaimedJob, deps: IngestDeps = {}): Promise<IngestOutcome> {
   const log = { jobId: job.id, objectId: job.objectId, workspaceId: job.workspaceId, attempt: job.attempt }
 
   const object = await queryOne<{ id: string; submitted_url: string; canonical_url: string; status: string }>(
@@ -103,7 +120,7 @@ export async function runIngestJob(job: ClaimedJob): Promise<IngestOutcome> {
 
   try {
     // ---- fetch. NO db connection held across this. ----
-    const fetched = await safeFetch(object.submitted_url)
+    const fetched = await (deps.fetch ?? safeFetch)(object.submitted_url)
 
     await advance(job.objectId, "fetching", "extracting")
 

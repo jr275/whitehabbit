@@ -11,7 +11,7 @@
     "start": "next start",
     "migrate": "node scripts/migrate.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types --conditions=react-server --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/helpers/register-alias.mjs \"tests/**/*.test.ts\"",
+    "test": "node --test --test-concurrency=1 --experimental-strip-types --conditions=react-server --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/helpers/register-alias.mjs \"tests/**/*.test.ts\"",
     "boundaries": "node scripts/check-boundaries.mjs",
     "verify": "npm run typecheck && npm run boundaries && npm test"
   },

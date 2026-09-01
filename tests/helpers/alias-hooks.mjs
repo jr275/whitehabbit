@@ -54,5 +54,20 @@ export async function resolve(specifier, context, next) {
     if (resolved) return next(pathToFileURL(resolved).href, context)
   }
 
-  return next(specifier, context)
+  // 3. bare package subpaths without an extension ("next/headers").
+  //    Bundlers resolve these; raw Node ESM does not.
+  try {
+    return await next(specifier, context)
+  } catch (err) {
+    if (err?.code === "ERR_MODULE_NOT_FOUND" && /^[^./]/.test(specifier) && !specifier.startsWith("node:")) {
+      for (const ext of [".js", ".mjs", ".cjs"]) {
+        try {
+          return await next(`${specifier}${ext}`, context)
+        } catch {
+          /* try the next extension */
+        }
+      }
+    }
+    throw err
+  }
 }
