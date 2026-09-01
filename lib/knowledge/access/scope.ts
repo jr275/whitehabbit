@@ -16,7 +16,7 @@ import "server-only"
  * prerequisite for this milestone.
  * ================================================================== */
 
-import { requireSession } from "@/lib/platform"
+import { requireSession } from "@/lib/platform/session"
 
 export interface AccessScope {
   /** The authenticated user. */
