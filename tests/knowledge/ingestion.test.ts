@@ -16,7 +16,13 @@ import { runIngestJob, type Fetcher } from "@/lib/knowledge/ingestion/pipeline"
 import { SafeFetchError, type FetchFailureCode } from "@/lib/knowledge/ingestion/safe-fetch"
 import { canonicalizeUrl } from "@/lib/knowledge/ingestion/url"
 import { closeTestPool, createTenant, getTestPool, prepareDatabase } from "../helpers/db.ts"
-import type { AccessScope } from "@/lib/knowledge/access/scope"
+import type { AccessScope } from "@/lib/knowledge/access/types"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { createFilesystemStore } from "@/lib/knowledge/storage/index"
+import { listArtifacts, loadLatestArtifact } from "@/lib/knowledge/archive/index"
+import type { BlobStore } from "@/lib/knowledge/storage/types"
 
 const ARTICLE_HTML = `<!doctype html><html lang="en">
 <head><title>Test Article</title>
@@ -31,13 +37,16 @@ const ARTICLE_HTML = `<!doctype html><html lang="en">
 </article></body></html>`
 
 function stubFetch(html: string, url = "https://example.com/test-article"): Fetcher {
+  const body = Buffer.from(html, "utf8")
   return async () => ({
     resolvedUrl: url,
     originUrl: null,
     status: 200,
     contentType: "text/html",
     html,
-    bytes: html.length,
+    bytes: body.byteLength,
+    body,
+    charset: "utf-8",
   })
 }
 
@@ -60,6 +69,10 @@ async function saveUrl(scope: AccessScope, url: string) {
 describe("ingestion", () => {
   let alice: AccessScope
   let bob: AccessScope
+  // Archiving is injected so the suite writes into a temp directory it
+  // owns, rather than wherever the environment happens to point.
+  let root = ""
+  let store: BlobStore
 
   before(async () => {
     await prepareDatabase()
@@ -67,8 +80,11 @@ describe("ingestion", () => {
     const b = await createTenant("bob")
     alice = { userId: a.userId, workspaceId: a.orgId }
     bob = { userId: b.userId, workspaceId: b.orgId }
+    root = await mkdtemp(join(tmpdir(), "wh-ingest-test-"))
+    store = createFilesystemStore(root)
   })
   after(async () => {
+    await rm(root, { recursive: true, force: true })
     await closeTestPool()
   })
 
@@ -97,7 +113,7 @@ describe("ingestion", () => {
     const { object } = await saveUrl(alice, "https://example.com/success")
     const job = await claimNextJobFor(object.id)
 
-    const outcome = await runIngestJob(job, { fetch: stubFetch(ARTICLE_HTML) })
+    const outcome = await runIngestJob(job, { fetch: stubFetch(ARTICLE_HTML), store })
     assert.equal(outcome.status, "completed")
 
     const result = await getObjectWithContent(alice, object.id)
@@ -119,7 +135,7 @@ describe("ingestion", () => {
     const job = await claimNextJobFor(object.id)
 
     // http_4xx is a determinate answer: terminal, no retry.
-    const outcome = await runIngestJob(job, { fetch: failingFetch("http_4xx") })
+    const outcome = await runIngestJob(job, { fetch: failingFetch("http_4xx"), store })
     assert.equal(outcome.status, "failed")
 
     const stored = await getObject(alice, object.id)
@@ -136,7 +152,7 @@ describe("ingestion", () => {
     for (const expected of [1, 2]) {
       const job = await claimNextJobFor(object.id)
       assert.equal(job.attempt, expected)
-      const outcome = await runIngestJob(job, { fetch: failingFetch("timeout") })
+      const outcome = await runIngestJob(job, { fetch: failingFetch("timeout"), store })
       assert.equal(outcome.status, "retrying")
 
       const row = await db.query("SELECT status, run_after FROM knowledge_jobs WHERE object_id = $1", [object.id])
@@ -150,7 +166,7 @@ describe("ingestion", () => {
     // attempt 3 exhausts the ceiling -> terminal
     const last = await claimNextJobFor(object.id)
     assert.equal(last.attempt, 3)
-    const outcome = await runIngestJob(last, { fetch: failingFetch("timeout") })
+    const outcome = await runIngestJob(last, { fetch: failingFetch("timeout"), store })
     assert.equal(outcome.status, "failed", "retries must be bounded")
 
     const stored = await getObject(alice, object.id)
@@ -160,7 +176,7 @@ describe("ingestion", () => {
   it("re-arms a failed item on explicit retry", async () => {
     const { object } = await saveUrl(alice, "https://example.com/retry-me")
     const job = await claimNextJobFor(object.id)
-    await runIngestJob(job, { fetch: failingFetch("http_4xx") })
+    await runIngestJob(job, { fetch: failingFetch("http_4xx"), store })
 
     assert.equal(await retryObject(alice, object.id), true)
     const stored = await getObject(alice, object.id)
@@ -169,7 +185,7 @@ describe("ingestion", () => {
 
     const next = await claimNextJobFor(object.id)
     assert.equal(next.attempt, 1, "retry resets the attempt counter")
-    const outcome = await runIngestJob(next, { fetch: stubFetch(ARTICLE_HTML) })
+    const outcome = await runIngestJob(next, { fetch: stubFetch(ARTICLE_HTML), store })
     assert.equal(outcome.status, "completed")
   })
 
@@ -208,11 +224,12 @@ describe("ingestion", () => {
   it("does not process an object twice (compare-and-swap on status)", async () => {
     const { object } = await saveUrl(alice, "https://example.com/once")
     const job = await claimNextJobFor(object.id)
-    await runIngestJob(job, { fetch: stubFetch(ARTICLE_HTML) })
+    await runIngestJob(job, { fetch: stubFetch(ARTICLE_HTML), store })
 
     // Re-running the same claimed job must be a no-op, not a re-fetch.
     let called = false
     const outcome = await runIngestJob(job, {
+      store,
       fetch: async () => {
         called = true
         throw new SafeFetchError("timeout", "should never be called")
@@ -238,6 +255,77 @@ describe("ingestion", () => {
 
     // And Alice still can.
     assert.ok(await getObject(alice, object.id))
+  })
+
+  it("archives the original bytes BEFORE extraction, and links them to the content", async () => {
+    const { object } = await saveUrl(alice, "https://example.com/archived")
+    const job = await claimNextJobFor(object.id)
+    await runIngestJob(job, { fetch: stubFetch(ARTICLE_HTML), store })
+
+    const artifacts = await listArtifacts(alice, object.id)
+    assert.equal(artifacts.length, 1, "every ingestion must leave exactly one capture")
+    const [artifact] = artifacts
+    assert.equal(artifact.httpStatus, 200)
+    assert.equal(artifact.requestedUrl, "https://example.com/archived")
+    assert.equal(artifact.charset, "utf-8")
+
+    // The bytes come back exactly as the publisher served them —
+    // including the <script> the sanitizer removed from the article.
+    const loaded = await loadLatestArtifact(alice, object.id, { store })
+    assert.equal(loaded.html, ARTICLE_HTML)
+    assert.match(loaded.html, /window\.evil/, "the archive is the ORIGINAL, not the sanitized copy")
+
+    const { rows } = await getTestPool().query(
+      "SELECT artifact_id, extraction_method, extractor_version, revision FROM knowledge_content WHERE object_id = $1",
+      [object.id],
+    )
+    assert.equal(rows[0].artifact_id, artifact.id, "content must record which bytes produced it")
+    assert.equal(rows[0].extraction_method, "readability")
+    assert.equal(rows[0].revision, 1)
+  })
+
+  it("keeps the archived document even when extraction finds nothing", async () => {
+    const { object } = await saveUrl(alice, "https://example.com/unreadable")
+    const job = await claimNextJobFor(object.id)
+
+    // A document with no article and no metadata: every tier declines.
+    const outcome = await runIngestJob(job, { fetch: stubFetch("<html><body></body></html>"), store })
+    assert.equal(outcome.status, "failed")
+
+    const artifacts = await listArtifacts(alice, object.id)
+    assert.equal(artifacts.length, 1, "a page we could not read must still be re-processable")
+    const loaded = await loadLatestArtifact(alice, object.id, { store })
+    assert.equal(loaded.html, "<html><body></body></html>")
+  })
+
+  it("archives nothing when the fetch itself failed", async () => {
+    const { object } = await saveUrl(alice, "https://example.com/never-fetched")
+    const job = await claimNextJobFor(object.id)
+    await runIngestJob(job, { fetch: failingFetch("http_4xx"), store })
+    assert.deepEqual(await listArtifacts(alice, object.id), [])
+  })
+
+  it("does not archive a second copy of an unchanged page on retry", async () => {
+    const { object } = await saveUrl(alice, "https://example.com/retried")
+    await runIngestJob(await claimNextJobFor(object.id), { fetch: stubFetch(ARTICLE_HTML), store })
+
+    // Force a re-ingest of the same object with identical bytes.
+    await getTestPool().query("UPDATE knowledge_objects SET status = 'pending' WHERE id = $1", [object.id])
+    await getTestPool().query(
+      "UPDATE knowledge_jobs SET status = 'pending', locked_at = NULL WHERE object_id = $1",
+      [object.id],
+    )
+    await runIngestJob(await claimNextJobFor(object.id), { fetch: stubFetch(ARTICLE_HTML), store })
+
+    assert.equal((await listArtifacts(alice, object.id)).length, 1, "identical bytes are one capture, not two")
+  })
+
+  it("never lets another tenant reach an archived document", async () => {
+    const { object } = await saveUrl(alice, "https://example.com/alices-archive")
+    await runIngestJob(await claimNextJobFor(object.id), { fetch: stubFetch(ARTICLE_HTML), store })
+
+    assert.deepEqual(await listArtifacts(bob, object.id), [], "raw HTML must never cross a tenant boundary")
+    await assert.rejects(() => loadLatestArtifact(bob, object.id, { store }))
   })
 
   it("paginates with a stable cursor", async () => {

@@ -17,13 +17,9 @@ import "server-only"
  * ================================================================== */
 
 import { requireSession } from "@/lib/platform/session"
+import type { AccessScope } from "./types.ts"
 
-export interface AccessScope {
-  /** The authenticated user. */
-  readonly userId: string
-  /** The tenant. Physically `organizations.id`; called a workspace here. */
-  readonly workspaceId: string
-}
+export type { AccessScope } from "./types.ts"
 
 /**
  * Derives the scope from the verified session. The workspace id comes

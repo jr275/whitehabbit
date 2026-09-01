@@ -22,10 +22,13 @@ import "server-only"
 import { createHash } from "node:crypto"
 import { query, queryOne } from "@/lib/platform/db"
 import { logger } from "@/lib/platform/logger"
+import { workerScope } from "../access/worker.ts"
+import { archiveDocument, ArchiveError, releaseSupersededArtifacts } from "../archive/index.ts"
 import { extractContent, ExtractionError } from "./extraction/index.ts"
-import { countWords, readingTimeSeconds } from "./extraction/sanitize.ts"
 import { type ClaimedJob, completeJob, failJob } from "./jobs.ts"
+import { persistExtraction } from "./persist.ts"
 import { safeFetch, SafeFetchError } from "./safe-fetch.ts"
+import type { BlobStore } from "../storage/types.ts"
 import { hashCanonicalUrl } from "./url.ts"
 import type { ObjectStatus } from "./state.ts"
 
@@ -50,7 +53,21 @@ export type Fetcher = (url: string) => Promise<Awaited<ReturnType<typeof safeFet
 
 export interface IngestDeps {
   fetch?: Fetcher
+  /** Injectable so tests archive to a temp directory rather than to
+   * whatever the environment happens to be configured with. */
+  store?: BlobStore
 }
+
+/**
+ * How many captures of one object survive.
+ *
+ * The newest is what re-extraction reads. The two before it are what
+ * makes "this publisher changed the article after we saved it"
+ * answerable — the cheapest insurance in the system, at roughly one
+ * gzipped page each. More than three buys nothing any current or
+ * planned feature reads.
+ */
+const ARTIFACTS_KEPT_PER_OBJECT = 3
 
 /**
  * Compare-and-swap a status transition.
@@ -122,6 +139,32 @@ export async function runIngestJob(job: ClaimedJob, deps: IngestDeps = {}): Prom
     // ---- fetch. NO db connection held across this. ----
     const fetched = await (deps.fetch ?? safeFetch)(object.submitted_url)
 
+    // ---- archive FIRST -------------------------------------------
+    // Before any interpretation of the bytes. A page no extractor can
+    // read is still permanently re-processable; an extraction failure
+    // that lost the document would be the one unrecoverable failure in
+    // the system (M2's single hard requirement).
+    const scope = workerScope(job.workspaceId)
+    const artifact = await archiveDocument(
+      scope,
+      {
+        objectId: job.objectId,
+        body: fetched.body,
+        contentType: fetched.contentType,
+        charset: fetched.charset,
+        requestedUrl: object.submitted_url,
+        resolvedUrl: fetched.resolvedUrl,
+        httpStatus: fetched.status,
+      },
+      { store: deps.store },
+    )
+
+    // Retention runs here rather than in a sweep: a re-fetched object
+    // is exactly the moment an older capture becomes superseded, and
+    // the newest is never released.
+    const released = await releaseSupersededArtifacts(scope, job.objectId, ARTIFACTS_KEPT_PER_OBJECT)
+    if (released > 0) logger.info("knowledge_artifacts_released", { ...log, released })
+
     await advance(job.objectId, "fetching", "extracting")
 
     // ---- extract + sanitize ----
@@ -135,61 +178,21 @@ export async function runIngestJob(job: ClaimedJob, deps: IngestDeps = {}): Prom
       },
     )
 
-    const wordCount = countWords(extracted.contentText)
-    const now = Date.now()
-    const contentHash =
-      extracted.contentText.length > 0
-        ? createHash("sha256").update(extracted.contentText).digest("hex")
-        : null
-
     // A redirect that landed on an already-saved article: record the
     // resolved URL, but do not create a second object for it.
     const resolvedHash = hashCanonicalUrl(fetched.resolvedUrl)
 
-    // ---- persist ----
-    await query(
-      `UPDATE knowledge_objects SET
-         resolved_url = $1, origin_url = $2, http_status = $3,
-         title = $4, authors = $5, excerpt = $6, published_at = $7, language = $8,
-         site_name = $9, image_url = $10, favicon_url = $11,
-         word_count = $12, reading_time_seconds = $13,
-         extractor = $14, status = 'completed',
-         failure_code = NULL, failure_message = NULL, updated_at = $15
-       WHERE id = $16 AND org_id = $17`,
-      [
-        fetched.resolvedUrl,
-        fetched.originUrl,
-        fetched.status,
-        extracted.title,
-        extracted.authors,
-        extracted.excerpt,
-        extracted.publishedAt,
-        extracted.language,
-        extracted.siteName,
-        extracted.imageUrl,
-        extracted.faviconUrl,
-        wordCount > 0 ? wordCount : null,
-        wordCount > 0 ? readingTimeSeconds(wordCount) : null,
-        // The version string carries the method as its prefix
-        // ("graby@2.5.2+…", "readability@1"), so this one column stays
-        // faithful to both until M2's dedicated columns land.
-        extracted.extractorVersion,
-        now,
-        job.objectId,
-        job.workspaceId,
-      ],
-    )
-
-    await query(
-      `INSERT INTO knowledge_content (object_id, org_id, content_html, content_text, content_hash, extracted_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (object_id) DO UPDATE SET
-         content_html = EXCLUDED.content_html,
-         content_text = EXCLUDED.content_text,
-         content_hash = EXCLUDED.content_hash,
-         extracted_at = EXCLUDED.extracted_at`,
-      [job.objectId, job.workspaceId, extracted.contentHtml, extracted.contentText, contentHash, now],
-    )
+    // ---- persist. Object row and content in ONE transaction. ----
+    const { wordCount } = await persistExtraction(scope, {
+      objectId: job.objectId,
+      extracted,
+      artifactId: artifact.id,
+      fetch: {
+        resolvedUrl: fetched.resolvedUrl,
+        originUrl: fetched.originUrl,
+        httpStatus: fetched.status,
+      },
+    })
 
     await completeJob(job.id)
     logger.info("knowledge_ingest_completed", {
@@ -198,15 +201,24 @@ export async function runIngestJob(job: ClaimedJob, deps: IngestDeps = {}): Prom
       extractorVersion: extracted.extractorVersion,
       siteConfigMatched: extracted.siteConfigMatched,
       confidence: extracted.confidence,
+      artifactId: artifact.id,
       wordCount,
       resolvedHash: resolvedHash.slice(0, 12),
     })
     return { objectId: job.objectId, status: "completed" }
   } catch (err) {
     const { code, userMessage } =
-      err instanceof SafeFetchError || err instanceof ExtractionError
+      err instanceof SafeFetchError || err instanceof ExtractionError || err instanceof ArchiveError
         ? { code: err.code, userMessage: err.userMessage }
         : { code: "extraction_error", userMessage: "Something went wrong while saving this page." }
+
+    // An extraction that failed AFTER the archive succeeded is fully
+    // recoverable without touching the publisher again. Logged
+    // explicitly, because "we still have the bytes" is the difference
+    // between a retry and a re-fetch.
+    if (!(err instanceof SafeFetchError) && !(err instanceof ArchiveError)) {
+      logger.info("knowledge_ingest_archive_survived", { ...log, failureCode: code })
+    }
 
     const { willRetry } = await failJob(job, code, err instanceof Error ? err.message : String(err))
 

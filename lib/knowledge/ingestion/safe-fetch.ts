@@ -82,8 +82,21 @@ export interface SafeFetchResult {
   originUrl: string | null
   status: number
   contentType: string
+  /** The document decoded to a JS string, for extraction. */
   html: string
   bytes: number
+  /**
+   * THE BYTES EXACTLY AS SERVED, undecoded.
+   *
+   * `html` above is already a transformation — a decode from whatever
+   * the publisher declared into UTF-16 — and M2's one hard requirement
+   * is that the ORIGINAL representation survives. So the archive
+   * stores this, not `html`: a mis-detected charset then costs us a
+   * re-extraction rather than the document.
+   */
+  body: Buffer
+  /** The charset we decoded with, as declared by the publisher. */
+  charset: string
 }
 
 /** Wrap a bare address so the shared guard sees it as an IP literal. */
@@ -273,6 +286,8 @@ export async function safeFetch(rawUrl: string): Promise<SafeFetchResult> {
       contentType,
       html: res.body.toString(encoding),
       bytes: res.body.length,
+      body: res.body,
+      charset,
     }
   }
 }
