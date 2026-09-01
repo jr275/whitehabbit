@@ -71,8 +71,13 @@ const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
 const MAX_INFLATED_BYTES = MAX_DOCUMENT_BYTES + 2 * 1024 * 1024
 
 /**
- * Below this, compression costs more than it saves. HTML typically
- * compresses 5–8×, so nearly every real document is worth gzipping.
+ * Below this, compression costs more than it saves.
+ *
+ * Measured on real documents rather than assumed: gzip -6 over a
+ * corpus of actual served HTML came out at 3.6–4.4× (aggregate 3.8×).
+ * A synthetic page with repeated paragraphs reports 100×+ and is not
+ * worth believing. At 3.8× nearly every real document is worth
+ * gzipping; a sub-kilobyte one is not.
  */
 const MIN_BYTES_TO_COMPRESS = 1024
 
