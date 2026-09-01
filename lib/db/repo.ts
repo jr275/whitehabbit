@@ -346,8 +346,12 @@ export async function insertTask(task: WorkerTask, orgId: string, input: Record<
   )
 }
 
-export async function updateTaskStatus(id: string, status: WorkerTask["status"]): Promise<void> {
-  await query("UPDATE tasks SET status = $1 WHERE id = $2", [status, id])
+/** Org-scoped, like every other write here. The ids passed today are
+ * server-generated (lib/agent/runtime.ts creates them moments before),
+ * so adding `org_id` changes no behavior — it removes the possibility
+ * that a future caller reaches another org's row by id alone. */
+export async function updateTaskStatus(id: string, orgId: string, status: WorkerTask["status"]): Promise<void> {
+  await query("UPDATE tasks SET status = $1 WHERE id = $2 AND org_id = $3", [status, id, orgId])
 }
 
 /* ---- executions ------------------------------------------------------ */
@@ -376,12 +380,15 @@ export async function insertExecution(exec: WorkerExecution, orgId: string): Pro
   )
 }
 
-export async function updateExecutionStatus(id: string, status: WorkerExecution["status"]): Promise<void> {
-  await query("UPDATE executions SET status = $1 WHERE id = $2", [status, id])
+/** Org-scoped — see updateTaskStatus. */
+export async function updateExecutionStatus(id: string, orgId: string, status: WorkerExecution["status"]): Promise<void> {
+  await query("UPDATE executions SET status = $1 WHERE id = $2 AND org_id = $3", [status, id, orgId])
 }
 
+/** Org-scoped — see updateTaskStatus. */
 export async function finalizeExecution(
   id: string,
+  orgId: string,
   patch: {
     status: WorkerExecution["status"]
     reasonCode?: WorkerExecution["reasonCode"]
@@ -396,7 +403,7 @@ export async function finalizeExecution(
   },
 ): Promise<void> {
   await query(
-    `UPDATE executions SET status = $1, reason_code = $2, blocked_reason = $3, completed_at = $4, duration_ms = $5, cost_usd = $6, input_tokens = $7, output_tokens = $8, model = $9, execution_mode = $10 WHERE id = $11`,
+    `UPDATE executions SET status = $1, reason_code = $2, blocked_reason = $3, completed_at = $4, duration_ms = $5, cost_usd = $6, input_tokens = $7, output_tokens = $8, model = $9, execution_mode = $10 WHERE id = $11 AND org_id = $12`,
     [
       patch.status,
       patch.reasonCode ?? null,
@@ -409,6 +416,7 @@ export async function finalizeExecution(
       patch.model ?? null,
       patch.executionMode ?? null,
       id,
+      orgId,
     ],
   )
 }

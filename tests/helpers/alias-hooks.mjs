@@ -1,0 +1,58 @@
+/* ================================================================== *
+ * MODULE RESOLUTION HOOKS FOR node:test
+ *
+ * Lets tests import application code exactly as Next.js imports it,
+ * instead of duplicating logic into the test. Two shims, both of
+ * which a bundler normally provides and raw Node ESM does not:
+ *
+ *   1. the "@/..." path alias from tsconfig.json
+ *   2. extensionless specifiers ("./client" -> "./client.ts")
+ *
+ * Zero dependencies — Node's built-in module resolve hooks only.
+ * Test-only: nothing in the application imports this.
+ * ================================================================== */
+
+import { statSync } from "node:fs"
+import path from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
+
+const root = process.cwd()
+
+/** Probe the extensions TypeScript would have resolved. */
+function firstExistingFile(base) {
+  const candidates = [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    `${base}.mjs`,
+    `${base}.js`,
+    path.join(base, "index.ts"),
+    path.join(base, "index.tsx"),
+    path.join(base, "index.js"),
+  ]
+  for (const candidate of candidates) {
+    try {
+      if (statSync(candidate).isFile()) return candidate
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  return null
+}
+
+export async function resolve(specifier, context, next) {
+  // 1. "@/lib/db/repo" -> <root>/lib/db/repo.ts
+  if (specifier.startsWith("@/")) {
+    const resolved = firstExistingFile(path.join(root, specifier.slice(2)))
+    if (resolved) return next(pathToFileURL(resolved).href, context)
+  }
+
+  // 2. "./client" -> "./client.ts", relative to the importing file
+  if ((specifier.startsWith("./") || specifier.startsWith("../")) && context.parentURL?.startsWith("file:")) {
+    const parentDir = path.dirname(fileURLToPath(context.parentURL))
+    const resolved = firstExistingFile(path.resolve(parentDir, specifier))
+    if (resolved) return next(pathToFileURL(resolved).href, context)
+  }
+
+  return next(specifier, context)
+}

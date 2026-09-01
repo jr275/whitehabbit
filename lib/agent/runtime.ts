@@ -197,7 +197,7 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
 
       const completedAt = Date.now()
       const durationMs = completedAt - execution.startedAt
-      await repo.finalizeExecution(execution.id, {
+      await repo.finalizeExecution(execution.id, run.orgId, {
         status: "completed",
         completedAt,
         durationMs,
@@ -207,7 +207,7 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
         model: result.model,
         executionMode: result.executionMode,
       })
-      await repo.updateTaskStatus(task.id, "completed")
+      await repo.updateTaskStatus(task.id, run.orgId, "completed")
       emit("task_completed", { outputId: output.id, durationMs })
 
       // Domain Intelligence -> Memory: only for a Product-provisioned
@@ -228,21 +228,21 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
       // "credential required" vs "the provider failed" vs "this run's
       // own logic broke" — never inferred from string-matching a message.
       if (err instanceof SkillBlockedError) {
-        await repo.finalizeExecution(execution.id, { status: "blocked", reasonCode: err.code, blockedReason: err.reason, completedAt, durationMs })
-        await repo.updateTaskStatus(task.id, "blocked")
+        await repo.finalizeExecution(execution.id, run.orgId, { status: "blocked", reasonCode: err.code, blockedReason: err.reason, completedAt, durationMs })
+        await repo.updateTaskStatus(task.id, run.orgId, "blocked")
         emit("task_blocked", { reason: err.reason, reasonCode: err.code })
       } else if (err instanceof ApprovalRequiredError) {
         // Real terminal state, not a failure: the tool exists and
         // works, it just requires a human to say yes first. No tool
         // action ran — runToolAction() throws before calling it.
-        await repo.finalizeExecution(execution.id, { status: "pending_approval", blockedReason: err.message, completedAt, durationMs })
-        await repo.updateTaskStatus(task.id, "pending_approval")
+        await repo.finalizeExecution(execution.id, run.orgId, { status: "pending_approval", blockedReason: err.message, completedAt, durationMs })
+        await repo.updateTaskStatus(task.id, run.orgId, "pending_approval")
         emit("approval_required", { reason: err.message, toolId: err.toolId, toolName: err.toolName, action: err.actionLabel, permission: err.permission })
       } else {
         const reasonCode: ExecutionReasonCode = err instanceof InvalidCredentialError || err instanceof ProviderError ? err.code : "execution_error"
         const message = err instanceof Error ? err.message : "Task failed for an unknown reason."
-        await repo.finalizeExecution(execution.id, { status: "failed", reasonCode, blockedReason: message, completedAt, durationMs })
-        await repo.updateTaskStatus(task.id, "failed")
+        await repo.finalizeExecution(execution.id, run.orgId, { status: "failed", reasonCode, blockedReason: message, completedAt, durationMs })
+        await repo.updateTaskStatus(task.id, run.orgId, "failed")
         emit("task_failed", { reason: message, reasonCode })
       }
     } finally {
