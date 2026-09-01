@@ -66,8 +66,20 @@ export function extractTitle(html: string, siteName: string | null): string | nu
       return m?.[1] ? decodeEntities(htmlToText(m[1])) : null
     })()
 
-  if (!candidate) return null
-  let title = candidate.replace(/\s+/g, " ").trim()
+  return cleanTitle(candidate, siteName)
+}
+
+/**
+ * Normalise a title and drop the publisher's own boilerplate suffix.
+ *
+ * Exported because tier 1 needs it too: graby reports the raw <title>,
+ * so " | Example Engineering" would otherwise reach the reader from one
+ * tier and not the others. One rule, one place, same result whichever
+ * tier won.
+ */
+export function cleanTitle(raw: string | null, siteName: string | null): string | null {
+  if (!raw) return null
+  let title = raw.replace(/\s+/g, " ").trim()
 
   // Strip a trailing " | Site Name" / " - Site Name" suffix.
   if (siteName) {
@@ -171,4 +183,64 @@ export function extractExcerpt(html: string, fallbackText: string): string | nul
   if (described && described.length > 0) return described.slice(0, 500)
   const trimmed = fallbackText.trim()
   return trimmed.length > 0 ? `${trimmed.slice(0, 300)}${trimmed.length > 300 ? "…" : ""}` : null
+}
+
+/**
+ * The publisher's own idea of this page's address.
+ *
+ * Kept separate from the URL we fetched: they legitimately differ
+ * (syndication, AMP, tracking-laden share links), and knowing the
+ * publisher's canonical form is what lets a future milestone merge
+ * duplicates that our URL canonicaliser cannot see are the same.
+ */
+export function extractCanonicalUrl(html: string, baseUrl: string): string | null {
+  const head = html.slice(0, HEAD_LIMIT)
+  const raw =
+    /<link[^>]+rel\s*=\s*["\']canonical["\'][^>]*href\s*=\s*["\']([^"\']+)["\']/i.exec(head)?.[1] ??
+    /<link[^>]+href\s*=\s*["\']([^"\']+)["\'][^>]*rel\s*=\s*["\']canonical["\']/i.exec(head)?.[1] ??
+    firstOf(html, ["og:url"])
+  if (!raw) return null
+  try {
+    const resolved = new URL(raw, baseUrl)
+    if (resolved.protocol !== "http:" && resolved.protocol !== "https:") return null
+    return resolved.toString()
+  } catch {
+    return null
+  }
+}
+
+/** Cap: an article with 400 images is a gallery page, and storing the
+ * whole list buys nothing. */
+const MAX_IMAGES = 40
+
+/**
+ * Every in-article image URL, absolute and de-duplicated.
+ *
+ * NOT downloaded. M2 deliberately leaves images external (see the M2
+ * docs §10): downloading every image on every save is real bandwidth
+ * and storage cost for a benefit no current feature needs. Recording
+ * the list means a future milestone can archive selected images
+ * without re-extracting.
+ */
+export function extractImages(html: string, baseUrl: string): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  const re = /<img\b[^>]*?\bsrc\s*=\s*["\']([^"\']+)["\']/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(html)) !== null && out.length < MAX_IMAGES) {
+    const raw = m[1].trim()
+    // Inline data URIs are not addressable resources; skip them.
+    if (raw.length === 0 || /^data:/i.test(raw)) continue
+    try {
+      const resolved = new URL(raw, baseUrl)
+      if (resolved.protocol !== "http:" && resolved.protocol !== "https:") continue
+      const href = resolved.toString()
+      if (seen.has(href)) continue
+      seen.add(href)
+      out.push(href)
+    } catch {
+      /* unresolvable src — skip */
+    }
+  }
+  return out
 }

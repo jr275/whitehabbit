@@ -125,7 +125,15 @@ export async function runIngestJob(job: ClaimedJob, deps: IngestDeps = {}): Prom
     await advance(job.objectId, "fetching", "extracting")
 
     // ---- extract + sanitize ----
-    const extracted = extractContent({ url: fetched.resolvedUrl, html: fetched.html })
+    // Falling through a tier is normal (the graby sidecar is optional),
+    // so it is logged rather than raised.
+    const extracted = await extractContent(
+      { url: fetched.resolvedUrl, html: fetched.html },
+      {
+        onFallthrough: (method, reason) =>
+          logger.info("knowledge_extract_fallthrough", { ...log, method, reason }),
+      },
+    )
 
     const wordCount = countWords(extracted.contentText)
     const now = Date.now()
@@ -162,7 +170,10 @@ export async function runIngestJob(job: ClaimedJob, deps: IngestDeps = {}): Prom
         extracted.faviconUrl,
         wordCount > 0 ? wordCount : null,
         wordCount > 0 ? readingTimeSeconds(wordCount) : null,
-        extracted.extractor,
+        // The version string carries the method as its prefix
+        // ("graby@2.5.2+…", "readability@1"), so this one column stays
+        // faithful to both until M2's dedicated columns land.
+        extracted.extractorVersion,
         now,
         job.objectId,
         job.workspaceId,
@@ -183,7 +194,10 @@ export async function runIngestJob(job: ClaimedJob, deps: IngestDeps = {}): Prom
     await completeJob(job.id)
     logger.info("knowledge_ingest_completed", {
       ...log,
-      extractor: extracted.extractor,
+      method: extracted.method,
+      extractorVersion: extracted.extractorVersion,
+      siteConfigMatched: extracted.siteConfigMatched,
+      confidence: extracted.confidence,
       wordCount,
       resolvedHash: resolvedHash.slice(0, 12),
     })

@@ -3,7 +3,13 @@
 
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
-import { extractContent, ExtractionError } from "@/lib/knowledge/ingestion/extraction/index"
+import {
+  extractContent,
+  ExtractionError,
+  EXTRACTION_LADDER,
+  LOCAL_LADDER,
+  type ContentExtractor,
+} from "@/lib/knowledge/ingestion/extraction/index"
 import { htmlToText, sanitizeHtml } from "@/lib/knowledge/ingestion/extraction/sanitize"
 
 const ARTICLE = `<!doctype html>
@@ -31,17 +37,26 @@ const ARTICLE = `<!doctype html>
   <footer><p>Copyright Example</p></footer>
 </body></html>`
 
+const PAYWALL_STUB = `<html><head><title>Paywalled</title>
+  <meta property="og:description" content="Subscribe to continue reading."></head>
+  <body><div class="paywall"><p>Subscribe.</p></div></body></html>`
+
 describe("extractContent", () => {
-  it("extracts the article body and drops page chrome", () => {
-    const r = extractContent({ url: "https://example.com/why-retrieval-fails", html: ARTICLE })
-    assert.equal(r.extractor, "readability@1")
+  // Pinned to the in-process tiers: these cases are about the
+  // heuristics, not about whether a sidecar happens to be running.
+  const local = { ladder: LOCAL_LADDER }
+
+  it("extracts the article body and drops page chrome", async () => {
+    const r = await extractContent({ url: "https://example.com/why-retrieval-fails", html: ARTICLE }, local)
+    assert.equal(r.method, "readability")
+    assert.equal(r.extractorVersion, "readability@1")
     assert.match(r.contentText, /chunking failures/)
     assert.match(r.contentText, /embedding model mismatched/)
     assert.doesNotMatch(r.contentText, /Jobs|Copyright Example/, "nav and footer must not survive")
   })
 
-  it("extracts metadata with the documented precedence", () => {
-    const r = extractContent({ url: "https://example.com/a", html: ARTICLE })
+  it("extracts metadata with the documented precedence", async () => {
+    const r = await extractContent({ url: "https://example.com/a", html: ARTICLE }, local)
     assert.equal(r.title, "Why Retrieval Systems Fail") // og:title, site suffix stripped
     assert.deepEqual(r.authors, ["Sarah Chen"])
     assert.equal(r.siteName, "Example Engineering")
@@ -52,26 +67,170 @@ describe("extractContent", () => {
     assert.equal(r.publishedAt, Date.parse("2026-03-14T09:00:00Z"))
   })
 
-  it("falls back to metadata-only rather than returning an empty article", () => {
-    // A paywall stub: real metadata, no readable body.
-    const stub = `<html><head><title>Paywalled</title>
-      <meta property="og:description" content="Subscribe to continue reading."></head>
-      <body><div class="paywall"><p>Subscribe.</p></div></body></html>`
-    const r = extractContent({ url: "https://example.com/p", html: stub })
-    assert.equal(r.extractor, "metadata@1")
+  it("falls back to metadata-only rather than returning an empty article", async () => {
+    const r = await extractContent({ url: "https://example.com/p", html: PAYWALL_STUB }, local)
+    assert.equal(r.method, "metadata")
     assert.equal(r.contentHtml, null)
     assert.equal(r.title, "Paywalled")
     assert.equal(r.excerpt, "Subscribe to continue reading.")
   })
 
-  it("throws when there is genuinely nothing to read", () => {
-    assert.throws(() => extractContent({ url: "https://example.com/x", html: "<html><body></body></html>" }), ExtractionError)
-    assert.throws(() => extractContent({ url: "https://example.com/x", html: "" }), ExtractionError)
+  it("throws when there is genuinely nothing to read", async () => {
+    await assert.rejects(
+      () => extractContent({ url: "https://example.com/x", html: "<html><body></body></html>" }, local),
+      ExtractionError,
+    )
+    await assert.rejects(() => extractContent({ url: "https://example.com/x", html: "" }, local), ExtractionError)
   })
 
-  it("rejects implausible publication dates rather than storing them", () => {
+  it("rejects implausible publication dates rather than storing them", async () => {
     const bad = ARTICLE.replace("2026-03-14T09:00:00Z", "1000-01-01T00:00:00Z")
-    assert.equal(extractContent({ url: "https://example.com/a", html: bad }).publishedAt, null)
+    const r = await extractContent({ url: "https://example.com/a", html: bad }, local)
+    assert.equal(r.publishedAt, null)
+  })
+
+  it("records the SOURCE/DERIVED split on every result", async () => {
+    const r = await extractContent({ url: "https://example.com/a", html: ARTICLE }, local)
+    // DERIVED fields are always present, never guessed at by callers.
+    assert.equal(typeof r.method, "string")
+    assert.equal(typeof r.extractorVersion, "string")
+    assert.equal(r.siteConfigMatched, false) // no per-domain rules in the local tiers
+    assert.ok(r.confidence > 0 && r.confidence <= 1, `confidence out of range: ${r.confidence}`)
+    // SOURCE fields the local tiers now read.
+    assert.deepEqual(r.images, [])
+    assert.equal(r.canonicalUrl, null)
+  })
+
+  it("reads the publisher's canonical URL separately from the fetched URL", async () => {
+    const html = ARTICLE.replace(
+      "<link rel=\"icon\"",
+      '<link rel="canonical" href="https://example.com/canonical-path"><link rel="icon"',
+    )
+    const r = await extractContent({ url: "https://example.com/?utm_source=x", html }, local)
+    assert.equal(r.canonicalUrl, "https://example.com/canonical-path")
+  })
+})
+
+describe("extraction ladder", () => {
+  /** A tier that always declines, to prove the ladder keeps going. */
+  function decliningTier(id: "graby" | "readability", code: "extraction_empty" | "extractor_unavailable"): ContentExtractor {
+    return {
+      id,
+      async isAvailable() {
+        return true
+      },
+      async extract(): Promise<never> {
+        throw new ExtractionError(code, "nope")
+      },
+    }
+  }
+
+  it("ends on an in-process tier", () => {
+    assert.deepEqual(
+      EXTRACTION_LADDER.map((t) => t.id),
+      ["readability", "metadata"],
+      "ladder order is the extraction policy; changing it is a deliberate act",
+    )
+    // The last tier must be in-process, or a future sidecar outage
+    // becomes an ingestion outage.
+    assert.equal(EXTRACTION_LADDER[EXTRACTION_LADDER.length - 1]?.id, "metadata")
+  })
+
+  it("falls through a declining tier and reports why", async () => {
+    const seen: string[] = []
+    const r = await extractContent(
+      { url: "https://example.com/a", html: ARTICLE },
+      {
+        ladder: [decliningTier("graby", "extractor_unavailable"), ...LOCAL_LADDER],
+        onFallthrough: (method, reason) => seen.push(`${method}:${reason}`),
+      },
+    )
+    assert.deepEqual(seen, ["graby:extractor_unavailable"])
+    assert.equal(r.method, "readability")
+  })
+
+  it("skips a tier that reports itself unavailable without calling it", async () => {
+    let called = false
+    const dead: ContentExtractor = {
+      id: "graby",
+      async isAvailable() {
+        return false
+      },
+      async extract(): Promise<never> {
+        called = true
+        throw new ExtractionError("extraction_error", "must not run")
+      },
+    }
+    const r = await extractContent({ url: "https://example.com/a", html: ARTICLE }, { ladder: [dead, ...LOCAL_LADDER] })
+    assert.equal(called, false)
+    assert.equal(r.method, "readability")
+  })
+
+  it("contains a tier that throws something that is not an ExtractionError", async () => {
+    const rogue: ContentExtractor = {
+      id: "graby",
+      async isAvailable() {
+        return true
+      },
+      async extract(): Promise<never> {
+        throw new TypeError("undefined is not a function")
+      },
+    }
+    const r = await extractContent({ url: "https://example.com/a", html: ARTICLE }, { ladder: [rogue, ...LOCAL_LADDER] })
+    assert.equal(r.method, "readability", "one broken tier must not cost us the rest of the ladder")
+  })
+
+  it("throws the last tier's error when every tier declines", async () => {
+    await assert.rejects(
+      () =>
+        extractContent(
+          { url: "https://example.com/a", html: ARTICLE },
+          { ladder: [decliningTier("graby", "extraction_empty"), decliningTier("readability", "extraction_empty")] },
+        ),
+      ExtractionError,
+    )
+  })
+
+  it("sanitizes whatever a tier returns, however hostile", async () => {
+    const hostile: ContentExtractor = {
+      id: "graby",
+      async isAvailable() {
+        return true
+      },
+      async extract() {
+        // A compromised or simply buggy sidecar. The ladder sanitizes
+        // centrally so no tier can be trusted to have done it.
+        return {
+          title: "t",
+          contentHtml: `<p>real text that is long enough to survive</p><script>alert(1)</script><img src=x onerror=alert(1)>`,
+          contentText: "real text that is long enough to survive",
+          excerpt: null,
+          authors: [],
+          publishedAt: null,
+          language: null,
+          siteName: null,
+          canonicalUrl: null,
+          imageUrl: null,
+          faviconUrl: null,
+          images: [],
+          method: "graby" as const,
+          extractorVersion: "graby@test",
+          siteConfigMatched: true,
+          confidence: 0.9,
+        }
+      },
+    }
+    const r = await extractContent({ url: "https://example.com/a", html: ARTICLE }, { ladder: [hostile] })
+    assert.ok(r.contentHtml)
+    assert.doesNotMatch(r.contentHtml, /<script/i)
+    assert.doesNotMatch(r.contentHtml, /onerror/i)
+    assert.match(r.contentText, /real text/)
+  })
+
+  it("pins a single method when asked", async () => {
+    const r = await extractContent({ url: "https://example.com/a", html: ARTICLE }, { only: "metadata" })
+    assert.equal(r.method, "metadata")
+    assert.equal(r.contentHtml, null, "pinning tier 3 must not silently promote to tier 2")
   })
 })
 
