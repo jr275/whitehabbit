@@ -7,6 +7,7 @@
 @theme inline {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-serif: var(--font-fraunces), ui-serif, Georgia, serif;
   --color-alive: var(--alive);
   --color-alive-foreground: var(--alive-foreground);
   --color-grow: var(--grow);
@@ -257,6 +258,76 @@
     width: 1rem;
     height: 1rem;
   }
+}
+
+/* ── Knowledge (editorial surface) ─────────────────────────────
+ * Same dark blue-cast family as the rest of Whitehabbit, but a calmer,
+ * magazine-like reading environment. Scoped so Workforce is untouched. */
+.knowledge-surface {
+  color-scheme: dark;
+  /* a hair warmer/deeper than the operational void for a reading feel */
+  --kn-paper: oklch(0.17 0.013 264);
+  --kn-edge: oklch(1 0 0 / 8%);
+  --kn-ai: var(--warn); /* amber = the intelligence glow */
+}
+
+/* editorial masonry via CSS columns — no layout library needed */
+.kn-masonry {
+  column-gap: 1.25rem;
+}
+.kn-masonry > * {
+  break-inside: avoid;
+  margin-bottom: 1.25rem;
+}
+@media (min-width: 640px) {
+  .kn-masonry {
+    columns: 2;
+  }
+}
+@media (min-width: 1024px) {
+  .kn-masonry {
+    columns: 3;
+  }
+}
+@media (min-width: 1536px) {
+  .kn-masonry {
+    columns: 4;
+  }
+}
+
+/* one-shot staggered reveal for arriving cards */
+@keyframes kn-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.kn-rise {
+  animation: kn-rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* soft shimmer for processing states */
+@keyframes kn-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.kn-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    oklch(1 0 0 / 6%) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: kn-shimmer 1.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
