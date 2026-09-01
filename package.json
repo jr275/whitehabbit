@@ -14,7 +14,8 @@
     "test": "node --test --test-concurrency=1 --experimental-strip-types --conditions=react-server --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/helpers/register-alias.mjs \"tests/**/*.test.ts\"",
     "boundaries": "node scripts/check-boundaries.mjs",
     "verify": "npm run typecheck && npm run boundaries && npm test",
-    "worker": "node --experimental-strip-types --conditions=react-server --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/knowledge-worker.mjs"
+    "worker": "node --experimental-strip-types --conditions=react-server --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/knowledge-worker.mjs",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
