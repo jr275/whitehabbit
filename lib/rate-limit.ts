@@ -12,6 +12,8 @@ export const RATE_LIMITS = {
   worker_build: { limit: 30, windowMs: 60_000 },
   worker_release: { limit: 30, windowMs: 60_000 },
   worker_run: { limit: 10, windowMs: 60_000 }, // real LLM calls — tighter
+  knowledge_save: { limit: 30, windowMs: 60_000 }, // 30 saves/min per org — each triggers a real outbound fetch
+  knowledge_retry: { limit: 20, windowMs: 60_000 },
 } as const
 
 export async function enforceRateLimit(scope: keyof typeof RATE_LIMITS, subject: string): Promise<void> {

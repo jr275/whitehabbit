@@ -73,8 +73,8 @@ export function isNavActive(pathname: string, href: string): boolean {
 
 const RELATIVE = new Intl.RelativeTimeFormat("en", { numeric: "auto" })
 
-/** "Saved 2 days ago" style, computed against a fixed demo "now". */
-export function savedAgo(iso: string, now = new Date("2026-09-01")): string {
+/** "Saved 2 days ago" style, computed against the real current time. */
+export function savedAgo(iso: string, now = new Date()): string {
   const then = new Date(iso)
   const days = Math.round((then.getTime() - now.getTime()) / 86_400_000)
   if (days === 0) return "Saved today"

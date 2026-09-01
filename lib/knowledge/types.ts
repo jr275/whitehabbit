@@ -1,9 +1,13 @@
 /**
  * Knowledge domain types.
  *
- * These describe a *piece of knowledge* — not merely a saved URL. Components
- * are typed against these interfaces so the demo data source can be swapped
- * for the real Knowledge API without touching the UI.
+ * These describe a *piece of knowledge* — a saved URL as it moves through
+ * the real ingestion pipeline (lib/knowledge/service.ts) and is persisted
+ * in the `knowledge_items` table (migrations/0002_knowledge.sql).
+ *
+ * Components are typed against these interfaces and receive them via the
+ * adapter (lib/knowledge/adapter.ts), so the UI never sees a database row
+ * shape and the domain layer never imports React.
  */
 
 export type KnowledgeKind =
@@ -14,19 +18,21 @@ export type KnowledgeKind =
   | "social"
   | "document"
 
-/** Lifecycle of a saved item as the system ingests and understands it. */
+/**
+ * The real lifecycle state machine, matching the backend exactly:
+ *   saved → fetching → extracting → ready | failed
+ *
+ * There are deliberately NO fabricated "AI understanding" phases — the
+ * pipeline reflects what the server actually does (validate, fetch,
+ * extract). Additional states can appear here only when a real service
+ * produces them. `archived`/`favorite` are flags on the item, not states.
+ */
 export type KnowledgeState =
   | "saved"
-  | "processing"
+  | "fetching"
+  | "extracting"
   | "ready"
   | "failed"
-  | "archived"
-
-/** Discrete, honest processing phases — never fake percentages. */
-export type ProcessingPhase =
-  | "fetching" // Fetching content…
-  | "understanding" // Understanding…
-  | "organizing" // Organizing…
 
 export type ReadState = "unread" | "read"
 
@@ -34,42 +40,41 @@ export interface KnowledgeItem {
   id: string
   kind: KnowledgeKind
   state: KnowledgeState
-  /** Only meaningful while state === "processing". */
-  phase?: ProcessingPhase
   readState: ReadState
   favorite: boolean
+  archived: boolean
 
-  title: string
-  /** Short human excerpt pulled from the source. */
-  excerpt?: string
-  /** System-generated understanding of the piece. */
-  aiSummary?: string
-
-  source: string // e.g. "The Verge"
-  author?: string
-  /** Local cover path under /public, or undefined for text-forward variants. */
-  cover?: string
+  /** The URL the user saved, and the resolved display domain. */
+  url: string
   domain?: string
 
-  topics: string[]
-  collectionIds: string[]
+  title: string
+  /** Short human excerpt pulled from the source (meta description). */
+  excerpt?: string
+  /** Reserved for a real AI summary; undefined until that pipeline exists. */
+  aiSummary?: string
 
-  /** Minutes to read / watch / listen. */
+  source: string // publication / site name, falling back to domain
+  author?: string
+  /** Remote lead image URL (og:image), rendered with crossOrigin. */
+  cover?: string
+
+  topics: string[]
+
+  /** Minutes to read, derived from real word count. */
   durationMin?: number
+  /** Human-readable failure reason when state === "failed". */
+  error?: string
   /** ISO date string. */
   savedAt: string
 }
 
-export interface Collection {
-  id: string
-  name: string
-  /** True when the collection was assembled automatically by the system. */
-  auto: boolean
-  description?: string
-  itemCount: number
-  /** Up to a few cover paths used to build a mosaic preview. */
-  covers: string[]
-  accent: "blue" | "green" | "amber" | "neutral"
+/** The full reader payload — includes the extracted body text. */
+export interface KnowledgeDocument extends KnowledgeItem {
+  contentText?: string
+  publishedAt?: string
+  wordCount?: number
+  attempts: number
 }
 
 export interface Topic {
@@ -80,14 +85,6 @@ export interface Topic {
   momentum: number
 }
 
-/** A single editorial "Today's Intelligence" observation. */
-export interface Insight {
-  id: string
-  kind: "connection" | "trend" | "revisit"
-  body: string
-  relatedItemIds: string[]
-}
-
 export type ViewMode = "masonry" | "grid" | "list"
 
 export type PrimaryFilter =
@@ -96,3 +93,11 @@ export type PrimaryFilter =
   | "read"
   | "favorites"
   | "recent"
+
+/** Paginated list envelope returned by GET /api/knowledge. */
+export interface KnowledgeListResult {
+  items: KnowledgeItem[]
+  total: number
+  hasMore: boolean
+  nextOffset: number | null
+}
