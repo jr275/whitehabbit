@@ -1,6 +1,6 @@
 "use client"
 
-import { Chrome, Plus, Sparkles } from "lucide-react"
+import { Puzzle, Plus, Sparkles } from "lucide-react"
 
 export function EmptyLibrary({ onSave }: { onSave: () => void }) {
   return (
@@ -26,7 +26,7 @@ export function EmptyLibrary({ onSave }: { onSave: () => void }) {
           <Plus className="size-4" strokeWidth={2.5} /> Save your first link
         </button>
         <button className="flex h-11 items-center gap-2 rounded-xl border border-[var(--kn-edge)] bg-card/50 px-5 text-sm font-medium text-foreground transition-colors hover:border-foreground/20">
-          <Chrome className="size-4" /> Install browser extension
+          <Puzzle className="size-4" /> Install browser extension
         </button>
       </div>
     </div>
