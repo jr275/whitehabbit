@@ -124,10 +124,16 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_content_version
 ALTER TABLE knowledge_objects ADD COLUMN IF NOT EXISTS publisher_canonical_url TEXT;
 
 -- ---- job kinds ----------------------------------------------------
--- M1 wrote only 'ingest'. M2 adds exactly the kinds it needs and no
--- speculative ones:
+-- M1 wrote only 'ingest'. M2 adds exactly ONE more and no speculative
+-- ones:
 --   reextract  re-run extraction from an ARCHIVED artifact; no fetch
---   cleanup    collect blobs whose rows retention has released
+--
+-- Blob garbage collection is deliberately NOT a job kind. It is a
+-- system-wide sweep with no object and no tenant behind it, and this
+-- table requires an object_id — modelling it here would mean
+-- inventing a fake one. It rides on the same tick that reaps instead
+-- (lib/knowledge/ingestion/runner.ts).
+--
 -- The column already exists and is unconstrained, so this adds the
 -- check that was missing rather than widening one.
 DO $$
@@ -137,6 +143,6 @@ BEGIN
   ) THEN
     ALTER TABLE knowledge_jobs
       ADD CONSTRAINT knowledge_jobs_kind_check
-      CHECK (kind IN ('ingest', 'reextract', 'cleanup'));
+      CHECK (kind IN ('ingest', 'reextract'));
   END IF;
 END $$;

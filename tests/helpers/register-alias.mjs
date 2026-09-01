@@ -1,8 +1,9 @@
 /* ================================================================== *
  * TEST BOOTSTRAP — loaded via `node --import` before any test module.
  *
- * 1. Registers the module resolution hooks (alias-hooks.mjs) so tests
- *    can import application code exactly as Next.js does.
+ * 1. Registers the module resolution hooks (scripts/
+ *    module-alias-hooks.mjs, shared with the worker) so tests can
+ *    import application code exactly as Next.js does.
  * 2. Points DATABASE_URL at the disposable test database BEFORE
  *    lib/db/client.ts reads it at module load. It always overrides,
  *    so a developer with a real DATABASE_URL in their shell cannot
@@ -10,7 +11,7 @@
  * ================================================================== */
 import { register } from "node:module"
 
-register("./alias-hooks.mjs", import.meta.url)
+register("../../scripts/module-alias-hooks.mjs", import.meta.url)
 
 const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? "postgres://postgres:postgres@127.0.0.1:5432/whitehabbit_test"

@@ -1,15 +1,20 @@
 /* ================================================================== *
- * MODULE RESOLUTION HOOKS FOR node:test
+ * MODULE RESOLUTION HOOKS
  *
- * Lets tests import application code exactly as Next.js imports it,
- * instead of duplicating logic into the test. Two shims, both of
- * which a bundler normally provides and raw Node ESM does not:
+ * Lets a plain Node process import application code exactly as
+ * Next.js imports it. Two shims, both of which a bundler normally
+ * provides and raw Node ESM does not:
  *
  *   1. the "@/..." path alias from tsconfig.json
  *   2. extensionless specifiers ("./client" -> "./client.ts")
  *
  * Zero dependencies — Node's built-in module resolve hooks only.
- * Test-only: nothing in the application imports this.
+ *
+ * Used by the test suite AND by the knowledge worker
+ * (scripts/knowledge-worker.mjs), which runs the same application code
+ * outside Next entirely. Shared rather than duplicated: two copies of
+ * module resolution would drift, and the drift would show up as a
+ * worker that imports a different module than the tests do.
  * ================================================================== */
 
 import { statSync } from "node:fs"

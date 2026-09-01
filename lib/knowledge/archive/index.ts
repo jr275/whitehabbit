@@ -38,7 +38,7 @@ import { logger } from "@/lib/platform/logger"
 import type { AccessScope } from "../access/types.ts"
 import { artifactKey, BlobStoreError, type BlobStore } from "../storage/types.ts"
 import { blobStore } from "../storage/index.ts"
-import { getArtifact, latestArtifact, recordArtifact } from "./repo.ts"
+import { claimCollectableArtifacts, forgetArtifact, getArtifact, latestArtifact, recordArtifact } from "./repo.ts"
 import { ArchiveError, type Artifact, type ArtifactKind, type LoadedArtifact } from "./types.ts"
 
 export * from "./types.ts"
@@ -277,6 +277,58 @@ export async function loadLatestArtifact(
     )
   }
   return loadRow(deps.store ?? blobStore(), artifact)
+}
+
+/* ---- garbage collection ------------------------------------------- *
+ *
+ * Phase two of retention: rows that retention MARKED get their blobs
+ * removed, and only then their rows. Deliberately not a queue job —
+ * it is a system-wide sweep with no object and no tenant behind it,
+ * and modelling it as a per-object job would need a fake object id.
+ * ------------------------------------------------------------------ */
+
+export interface CollectionResult {
+  collected: number
+  failed: number
+}
+
+/**
+ * Delete the blobs of released artifacts, then forget their rows.
+ *
+ * ORDER MATTERS, mirroring archiveDocument: blob first, row second.
+ * A crash between them leaves a marked row and a missing blob — which
+ * the next sweep finishes, because deleting an absent key succeeds.
+ * The reverse order would leave an unreferenced blob forever.
+ *
+ * A blob whose delete fails keeps its row, so it is retried rather
+ * than leaked.
+ */
+export async function collectReleasedArtifacts(
+  limit = 100,
+  deps: ArchiveDeps = {},
+): Promise<CollectionResult> {
+  const store = deps.store ?? blobStore()
+  const rows = await claimCollectableArtifacts(limit)
+  let collected = 0
+  let failed = 0
+
+  for (const artifact of rows) {
+    try {
+      await store.delete(artifact.storageKey)
+      await forgetArtifact(artifact.id)
+      collected += 1
+    } catch (err) {
+      failed += 1
+      logger.warn("knowledge_artifact_collect_failed", {
+        artifactId: artifact.id,
+        workspaceId: artifact.workspaceId,
+        message: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  if (collected > 0 || failed > 0) logger.info("knowledge_artifacts_collected", { collected, failed })
+  return { collected, failed }
 }
 
 export const __archiveLimits = { MAX_DOCUMENT_BYTES, MAX_INFLATED_BYTES, MIN_BYTES_TO_COMPRESS }

@@ -1,7 +1,7 @@
 import "server-only"
 
 /* ================================================================== *
- * RUNNER — drains the ingestion queue.
+ * RUNNER — drains the knowledge queue.
  *
  * Milestone 1 has no worker process and no queue dependency, so the
  * runner is driven from two places:
@@ -22,8 +22,11 @@ import "server-only"
  * ================================================================== */
 
 import { logger } from "@/lib/platform/logger"
-import { claimNextJob, newRunnerId, reapStaleJobs } from "./jobs.ts"
+import { workerScope } from "../access/worker.ts"
+import { collectReleasedArtifacts } from "../archive/index.ts"
+import { claimNextJob, completeJob, failJob, newRunnerId, reapStaleJobs, type ClaimedJob } from "./jobs.ts"
 import { runIngestJob } from "./pipeline.ts"
+import { reextractObject } from "./reextract.ts"
 
 /** Bounded so a single invocation cannot run past a function timeout. */
 const DEFAULT_MAX_JOBS = 5
@@ -36,6 +39,40 @@ export interface DrainResult {
   retrying: number
   skipped: number
   reaped: { requeued: number; failed: number }
+  collected: number
+}
+
+/**
+ * Run one claimed job, whatever kind it is.
+ *
+ * The dispatch lives here rather than inside either stage, so adding
+ * a kind is a case in one switch and neither pipeline learns about
+ * the other. Both stages return typed outcomes instead of throwing,
+ * for the same reason: an unhandled throw leaves a job 'active' until
+ * the reaper notices.
+ */
+async function runJob(job: ClaimedJob): Promise<"completed" | "failed" | "retrying" | "skipped"> {
+  if (job.kind === "ingest") {
+    const outcome = await runIngestJob(job)
+    return outcome.status === "completed"
+      ? "completed"
+      : outcome.status === "failed"
+        ? "failed"
+        : outcome.status === "retrying"
+          ? "retrying"
+          : "skipped"
+  }
+
+  // reextract: no fetch, so no backoff-worthy transient failures. It
+  // either produced something better, declined to, or could not read
+  // the archive — and in every case the stored article is intact.
+  const outcome = await reextractObject(workerScope(job.workspaceId), job.objectId)
+  if (outcome.status === "failed") {
+    await failJob(job, outcome.failureCode ?? "reextract_error", "Re-extraction could not complete.")
+    return "failed"
+  }
+  await completeJob(job.id)
+  return outcome.status === "replaced" ? "completed" : "skipped"
 }
 
 /**
@@ -44,7 +81,7 @@ export interface DrainResult {
  * two overlapping runners split the work rather than duplicating it.
  */
 export async function drainQueue(
-  options: { maxJobs?: number; budgetMs?: number; reap?: boolean } = {},
+  options: { maxJobs?: number; budgetMs?: number; reap?: boolean; collect?: boolean } = {},
 ): Promise<DrainResult> {
   const maxJobs = options.maxJobs ?? DEFAULT_MAX_JOBS
   const budgetMs = options.budgetMs ?? DEFAULT_BUDGET_MS
@@ -58,6 +95,7 @@ export async function drainQueue(
     retrying: 0,
     skipped: 0,
     reaped: { requeued: 0, failed: 0 },
+    collected: 0,
   }
 
   // Reap first: a job stranded by a dead runner should become
@@ -74,21 +112,29 @@ export async function drainQueue(
     result.claimed++
 
     try {
-      const outcome = await runIngestJob(job)
-      if (outcome.status === "completed") result.completed++
-      else if (outcome.status === "failed") result.failed++
-      else if (outcome.status === "retrying") result.retrying++
+      const status = await runJob(job)
+      if (status === "completed") result.completed++
+      else if (status === "failed") result.failed++
+      else if (status === "retrying") result.retrying++
       else result.skipped++
     } catch (err) {
-      // runIngestJob is written not to throw; this is belt and braces
+      // Both stages are written not to throw; this is belt and braces
       // so one bad job can never abort the whole drain.
       logger.error("knowledge_runner_unhandled", {
         jobId: job.id,
         objectId: job.objectId,
+        kind: job.kind,
         message: err instanceof Error ? err.message : String(err),
       })
       result.failed++
     }
+  }
+
+  // Garbage collection rides on the same pass that reaps, and only
+  // ever touches artifacts retention already released. Last, so it
+  // can never delay real work.
+  if (options.collect !== false && Date.now() < deadline) {
+    result.collected = (await collectReleasedArtifacts()).collected
   }
 
   return result
@@ -100,7 +146,9 @@ export async function drainQueue(
  * already durable, so the reaper or the next tick will pick it up.
  */
 export function drainInBackground(): Promise<void> {
-  return drainQueue({ maxJobs: 3, budgetMs: 30_000 })
+  // No collection sweep on the save path: the user is waiting on the
+  // response, and garbage is the tick's problem, not theirs.
+  return drainQueue({ maxJobs: 3, budgetMs: 30_000, collect: false })
     .then((r) => {
       logger.info("knowledge_drain", { ...r, reaped: undefined, ...r.reaped })
     })

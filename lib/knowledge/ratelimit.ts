@@ -19,6 +19,10 @@ export const KNOWLEDGE_RATE_LIMITS = {
   knowledge_read: { limit: 300, windowMs: 60_000 },
   /** Retry starts work again — tighter than save. */
   knowledge_retry: { limit: 10, windowMs: 60_000 },
+  /** Re-extraction performs no fetch, so it costs a publisher nothing
+   * — but it does read a multi-megabyte blob and re-run the ladder, so
+   * it is capped on OUR resources rather than on politeness. */
+  knowledge_reextract: { limit: 20, windowMs: 60_000 },
 } as const
 
 export async function enforceKnowledgeRateLimit(

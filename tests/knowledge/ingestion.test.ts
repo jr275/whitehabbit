@@ -11,7 +11,7 @@
 import { after, before, describe, it } from "node:test"
 import assert from "node:assert/strict"
 import { createObjectWithJob, getObject, getObjectWithContent, listObjects, retryObject } from "@/lib/knowledge/content/repo"
-import { reapStaleJobs, STALE_LOCK_MS } from "@/lib/knowledge/ingestion/jobs"
+import { reapStaleJobs, STALE_LOCK_MS, type JobKind } from "@/lib/knowledge/ingestion/jobs"
 import { runIngestJob, type Fetcher } from "@/lib/knowledge/ingestion/pipeline"
 import { SafeFetchError, type FetchFailureCode } from "@/lib/knowledge/ingestion/safe-fetch"
 import { canonicalizeUrl } from "@/lib/knowledge/ingestion/url"
@@ -368,7 +368,7 @@ async function claimJobFor(objectId: string) {
        FOR UPDATE SKIP LOCKED
        LIMIT 1
      )
-     RETURNING id, org_id, object_id, attempt, max_attempts`,
+     RETURNING id, org_id, object_id, kind, attempt, max_attempts`,
     [Date.now(), objectId],
   )
   if (rows.length === 0) return null
@@ -377,6 +377,7 @@ async function claimJobFor(objectId: string) {
     id: r.id as string,
     workspaceId: r.org_id as string,
     objectId: r.object_id as string,
+    kind: r.kind as JobKind,
     attempt: r.attempt as number,
     maxAttempts: r.max_attempts as number,
   }

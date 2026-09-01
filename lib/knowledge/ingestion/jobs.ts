@@ -29,10 +29,22 @@ import { backoffMs, MAX_ATTEMPTS, shouldRetry } from "./state.ts"
  * Comfortably above the 30s total fetch timeout. */
 export const STALE_LOCK_MS = 5 * 60 * 1000
 
+/**
+ * What a job asks for. M2 adds exactly the kind it needs and no
+ * speculative ones.
+ *
+ *   ingest     fetch, archive, extract, persist — the M1 pipeline
+ *   reextract  re-run extraction over an ARCHIVED artifact. No fetch,
+ *              so it is not rate-limited by a publisher and cannot
+ *              fail because a page has since moved or gone paywalled.
+ */
+export type JobKind = "ingest" | "reextract"
+
 export interface ClaimedJob {
   id: string
   workspaceId: string
   objectId: string
+  kind: JobKind
   attempt: number
   maxAttempts: number
 }
@@ -41,6 +53,7 @@ interface JobRow {
   id: string
   org_id: string
   object_id: string
+  kind: string
   attempt: number
   max_attempts: number
 }
@@ -70,7 +83,7 @@ export async function claimNextJob(runnerId: string, now = Date.now()): Promise<
        FOR UPDATE SKIP LOCKED
        LIMIT 1
      )
-     RETURNING id, org_id, object_id, attempt, max_attempts`,
+     RETURNING id, org_id, object_id, kind, attempt, max_attempts`,
     [now, runnerId],
   )
   if (!row) return null
@@ -78,9 +91,61 @@ export async function claimNextJob(runnerId: string, now = Date.now()): Promise<
     id: row.id,
     workspaceId: row.org_id,
     objectId: row.object_id,
+    kind: row.kind as JobKind,
     attempt: row.attempt,
     maxAttempts: row.max_attempts,
   }
+}
+
+/**
+ * Enqueue (or re-arm) one job for an object.
+ *
+ * ONE LIVE JOB PER (object, kind), enforced by the idempotency key: a
+ * user hammering "re-extract" produces one unit of work, not twenty.
+ * An existing row is RE-ARMED rather than duplicated — status back to
+ * pending, attempt counter back to zero — because a re-extraction
+ * asked for today deserves its own full allowance of attempts, not
+ * whatever a run last month left over.
+ *
+ * Tenant-scoped like everything else: the insert's guard proves the
+ * object belongs to this workspace, with no window between check and
+ * write.
+ */
+export async function enqueueJob(
+  scope: { workspaceId: string },
+  objectId: string,
+  kind: JobKind,
+  now = Date.now(),
+): Promise<{ jobId: string; created: boolean } | null> {
+  const key = `${kind}:${objectId}`
+  const jobId = `kjob_${randomUUID()}`
+
+  const inserted = await queryOne<{ id: string }>(
+    `INSERT INTO knowledge_jobs
+       (id, org_id, object_id, kind, status, attempt, run_after, idempotency_key, created_at, updated_at)
+     SELECT $1, $2, $3, $4, 'pending', 0, $5, $6, $5, $5
+     WHERE EXISTS (
+       SELECT 1 FROM knowledge_objects WHERE id = $3 AND org_id = $2 AND deleted_at IS NULL
+     )
+     ON CONFLICT (idempotency_key) DO NOTHING
+     RETURNING id`,
+    [jobId, scope.workspaceId, objectId, kind, now, key],
+  )
+  if (inserted) return { jobId: inserted.id, created: true }
+
+  const rearmed = await queryOne<{ id: string }>(
+    `UPDATE knowledge_jobs
+     SET status = 'pending', attempt = 0, run_after = $1, locked_at = NULL, locked_by = NULL,
+         last_error_code = NULL, last_error = NULL, updated_at = $1
+     WHERE idempotency_key = $2 AND org_id = $3 AND status <> 'active'
+     RETURNING id`,
+    [now, key, scope.workspaceId],
+  )
+  if (rearmed) return { jobId: rearmed.id, created: false }
+
+  // Either the object is not this workspace's, or a runner is holding
+  // the job right now. Both mean "no new work"; neither is an error.
+  return null
 }
 
 export async function completeJob(jobId: string, now = Date.now()): Promise<void> {
