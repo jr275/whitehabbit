@@ -21,7 +21,7 @@
  * ================================================================== */
 
 import type { KnowledgeDocument, KnowledgeItem, KnowledgeKind, KnowledgeListResult } from "./types"
-import { canonicalizeUrlSafe } from "./url"
+import { canonicalizeUrlSafe, InvalidKnowledgeUrlError, isCanonicalUrlTooLong, parseSaveableUrl } from "./url"
 
 const STORAGE_KEY = "knowledge.guest.items.v1"
 
@@ -90,18 +90,18 @@ function toItem(rec: GuestRecord): KnowledgeItem {
   return item
 }
 
+/** Same rule as the server save path, from the same shared function —
+ *  see lib/knowledge/url.ts's parseSaveableUrl(). A guest paste can
+ *  never accept a scheme or a credentialed URL the authenticated path
+ *  would refuse: both call this one function, not two copies of the
+ *  same checks that could quietly drift apart. */
 function normalizeUrl(raw: string): URL {
-  const trimmed = raw.trim()
-  if (!trimmed) throw new Error("Paste a URL to save.")
-  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
   let url: URL
   try {
-    url = new URL(withScheme)
-  } catch {
-    throw new Error("That doesn't look like a valid URL.")
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Only http and https links can be saved.")
+    url = parseSaveableUrl(raw)
+  } catch (err) {
+    if (err instanceof InvalidKnowledgeUrlError) throw new Error(err.message)
+    throw err
   }
   if (!url.hostname.includes(".")) throw new Error("That doesn't look like a valid URL.")
   return url
@@ -189,6 +189,11 @@ export function guestSaveUrl(rawUrl: string): { item: KnowledgeItem; duplicate: 
   // (non-archived) items, and return the existing one instead of a
   // duplicate.
   const key = canonicalizeUrlSafe(url.href)
+  // Same ceiling as the server, from the same shared function. There is
+  // no btree here — localStorage would take any length — but a guest
+  // library is meant to be exported into a real account later, and a URL
+  // this store accepts and saveUrl refuses is a row that cannot migrate.
+  if (key && isCanonicalUrlTooLong(key)) throw new Error("That URL is too long to save.")
   if (key) {
     const existing = readAll().find((r) => !r.archived && canonicalizeUrlSafe(r.url) === key)
     if (existing) return { item: toItem(existing), duplicate: true }

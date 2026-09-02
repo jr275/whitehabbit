@@ -1,11 +1,12 @@
 "use client"
 
-import { AlertCircle, LayoutGrid, Loader2, Rows3, Search, SearchX, X } from "lucide-react"
+import { AlertCircle, LayoutGrid, Loader2, Mic, MicOff, Rows3, Search, SearchX, X } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import * as api from "@/lib/knowledge/client"
 import { openSaveDialog } from "@/lib/knowledge/config"
 import { useKnowledgeLibrary } from "@/lib/knowledge/use-knowledge"
+import { useVoiceSearch, type UseVoiceSearchResult } from "@/lib/knowledge/use-voice-search"
 import type { KnowledgeItem, KnowledgeKind, PrimaryFilter } from "@/lib/knowledge/types"
 import { EmptyLibrary } from "./empty-state"
 import { KnowledgeCard } from "./knowledge-card"
@@ -73,6 +74,16 @@ export function LibraryView({
   const [kind, setKind] = useState<KnowledgeKind | null>(null)
   const [query, setQuery] = useState("")
   const [hydrated, setHydrated] = useState(false)
+
+  // ── Voice search — a browser capability, not a new search engine ──
+  // A final transcript REPLACES whatever is in the box (the modern
+  // convention — a fresh dictation, not an append) and the existing
+  // debounced search effect below picks it up exactly as if it had
+  // been typed. See lib/knowledge/voice-search.ts for the real state
+  // machine; this component only ever reads its state and calls
+  // start()/stop().
+  const voice = useVoiceSearch((transcript) => setQuery(transcript))
+  const voiceBusy = voice.state === "listening" || voice.state === "processing"
 
   // Restore prior context once, on the client, after the first paint.
   // View mode is restored always; filter/search only on the main Library,
@@ -198,21 +209,26 @@ export function LibraryView({
           <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="search"
-            value={query}
+            value={voiceBusy ? voice.interimTranscript || (voice.state === "listening" ? "Listening…" : "Processing…") : query}
             onChange={(e) => setQuery(e.target.value)}
+            readOnly={voiceBusy}
             placeholder="Search your library"
             aria-label="Search your library"
-            className="h-10 w-full rounded-full border border-[var(--kn-edge)] bg-card pl-10 pr-9 text-sm text-foreground shadow-sm outline-none transition-colors placeholder:text-muted-foreground hover:border-foreground/20 focus:border-primary/50 focus:ring-2 focus:ring-primary/15 [&::-webkit-search-cancel-button]:appearance-none"
+            className={cn(
+              "h-10 w-full rounded-full border border-[var(--kn-edge)] bg-card pl-10 pr-16 text-sm text-foreground shadow-sm outline-none transition-colors placeholder:text-muted-foreground hover:border-foreground/20 focus:border-primary/50 focus:ring-2 focus:ring-primary/15 [&::-webkit-search-cancel-button]:appearance-none",
+              voiceBusy && "text-muted-foreground",
+            )}
           />
-          {query && (
+          {query && !voiceBusy && (
             <button
               onClick={() => setQuery("")}
               aria-label="Clear search"
-              className="absolute right-2.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              className="absolute right-9 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             >
               <X className="size-3.5" />
             </button>
           )}
+          <VoiceSearchButton voice={voice} />
         </div>
 
         {/* type filter + layout */}
@@ -249,6 +265,12 @@ export function LibraryView({
           </div>
         </div>
       </div>
+
+      {voice.message && (
+        <p role="status" className="mt-2.5 text-[12.5px] leading-relaxed text-muted-foreground">
+          {voice.message}
+        </p>
+      )}
 
       {/* ── Content ──────────────────────────────────────────── */}
       <div className="mt-7">
@@ -320,6 +342,55 @@ export function LibraryView({
         )}
       </div>
     </div>
+  )
+}
+
+/** The mic control itself — one button, its appearance IS the state.
+ *  Click behavior: idle/success/permission-denied/error/unsupported →
+ *  start() (try again is just trying again); requesting/listening →
+ *  stop() (the cancel affordance); processing is momentary and the
+ *  button is disabled for it, so there's nothing to cancel mid-flight. */
+function VoiceSearchButton({ voice }: { voice: UseVoiceSearchResult }) {
+  const { state } = voice
+  const canCancel = state === "requesting" || state === "listening"
+
+  const label =
+    state === "unsupported"
+      ? "Voice search isn't supported in this browser"
+      : state === "requesting"
+        ? "Requesting microphone permission…"
+        : state === "listening"
+          ? "Listening — tap to stop"
+          : state === "processing"
+            ? "Processing voice input"
+            : state === "permission-denied"
+              ? "Microphone permission denied — tap to try again"
+              : state === "error"
+                ? "Voice search error — tap to try again"
+                : "Search by voice"
+
+  const Icon = state === "processing" ? Loader2 : state === "permission-denied" || state === "error" || state === "unsupported" ? MicOff : Mic
+
+  return (
+    <button
+      type="button"
+      onClick={() => (canCancel ? voice.stop() : voice.start())}
+      disabled={state === "processing"}
+      aria-label={label}
+      title={label}
+      className={cn(
+        "absolute right-2.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-full transition-colors",
+        state === "listening"
+          ? "bg-[var(--kn-ai)]/15 text-[var(--kn-ai)]"
+          : state === "permission-denied" || state === "error"
+            ? "text-destructive"
+            : state === "unsupported"
+              ? "text-muted-foreground/50"
+              : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+      )}
+    >
+      <Icon className={cn("size-3.5", state === "processing" && "animate-spin", state === "listening" && "animate-pulse")} />
+    </button>
   )
 }
 

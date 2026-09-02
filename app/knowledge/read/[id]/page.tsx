@@ -13,8 +13,10 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { id } = await params
   try {
-    const { organizationId } = await requireSession()
-    const row = await getItem(id, organizationId)
+    // S5: owner-scoped — another user's item never leaks its real
+    // title into the page <title>, browser history or tab either.
+    const { organizationId, userId } = await requireSession()
+    const row = await getItem(id, organizationId, userId)
     return { title: row?.title ? `${row.title} · Knowledge` : "Reader · Knowledge" }
   } catch {
     return { title: "Reader · Knowledge" }
@@ -32,8 +34,9 @@ export default async function ReadPage({
   if (id.startsWith("kn_guest_")) return <GuestReader id={id} />
 
   let organizationId: string
+  let userId: string
   try {
-    ;({ organizationId } = await requireSession())
+    ;({ organizationId, userId } = await requireSession())
   } catch (err) {
     // No session → guest mode. Load through the browser-local store
     // instead of hard-failing.
@@ -41,14 +44,17 @@ export default async function ReadPage({
     throw err
   }
 
-  const row = await getItem(id, organizationId)
+  // S5: another org member's item is a 404 here too — this page reads
+  // the repo directly (not through the API route), so it needs the
+  // exact same owner-scoped predicate, not a lesser check.
+  const row = await getItem(id, organizationId, userId)
   if (!row) notFound()
 
-  const tags = await getTags(id, organizationId)
+  const tags = await getTags(id, organizationId, userId)
   const doc = rowToDocument(row, tags)
 
   // Reading it counts as reading it.
-  if (!row.read_at) await markRead(id, organizationId).catch(() => {})
+  if (!row.read_at) await markRead(id, organizationId, userId).catch(() => {})
 
   return <ReaderView doc={doc} />
 }
