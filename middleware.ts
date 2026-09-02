@@ -22,7 +22,7 @@ import { authConfig } from "@/lib/auth.config"
 
 const { auth } = NextAuth(authConfig)
 
-const PROTECTED_PREFIXES = ["/studio", "/outputs", "/launch", "/onboarding"]
+const PROTECTED_PREFIXES = ["/knowledge", "/studio", "/outputs", "/launch", "/onboarding"]
 
 export default auth((req) => {
   const isAuthed = !!req.auth
@@ -37,5 +37,5 @@ export default auth((req) => {
 })
 
 export const config = {
-  matcher: ["/studio/:path*", "/outputs/:path*", "/launch", "/onboarding"],
+  matcher: ["/knowledge/:path*", "/studio/:path*", "/outputs/:path*", "/launch", "/onboarding"],
 }

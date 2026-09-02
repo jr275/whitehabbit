@@ -17,5 +17,5 @@ export default async function LaunchPage() {
   if (!session || !userId) redirect("/login?callbackUrl=/launch")
 
   const { completed } = await getOnboardingState(userId)
-  redirect(completed ? "/" : "/onboarding")
+  redirect(completed ? "/knowledge" : "/onboarding")
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { Boxes, Check, ChevronDown, LibraryBig, LogOut } from "lucide-react"
+import { LibraryBig, LogOut, Settings } from "lucide-react"
 import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -16,56 +16,24 @@ const TOOLS = KNOWLEDGE_NAV.slice(5)
 export function KnowledgeSidebar() {
   const pathname = usePathname()
   const { data: session } = useSession()
-  const [switcherOpen, setSwitcherOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const email = session?.user?.email ?? ""
-  const orgName = (session as { organizationName?: string } | null)?.organizationName ?? "Your organization"
-  const initial = (email || "Y").charAt(0).toUpperCase()
+  const name = session?.user?.name || email.split("@")[0] || "Your account"
+  const initial = (name || "Y").charAt(0).toUpperCase()
+  const settingsActive = isNavActive(pathname, "/knowledge/settings")
 
   return (
     <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col bg-sidebar lg:flex">
-      {/* brand + product switcher */}
-      <div className="relative px-5 pt-6">
-        <button
-          onClick={() => setSwitcherOpen((v) => !v)}
-          aria-expanded={switcherOpen}
-          className="group flex w-full items-center gap-2.5 rounded-lg py-1 text-left"
-        >
+      {/* brand — Knowledge stands on its own, no product switcher */}
+      <div className="px-5 pt-6">
+        <Link href="/knowledge" className="flex items-center gap-2.5 py-1" aria-label="Knowledge home">
           <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <LibraryBig className="size-4" />
           </span>
-          <span className="min-w-0 flex-1 font-serif text-xl font-medium leading-none tracking-tight text-foreground">
+          <span className="font-serif text-xl font-medium leading-none tracking-tight text-foreground">
             Knowledge
           </span>
-          <ChevronDown
-            className={cn(
-              "size-4 text-muted-foreground transition-transform group-hover:text-foreground",
-              switcherOpen && "rotate-180",
-            )}
-          />
-        </button>
-
-        {switcherOpen && (
-          <div className="absolute inset-x-5 top-full z-30 mt-2 overflow-hidden rounded-xl border border-border bg-popover p-1.5 shadow-xl">
-            <p className="px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground">Switch product</p>
-            <Link href="/knowledge" className="flex items-center gap-3 rounded-lg bg-secondary px-2.5 py-2">
-              <span className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                <LibraryBig className="size-4" />
-              </span>
-              <span className="text-sm font-medium text-foreground">Knowledge</span>
-              <Check className="ml-auto size-4 text-primary" strokeWidth={2.5} />
-            </Link>
-            <Link
-              href="/"
-              className="flex items-center gap-3 rounded-lg px-2.5 py-2 text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
-            >
-              <span className="flex size-8 items-center justify-center rounded-md bg-foreground/8 text-foreground/70">
-                <Boxes className="size-4" />
-              </span>
-              <span className="text-sm font-medium">Workforce</span>
-            </Link>
-          </div>
-        )}
+        </Link>
       </div>
 
       {/* primary nav */}
@@ -83,16 +51,40 @@ export function KnowledgeSidebar() {
             <NavLink key={item.href} item={item} active={isNavActive(pathname, item.href)} />
           ))}
         </div>
+
+        <div className="my-4 h-px bg-[var(--kn-edge)]" />
+
+        <Link
+          href="/knowledge/settings"
+          aria-current={settingsActive ? "page" : undefined}
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-[15px] transition-colors",
+            settingsActive
+              ? "bg-primary/10 font-medium text-primary"
+              : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+          )}
+        >
+          <Settings className="size-[18px]" strokeWidth={settingsActive ? 2.25 : 2} />
+          Settings
+        </Link>
       </nav>
 
-      {/* account — deliberately subtle */}
+      {/* account — deliberately subtle; no organization/workspace exposed */}
       <div className="relative px-3 pb-4">
         {accountOpen && (
           <div className="absolute inset-x-3 bottom-full z-30 mb-2 overflow-hidden rounded-xl border border-border bg-popover p-1.5 shadow-xl">
             <div className="px-2.5 py-2">
-              <p className="truncate text-sm font-medium text-popover-foreground">{email || "Authenticated"}</p>
-              <p className="mt-0.5 truncate text-[12px] text-muted-foreground">{orgName}</p>
+              <p className="truncate text-sm font-medium text-popover-foreground">{name}</p>
+              {email && <p className="mt-0.5 truncate text-[12px] text-muted-foreground">{email}</p>}
             </div>
+            <Link
+              href="/knowledge/settings"
+              onClick={() => setAccountOpen(false)}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              <Settings className="size-4" />
+              Settings
+            </Link>
             <button
               onClick={() => signOut({ callbackUrl: "/login" })}
               className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
@@ -111,8 +103,8 @@ export function KnowledgeSidebar() {
             {initial}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-foreground">{email || "Your account"}</span>
-            <span className="block truncate text-[12px] text-muted-foreground">{orgName}</span>
+            <span className="block truncate text-sm font-medium text-foreground">{name}</span>
+            <span className="block truncate text-[12px] text-muted-foreground">{email || "Signed in"}</span>
           </span>
         </button>
       </div>
