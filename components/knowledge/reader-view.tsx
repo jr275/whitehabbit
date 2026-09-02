@@ -308,7 +308,7 @@ function ArticleBody({ body, cover, title }: { body: string[]; cover?: string; t
         <img
           src={cover || "/placeholder.svg"}
           alt={`Lead image for ${title}`}
-          crossOrigin="anonymous"
+          referrerPolicy="no-referrer"
           onError={() => setCoverFailed(true)}
           className="mt-8 aspect-[16/9] w-full rounded-2xl object-cover"
         />
@@ -353,7 +353,7 @@ function ExcerptLede({
         <img
           src={cover || "/placeholder.svg"}
           alt={`Lead image for ${title}`}
-          crossOrigin="anonymous"
+          referrerPolicy="no-referrer"
           onError={() => setCoverFailed(true)}
           className="mt-8 aspect-[16/9] w-full rounded-2xl object-cover"
         />
@@ -407,7 +407,7 @@ function VideoBlock({ doc }: { doc: KnowledgeDocument }) {
             <img
               src={doc.cover || "/placeholder.svg"}
               alt=""
-              crossOrigin="anonymous"
+              referrerPolicy="no-referrer"
               onError={() => setCoverFailed(true)}
               className="absolute inset-0 h-full w-full object-cover"
             />
