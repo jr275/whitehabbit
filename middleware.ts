@@ -22,17 +22,20 @@ import { authConfig } from "@/lib/auth.config"
 
 const { auth } = NextAuth(authConfig)
 
+const PROTECTED_PREFIXES = ["/studio", "/outputs", "/launch", "/onboarding"]
+
 export default auth((req) => {
   const isAuthed = !!req.auth
-  const protectedPath = req.nextUrl.pathname.startsWith("/studio") || req.nextUrl.pathname.startsWith("/outputs")
+  const { pathname } = req.nextUrl
+  const protectedPath = PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
   if (protectedPath && !isAuthed) {
     const loginUrl = new URL("/login", req.nextUrl.origin)
-    loginUrl.searchParams.set("callbackUrl", req.nextUrl.pathname)
+    loginUrl.searchParams.set("callbackUrl", pathname)
     return NextResponse.redirect(loginUrl)
   }
   return NextResponse.next()
 })
 
 export const config = {
-  matcher: ["/studio/:path*", "/outputs/:path*"],
+  matcher: ["/studio/:path*", "/outputs/:path*", "/launch", "/onboarding"],
 }
