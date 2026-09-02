@@ -21,7 +21,7 @@
  * ================================================================== */
 
 import type { KnowledgeDocument, KnowledgeItem, KnowledgeKind, KnowledgeListResult } from "./types"
-import { canonicalizeUrlSafe, isCanonicalUrlTooLong } from "./url"
+import { canonicalizeUrlSafe, InvalidKnowledgeUrlError, isCanonicalUrlTooLong, parseSaveableUrl } from "./url"
 
 const STORAGE_KEY = "knowledge.guest.items.v1"
 
@@ -90,18 +90,18 @@ function toItem(rec: GuestRecord): KnowledgeItem {
   return item
 }
 
+/** Same rule as the server save path, from the same shared function —
+ *  see lib/knowledge/url.ts's parseSaveableUrl(). A guest paste can
+ *  never accept a scheme or a credentialed URL the authenticated path
+ *  would refuse: both call this one function, not two copies of the
+ *  same checks that could quietly drift apart. */
 function normalizeUrl(raw: string): URL {
-  const trimmed = raw.trim()
-  if (!trimmed) throw new Error("Paste a URL to save.")
-  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
   let url: URL
   try {
-    url = new URL(withScheme)
-  } catch {
-    throw new Error("That doesn't look like a valid URL.")
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Only http and https links can be saved.")
+    url = parseSaveableUrl(raw)
+  } catch (err) {
+    if (err instanceof InvalidKnowledgeUrlError) throw new Error(err.message)
+    throw err
   }
   if (!url.hostname.includes(".")) throw new Error("That doesn't look like a valid URL.")
   return url

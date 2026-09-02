@@ -273,45 +273,66 @@ describe("canonicalizeUrl — invalid and hostile input", () => {
     }
   })
 
-  it("silently turns a non-http(s) scheme into a bogus https URL", () => {
-    // SUSPECT (medium) — the https:// prefix is prepended to the WHOLE
-    // string whenever it does not already start with http(s), so a
-    // scheme that survives URL parsing produces a key that is not the
-    // thing the user submitted.
-    //
-    // "mailto:a@b.com" is the sharp one: it parses as userinfo
-    // "mailto:a" on host "b.com", so the key claims a host the user
+  it("FIXED (S4, Commit 9) — a non-http(s) scheme is rejected explicitly, never silently turned into a bogus https URL", () => {
+    // Was SUSPECT (medium): the https:// prefix used to be prepended to
+    // the WHOLE string whenever it did not already start with http(s),
+    // so a real scheme survived URL parsing and produced a key that was
+    // not the thing the user submitted — "mailto:a@b.com" used to parse
+    // as userinfo "mailto:a" on host "b.com", claiming a host the user
     // never named.
     //
-    // Latent today: both callers (service.normalizeUrl and
-    // guest-store.normalizeUrl) validate the protocol BEFORE this runs.
-    // It is a trap for the next caller, not a live bug.
-    assert.equal(canonicalizeUrl("mailto:a@b.com"), "https://mailto:a@b.com/")
-    assert.equal(canonicalizeUrl("ftp://example.com/a"), "https://ftp//example.com/a")
-    assert.equal(canonicalizeUrl("file:///etc/passwd"), "https://file///etc/passwd")
-    assert.notEqual(canonicalizeUrlSafe("mailto:a@b.com"), null, "CURRENT BEHAVIOUR: not rejected")
+    // Now parseSaveableUrl() (lib/knowledge/url.ts) names the real
+    // scheme and refuses it BEFORE any "assume https" prefixing runs —
+    // never left to an accidental parse failure, a DNS lookup, or the
+    // SSRF guard to catch it three layers downstream.
+    for (const bad of ["mailto:a@b.com", "ftp://example.com/a", "file:///etc/passwd", "tel:+5511999999999", "blob:https://example.com/x", "javascript:alert(1)", "data:text/html,<h1>x</h1>"]) {
+      assert.throws(() => canonicalizeUrl(bad), /http and https/i, `expected an explicit scheme rejection for ${JSON.stringify(bad)}`)
+      assert.equal(canonicalizeUrlSafe(bad), null, `safe variant should be null for ${JSON.stringify(bad)}`)
+    }
+  })
+
+  it("still assumes https for a bare host — including host:port, which is NOT mistaken for a scheme", () => {
+    // The port grammar (RFC 3986: a port is *DIGIT) is exactly what
+    // tells "example.com:8080/a" apart from a real scheme like
+    // "mailto:" — see colonIntroducesPort() in lib/knowledge/url.ts.
+    assert.equal(canonicalizeUrl("example.com:8080/a"), "https://example.com:8080/a")
+    assert.equal(canonicalizeUrl("localhost:3000"), "https://localhost:3000/")
   })
 
   it("accepts a URL with no host by promoting the path to a host", () => {
     // SUSPECT (low): "https:///a" has no authority; today it becomes
-    // the host "a".
+    // the host "a". Unrelated to S3/S4 — left exactly as it was.
     assert.equal(canonicalizeUrl("https:///a"), "https://a/")
   })
 
-  it("KEEPS credentials in the dedup key", () => {
-    // SUSPECT (medium, security-adjacent) — two problems in one:
+  it("FIXED (S3, Commit 9) — credentials in the URL are rejected, never kept in the dedup key", () => {
+    // Was SUSPECT (medium, security-adjacent) — two problems in one:
     //
-    //   1. the key is persisted in knowledge_items.normalized_url, so
-    //      a password pasted in a URL is written to the database in
-    //      clear text and survives in backups;
-    //   2. the same page with and without credentials produces two
-    //      different keys, so dedup misses.
-    assert.equal(canonicalizeUrl("https://user:pass@example.com/a"), "https://user:pass@example.com/a")
-    assertDistinct(
+    //   1. the key was persisted in knowledge_items.normalized_url, so
+    //      a password pasted in a URL was written to the database in
+    //      clear text and survived in backups;
+    //   2. the same page with and without credentials produced two
+    //      different keys, so dedup missed.
+    //
+    // Fixed by rejecting outright (parseSaveableUrl(), lib/knowledge/
+    // url.ts) rather than silently stripping and treating the public
+    // destination as what was asked for — Knowledge saves public
+    // content and has no concept of an authenticated source, so a URL
+    // that only works with a login is refused, not reinterpreted.
+    for (const withCreds of [
+      "https://user@example.com/a",
       "https://user:pass@example.com/a",
-      "https://example.com/a",
-      "CURRENT BEHAVIOUR: credentials make it a different page",
-    )
+      "https://user:pass@example.com/a?q=1",
+      "https://user:pass@example.com/a#section",
+      "https://user:pass@example.com/a#!/route",
+    ]) {
+      assert.throws(() => canonicalizeUrl(withCreds), /username or password/i, `expected credentials to be rejected for ${JSON.stringify(withCreds)}`)
+      assert.equal(canonicalizeUrlSafe(withCreds), null, `safe variant should be null for ${JSON.stringify(withCreds)}`)
+    }
+    // The equivalent public URL (same page, no credentials) still
+    // works exactly as before — this is a rejection, not a widening of
+    // what "invalid" means.
+    assert.equal(canonicalizeUrl("https://example.com/a"), "https://example.com/a")
   })
 
   it("does not itself truncate or reject, but reports over-length", () => {

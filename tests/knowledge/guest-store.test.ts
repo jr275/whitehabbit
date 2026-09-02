@@ -102,3 +102,34 @@ describe("guestSaveUrl — the byte ceiling", () => {
     assert.equal(guestSaveUrl(tracking).duplicate, false, "it canonicalises well under the limit")
   })
 })
+
+describe("guestSaveUrl — S3/S4 (Commit 9): the same rejection as the server, nothing persisted", () => {
+  // guest-store.ts's own normalizeUrl() calls the exact same
+  // lib/knowledge/url.ts#parseSaveableUrl() the server's saveUrl()
+  // does (see service.test-equivalent coverage in url.test.ts's
+  // canonicalizeUrl suite, which exercises that same function). This
+  // suite is the guest-side half of that guarantee: a guest paste is
+  // refused for the identical reasons, and nothing lands in
+  // localStorage for a refused save — the guest library can never
+  // accumulate a row an authenticated account would also refuse.
+
+  it("rejects credentials in the URL — username, password, and both — nothing saved", () => {
+    for (const withCreds of ["https://user@example.com/a", "https://:pass@example.com/a", "https://user:pass@example.com/a"]) {
+      assert.throws(() => guestSaveUrl(withCreds), /username or password/i, withCreds)
+    }
+    assert.equal(activeUrls().length, 0)
+  })
+
+  it("rejects a non-http(s) scheme — nothing saved", () => {
+    for (const bad of ["javascript:alert(1)", "data:text/html,<h1>x</h1>", "file:///etc/passwd", "ftp://example.com/a", "mailto:test@example.com", "tel:+5511999999999", "blob:https://example.com/x"]) {
+      assert.throws(() => guestSaveUrl(bad), /http and https/i, bad)
+    }
+    assert.equal(activeUrls().length, 0)
+  })
+
+  it("still saves the equivalent public http(s) URL fine — this is a rejection, not a widening of what's valid", () => {
+    assert.equal(guestSaveUrl("https://example.com/a").duplicate, false)
+    assert.equal(guestSaveUrl("http://example.com/b").duplicate, false)
+    assert.equal(activeUrls().length, 2)
+  })
+})

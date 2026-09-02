@@ -113,16 +113,121 @@ export function isCanonicalUrlTooLong(canonicalUrl: string): boolean {
   return new TextEncoder().encode(canonicalUrl).length > MAX_CANONICAL_URL_BYTES
 }
 
+/** Thrown by parseSaveableUrl() — the one thing both the server save
+ *  path (service.ts) and the guest path (guest-store.ts) throw for an
+ *  unsaveable URL, so both surfaces show the same real reason. */
+export class InvalidKnowledgeUrlError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "InvalidKnowledgeUrlError"
+  }
+}
+
+const EXPLICIT_HTTP_PREFIX_RE = /^https?:\/\//i
+/** A syntactically plausible URI scheme token (RFC 3986: a letter, then
+ *  letters/digits/+/-/.). Matched against the text before the first
+ *  ":" — never enough on its own, see disallowedScheme() below. */
+const SCHEME_TOKEN_RE = /^[a-z][a-z0-9+.-]*$/i
+
+/** True when the text right after a colon is a PORT — `*DIGIT`,
+ *  RFC 3986's actual grammar for one — followed only by the end of the
+ *  string or the start of a path/query/fragment. This is what tells
+ *  "example.com:8080/a" (a bare host+port, meant to become
+ *  https://example.com:8080/a) apart from "mailto:user@host" or
+ *  "javascript:alert(1)" (a real scheme, whose content is never purely
+ *  digits) — by the same rule the URL spec itself uses, not a guess. */
+function colonIntroducesPort(afterColon: string): boolean {
+  const digits = afterColon.match(/^[0-9]+/)?.[0] ?? ""
+  if (!digits) return false
+  const rest = afterColon.slice(digits.length)
+  return rest === "" || /^[/?#]/.test(rest)
+}
+
+/**
+ * The scheme name an input explicitly names, if it names one Knowledge
+ * must reject — javascript:, data:, file:, ftp:, mailto:, tel:, blob:,
+ * or any other non-http(s) scheme. Returns null for a bare domain
+ * ("example.com/a"), a bare host:port ("localhost:3000" —
+ * colonIntroducesPort() above is what tells this apart from a scheme),
+ * and for anything already starting with an explicit http(s):// prefix
+ * (handled, and reduced to a scheme check on the parsed URL itself, by
+ * parseSaveableUrl() below).
+ *
+ * Checked on the RAW input, before any "assume https" prefixing —
+ * prefixing first is exactly what let a scheme slip through unchecked
+ * before this existed: "https://" + "file:///etc/passwd" parses to
+ * protocol "https:" with hostname "file", not to protocol "file:", so
+ * a check made only after that prefixing never sees the real scheme.
+ */
+function disallowedScheme(trimmed: string): string | null {
+  if (EXPLICIT_HTTP_PREFIX_RE.test(trimmed)) return null
+  const colonIdx = trimmed.indexOf(":")
+  if (colonIdx === -1) return null
+  const beforeColon = trimmed.slice(0, colonIdx)
+  const afterColon = trimmed.slice(colonIdx + 1)
+  if (!SCHEME_TOKEN_RE.test(beforeColon)) return null
+  if (colonIntroducesPort(afterColon)) return null
+  return beforeColon.toLowerCase()
+}
+
+/**
+ * Turn a user-submitted string into a real, saveable URL — the ONE
+ * shared entry point for both the server save path (service.ts's
+ * normalizeUrl) and the guest path (guest-store.ts's normalizeUrl), so
+ * the two can never diverge on what they accept.
+ *
+ * Enforces exactly two rules, both explicit — never left to an
+ * accidental side effect of parsing, DNS, or a fetch failing:
+ *
+ *   1. Only http/https. Checked BEFORE the "assume https" convenience
+ *      prefix runs (disallowedScheme(), above — see why there), and
+ *      checked again on the parsed result as a real second layer, not
+ *      a formality.
+ *   2. No userinfo (a username and/or password embedded in the URL,
+ *      "https://user:pass@host/..."). Knowledge saves public content —
+ *      it has no concept of an authenticated source — so a URL
+ *      carrying credentials is refused outright rather than silently
+ *      stripped and treated as if the public destination were what was
+ *      asked for; see the commit message for the fuller reasoning.
+ */
+export function parseSaveableUrl(input: string): URL {
+  const trimmed = input.trim()
+  if (!trimmed) throw new InvalidKnowledgeUrlError("Enter a URL to save.")
+
+  const scheme = disallowedScheme(trimmed)
+  if (scheme) {
+    throw new InvalidKnowledgeUrlError(`Only http and https links can be saved (got "${scheme}:").`)
+  }
+
+  const withScheme = EXPLICIT_HTTP_PREFIX_RE.test(trimmed) ? trimmed : `https://${trimmed}`
+  let url: URL
+  try {
+    url = new URL(withScheme)
+  } catch {
+    throw new InvalidKnowledgeUrlError("That doesn't look like a valid URL.")
+  }
+  // Real authority, not a repeat of the check above by another name:
+  // this is what actually decides what gets fetched and stored.
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new InvalidKnowledgeUrlError(`Only http and https links can be saved (got "${url.protocol}").`)
+  }
+  if (url.username || url.password) {
+    throw new InvalidKnowledgeUrlError(
+      "Links with a username or password in the URL can't be saved — Knowledge only saves public pages.",
+    )
+  }
+  return url
+}
+
 /**
  * Turn a user-submitted URL string into a canonical dedup key. Throws
- * if the input can't be parsed as an http(s) URL — callers already
- * validate/normalize for storage, so in practice this succeeds; the
- * throw is a safety net, never a user-facing path.
+ * if the input can't be parsed as a saveable http(s) URL with no
+ * embedded credentials (see parseSaveableUrl()) — callers already
+ * validate for storage, so in practice this succeeds; the throw is a
+ * safety net, never a user-facing path.
  */
 export function canonicalizeUrl(input: string): string {
-  const trimmed = input.trim()
-  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
-  const url = new URL(withScheme)
+  const url = parseSaveableUrl(input)
 
   url.protocol = url.protocol.toLowerCase()
   url.hostname = url.hostname.toLowerCase().replace(/^www\./, "")

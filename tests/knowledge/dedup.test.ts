@@ -84,6 +84,14 @@ async function findExisting(tenant: TestTenant, url: string) {
   return key ? repo.findByNormalizedUrl(tenant.orgId, key) : null
 }
 
+async function countItems(orgId: string): Promise<number> {
+  const { rows } = await getTestPool().query<{ n: string }>(
+    "SELECT count(*)::text AS n FROM knowledge_items WHERE org_id = $1",
+    [orgId],
+  )
+  return Number(rows[0].n)
+}
+
 describe("dedup — the same page saved twice", () => {
   it("finds the existing item for the exact same URL", async () => {
     const url = `https://example.com/exact-${randomBytes(6).toString("hex")}`
@@ -305,14 +313,6 @@ describe("dedup — canonical key length", () => {
     return prefix + "a".repeat(pathBytes - prefix.length)
   }
 
-  async function countItems(orgId: string): Promise<number> {
-    const { rows } = await getTestPool().query<{ n: string }>(
-      "SELECT count(*)::text AS n FROM knowledge_items WHERE org_id = $1",
-      [orgId],
-    )
-    return Number(rows[0].n)
-  }
-
   it("saveUrl rejects an over-long URL with a message the user can act on", async () => {
     const tenant = await createTenant("too-long")
     await assert.rejects(
@@ -404,5 +404,62 @@ describe("dedup — hash routes are distinct documents", () => {
     const slug = randomBytes(6).toString("hex")
     await save(tenant, `https://example.com/${slug}#intro`)
     await assert.rejects(() => save(tenant, `https://example.com/${slug}#comments`))
+  })
+})
+
+describe("dedup — S3/S4 (Commit 9): credentials and non-http schemes never reach the database", () => {
+  // Unlike the length tests above, none of these need a real IP or any
+  // network access at all: the rejection happens in service.normalizeUrl
+  // (lib/knowledge/url.ts's parseSaveableUrl()), which runs BEFORE
+  // assertSafeUrl's DNS lookup — so an ordinary hostname is fine here,
+  // and a passing test is real proof no lookup was even attempted, not
+  // just that the eventual write didn't happen.
+
+  it("saveUrl rejects a URL with credentials, and writes nothing", async () => {
+    const tenant = await createTenant("creds")
+    const before = await countItems(tenant.orgId)
+    await assert.rejects(
+      () => saveUrl({ orgId: tenant.orgId, userId: tenant.userId, url: "https://user:pass@example.com/article" }),
+      (err: unknown) => {
+        assert.ok(err instanceof SaveValidationError, "a 400, not a 500")
+        assert.match(err.message, /username or password/i)
+        return true
+      },
+    )
+    assert.equal(await countItems(tenant.orgId), before, "nothing was persisted")
+  })
+
+  it("saveUrl rejects a non-http(s) scheme, and writes nothing", async () => {
+    const tenant = await createTenant("scheme")
+    const before = await countItems(tenant.orgId)
+    await assert.rejects(
+      () => saveUrl({ orgId: tenant.orgId, userId: tenant.userId, url: "file:///etc/passwd" }),
+      (err: unknown) => {
+        assert.ok(err instanceof SaveValidationError, "a 400, not a 500")
+        assert.match(err.message, /http and https/i)
+        return true
+      },
+    )
+    assert.equal(await countItems(tenant.orgId), before, "nothing was persisted")
+  })
+
+  it("the equivalent public URL (same page, no credentials) still saves fine", async () => {
+    const tenant = await createTenant("creds-public")
+    const result = await saveUrl({ orgId: tenant.orgId, userId: tenant.userId, url: "https://example.com/article" })
+    assert.equal(result.duplicate, false)
+    assert.equal(await countItems(tenant.orgId), 1)
+    const row = await repo.getItem(result.row.id, tenant.orgId)
+    assert.ok(row)
+    assert.doesNotMatch(row!.url, /@/, "no userinfo makes it into the stored url either")
+    assert.doesNotMatch(row!.normalized_url ?? "", /@/, "or into the dedup key")
+  })
+
+  it("plain http:// (not just https://) still saves fine — the scheme check allows both", async () => {
+    const tenant = await createTenant("http-scheme")
+    const result = await saveUrl({ orgId: tenant.orgId, userId: tenant.userId, url: "http://example.com/plain-http" })
+    assert.equal(result.duplicate, false)
+    assert.equal(await countItems(tenant.orgId), 1)
+    const row = await repo.getItem(result.row.id, tenant.orgId)
+    assert.equal(row?.url, "http://example.com/plain-http")
   })
 })

@@ -17,7 +17,7 @@ import { logger } from "@/lib/observability/logger"
 import { extractFavicon, extractFromHtml } from "./extract"
 import * as repo from "./repo"
 import type { KnowledgeRow } from "./repo"
-import { canonicalizeUrlSafe, isCanonicalUrlTooLong } from "./url"
+import { canonicalizeUrlSafe, InvalidKnowledgeUrlError, isCanonicalUrlTooLong, parseSaveableUrl } from "./url"
 
 const FETCH_TIMEOUT_MS = 15_000
 const MAX_BYTES = 5_000_000 // 5 MB cap — enough for real articles, refuses payload bombs
@@ -71,16 +71,17 @@ export class SaveValidationError extends Error {
 }
 
 /** Normalize + validate the user-submitted URL string into a real URL.
- * Adds https:// when the user omits a scheme (a very common paste). */
+ * Adds https:// when the user omits a scheme (a very common paste).
+ * Rejects a non-http(s) scheme and a URL carrying credentials — see
+ * lib/knowledge/url.ts's parseSaveableUrl(), the one shared rule this
+ * and guest-store.ts's own normalizeUrl() both enforce. */
 export function normalizeUrl(input: string): string {
-  const trimmed = input.trim()
-  if (!trimmed) throw new SaveValidationError("Enter a URL to save.")
-  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
   let url: URL
   try {
-    url = new URL(withScheme)
-  } catch {
-    throw new SaveValidationError("That doesn't look like a valid URL.")
+    url = parseSaveableUrl(input)
+  } catch (err) {
+    if (err instanceof InvalidKnowledgeUrlError) throw new SaveValidationError(err.message)
+    throw err
   }
   if (!url.hostname.includes(".")) throw new SaveValidationError("That doesn't look like a valid web address.")
   return url.toString()
