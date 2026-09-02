@@ -31,8 +31,8 @@ export function KnowledgeSidebar() {
           <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <LibraryBig className="size-4" />
           </span>
-          <span className="font-serif text-xl font-medium leading-none tracking-tight text-foreground">
-            Knowledge
+          <span className="text-xl font-semibold leading-none tracking-tight text-foreground">
+            Keeply
           </span>
         </Link>
       </div>
