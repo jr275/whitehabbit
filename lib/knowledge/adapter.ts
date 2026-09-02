@@ -39,6 +39,7 @@ export function rowToItem(row: KnowledgeRow, tags: string[] = []): KnowledgeItem
     source: row.site_name ?? domain ?? "Unknown source",
     author: row.author ?? undefined,
     cover: row.image_url ?? undefined,
+    favicon: row.favicon ?? undefined,
     topics: tags,
     durationMin: row.reading_min ?? undefined,
     error: row.error ?? undefined,

@@ -14,6 +14,7 @@ import { assertSafeUrl, UnsafeUrlError } from "@/lib/security/ssrf-guard"
 import { extractFavicon, extractFromHtml } from "./extract"
 import * as repo from "./repo"
 import type { KnowledgeRow } from "./repo"
+import { canonicalizeUrlSafe } from "./url"
 
 const FETCH_TIMEOUT_MS = 15_000
 const MAX_BYTES = 5_000_000 // 5 MB cap — enough for real articles, refuses payload bombs
@@ -50,10 +51,22 @@ function domainOf(url: string): string | null {
   }
 }
 
+/** The outcome of a save: the row, plus whether it was ALREADY in the
+ * org's library (a re-save of the same page). When `duplicate` is true
+ * the caller must NOT re-run the ingestion pipeline — it just opens the
+ * existing item. */
+export interface SaveResult {
+  row: KnowledgeRow
+  duplicate: boolean
+}
+
 /** Create the row immediately in `saved` state and return it, so the
- * API can respond instantly and the UI can render the new card. The
- * caller schedules processItem() to run after the response. */
-export async function saveUrl(params: { orgId: string; userId: string | null; url: string }): Promise<KnowledgeRow> {
+ * API can respond instantly and the UI can render the new card — unless
+ * the same page (by canonical dedup key) is already saved, in which case
+ * the existing item is returned untouched with duplicate=true. The
+ * caller schedules processItem() to run after the response only for a
+ * genuinely new item. */
+export async function saveUrl(params: { orgId: string; userId: string | null; url: string }): Promise<SaveResult> {
   const normalized = normalizeUrl(params.url)
   // Fail fast on obviously-unsafe URLs before we even persist, so the
   // user gets an immediate 400 rather than a row that will fail async.
@@ -63,7 +76,34 @@ export async function saveUrl(params: { orgId: string; userId: string | null; ur
     if (err instanceof UnsafeUrlError) throw new SaveValidationError(err.message)
     throw err
   }
-  return repo.insertSavedItem({ orgId: params.orgId, userId: params.userId, url: normalized, domain: domainOf(normalized) })
+
+  const normalizedKey = canonicalizeUrlSafe(normalized)
+
+  // Already saved? Return the existing item rather than a duplicate.
+  if (normalizedKey) {
+    const existing = await repo.findByNormalizedUrl(params.orgId, normalizedKey)
+    if (existing) return { row: existing, duplicate: true }
+  }
+
+  try {
+    const row = await repo.insertSavedItem({
+      orgId: params.orgId,
+      userId: params.userId,
+      url: normalized,
+      normalizedUrl: normalizedKey,
+      domain: domainOf(normalized),
+    })
+    return { row, duplicate: false }
+  } catch (err) {
+    // Race: a concurrent save inserted the same canonical URL first and
+    // tripped the partial unique index. Resolve to that existing item
+    // instead of surfacing a raw constraint error.
+    if (normalizedKey && err instanceof Error && /duplicate key|unique/i.test(err.message)) {
+      const existing = await repo.findByNormalizedUrl(params.orgId, normalizedKey)
+      if (existing) return { row: existing, duplicate: true }
+    }
+    throw err
+  }
 }
 
 /** Read-only page metadata — the DB-free counterpart to processItem().
@@ -82,6 +122,7 @@ export interface PageMetadata {
   author: string | null
   imageUrl: string | null
   favicon: string | null
+  readingMin: number | null
   kind: string
 }
 
@@ -122,11 +163,13 @@ export async function fetchPageMetadata(rawUrl: string): Promise<PageMetadata> {
       author: null,
       imageUrl: null,
       favicon: null,
+      readingMin: null,
       kind: normalized.toLowerCase().endsWith(".pdf") ? "pdf" : "document",
     }
   }
 
   const x = extractFromHtml(fetched.html, normalized)
+  const textKind = x.kind === "article" || x.kind === "document"
   return {
     url: normalized,
     canonicalUrl: x.canonicalUrl ?? null,
@@ -137,6 +180,7 @@ export async function fetchPageMetadata(rawUrl: string): Promise<PageMetadata> {
     author: x.author ?? null,
     imageUrl: x.imageUrl ?? null,
     favicon: extractFavicon(fetched.html, normalized) ?? null,
+    readingMin: textKind ? (x.readingMin ?? null) : null,
     kind: x.kind,
   }
 }
@@ -238,6 +282,7 @@ export async function processItem(id: string, orgId: string): Promise<void> {
         siteName: domain ?? null,
         excerpt: null,
         imageUrl: null,
+        favicon: null,
         canonicalUrl: null,
         publishedAt: null,
         wordCount: null,
@@ -251,6 +296,9 @@ export async function processItem(id: string, orgId: string): Promise<void> {
     }
 
     const extracted = extractFromHtml(fetched.html, item.url)
+    // Reading time is only honest for text kinds — never label a video
+    // or PDF with an invented "N min read" derived from page chrome.
+    const textKind = extracted.kind === "article" || extracted.kind === "document"
     await repo.saveExtraction(id, orgId, {
       status: "ready",
       kind: extracted.kind,
@@ -259,10 +307,11 @@ export async function processItem(id: string, orgId: string): Promise<void> {
       siteName: extracted.siteName ?? domain ?? null,
       excerpt: extracted.excerpt ?? null,
       imageUrl: extracted.imageUrl ?? null,
+      favicon: extractFavicon(fetched.html, item.url) ?? null,
       canonicalUrl: extracted.canonicalUrl ?? null,
       publishedAt: extracted.publishedAt ?? null,
       wordCount: extracted.wordCount ?? null,
-      readingMin: extracted.readingMin ?? null,
+      readingMin: textKind ? (extracted.readingMin ?? null) : null,
       lang: extracted.lang ?? null,
       contentText: extracted.contentText ?? null,
       rawHtml: fetched.html.length <= MAX_BYTES ? fetched.html : null,

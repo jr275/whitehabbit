@@ -134,8 +134,9 @@ export function useKnowledgeLibrary(opts: UseLibraryOptions = {}): LibraryState 
 
   const save = useCallback(
     async (url: string) => {
-      const item = await api.saveUrl(url)
-      insert(item)
+      const { item, duplicate } = await api.saveUrl(url)
+      // A duplicate is already in the list — don't insert a second card.
+      if (!duplicate) insert(item)
       return item
     },
     [insert],

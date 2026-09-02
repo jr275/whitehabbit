@@ -102,14 +102,23 @@ export async function searchLibrary(q: string, signal?: AbortSignal): Promise<Kn
   }
 }
 
-export async function saveUrl(url: string): Promise<KnowledgeItem> {
+/** Result of a save: the item, plus whether it was ALREADY in the
+ * library (a re-save of the same page). Lets the UI show a discreet
+ * "Already in your library" + Open instead of an error or a duplicate. */
+export interface SaveResult {
+  item: KnowledgeItem
+  duplicate: boolean
+}
+
+export async function saveUrl(url: string): Promise<SaveResult> {
   try {
     const res = await fetch("/api/knowledge", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ url }),
     })
-    return (await parse<{ item: KnowledgeItem }>(res)).item
+    const data = await parse<{ item: KnowledgeItem; duplicate?: boolean }>(res)
+    return { item: data.item, duplicate: data.duplicate === true }
   } catch (err) {
     if (isAuthMiss(err)) {
       markGuest()

@@ -62,12 +62,21 @@ export async function POST(req: Request) {
     const body = (await req.json().catch(() => null)) as { url?: unknown } | null
     if (!body || typeof body.url !== "string") throw new ValidationError("A url string is required.")
 
-    let row
+    let result
     try {
-      row = await saveUrl({ orgId: organizationId, userId, url: body.url })
+      result = await saveUrl({ orgId: organizationId, userId, url: body.url })
     } catch (err) {
       if (err instanceof SaveValidationError) throw new ValidationError(err.message)
       throw err
+    }
+
+    const { row, duplicate } = result
+
+    // Already in the library — return the existing item, don't re-ingest,
+    // don't re-audit. The client surfaces "Already in your library".
+    if (duplicate) {
+      const tags = await repo.getTags(row.id, organizationId)
+      return NextResponse.json({ item: rowToItem(row, tags), duplicate: true }, { status: 200 })
     }
 
     await recordAudit({ orgId: organizationId, userId, action: "knowledge.save", resourceType: "knowledge_item", resourceId: row.id })
@@ -78,6 +87,6 @@ export async function POST(req: Request) {
       await processItem(row.id, organizationId)
     })
 
-    return NextResponse.json({ item: rowToItem(row, []) }, { status: 201 })
+    return NextResponse.json({ item: rowToItem(row, []), duplicate: false }, { status: 201 })
   })
 }

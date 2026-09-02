@@ -58,6 +58,9 @@ export interface KnowledgeItem {
   author?: string
   /** Remote lead image URL (og:image), rendered with crossOrigin. */
   cover?: string
+  /** Source site icon URL (favicon), shown as the small source glyph;
+   *  falls back to the kind icon when absent or it fails to load. */
+  favicon?: string
 
   topics: string[]
 

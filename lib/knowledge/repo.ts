@@ -18,6 +18,7 @@ export interface KnowledgeRow {
   org_id: string
   created_by: string | null
   url: string
+  normalized_url: string | null
   canonical_url: string | null
   domain: string | null
   status: string
@@ -29,6 +30,7 @@ export interface KnowledgeRow {
   site_name: string | null
   excerpt: string | null
   image_url: string | null
+  favicon: string | null
   published_at: string | null
   word_count: number | null
   reading_min: number | null
@@ -51,8 +53,8 @@ export interface ListOptions {
   includeArchived?: boolean
 }
 
-const SELECT_COLS = `id, org_id, created_by, url, canonical_url, domain, status, kind, error, attempts,
-  title, author, site_name, excerpt, image_url, published_at, word_count, reading_min, lang,
+const SELECT_COLS = `id, org_id, created_by, url, normalized_url, canonical_url, domain, status, kind, error, attempts,
+  title, author, site_name, excerpt, image_url, favicon, published_at, word_count, reading_min, lang,
   content_text, summary, favorite, archived, read_at, created_at, updated_at`
 
 /** Insert a freshly-saved item in the `saved` state. Content columns
@@ -61,16 +63,30 @@ export async function insertSavedItem(params: {
   orgId: string
   userId: string | null
   url: string
+  normalizedUrl: string | null
   domain: string | null
 }): Promise<KnowledgeRow> {
   const id = `kn_${randomUUID()}`
   const now = Date.now()
   await query(
-    `INSERT INTO knowledge_items (id, org_id, created_by, url, domain, status, kind, attempts, favorite, archived, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, 'saved', 'article', 0, FALSE, FALSE, $6, $6)`,
-    [id, params.orgId, params.userId, params.url, params.domain, now],
+    `INSERT INTO knowledge_items (id, org_id, created_by, url, normalized_url, domain, status, kind, attempts, favorite, archived, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 'saved', 'article', 0, FALSE, FALSE, $7, $7)`,
+    [id, params.orgId, params.userId, params.url, params.normalizedUrl, params.domain, now],
   )
   return (await getItem(id, params.orgId))!
+}
+
+/** Find an org's ACTIVE (non-archived) item matching a canonical dedup
+ * key, so a re-save of the same page opens the existing item instead of
+ * creating a duplicate. Archived items are excluded — re-saving one is a
+ * genuine new save. Returns null when nothing matches. */
+export async function findByNormalizedUrl(orgId: string, normalizedUrl: string): Promise<KnowledgeRow | null> {
+  return queryOne<KnowledgeRow>(
+    `SELECT ${SELECT_COLS} FROM knowledge_items
+     WHERE org_id = $1 AND normalized_url = $2 AND archived = FALSE
+     ORDER BY created_at DESC LIMIT 1`,
+    [orgId, normalizedUrl],
+  )
 }
 
 /** Org-scoped single read. Returns null (never another org's row) when
@@ -166,6 +182,7 @@ export interface ExtractionPatch {
   siteName: string | null
   excerpt: string | null
   imageUrl: string | null
+  favicon: string | null
   canonicalUrl: string | null
   publishedAt: number | null
   wordCount: number | null
@@ -184,9 +201,9 @@ export async function saveExtraction(id: string, orgId: string, patch: Extractio
     await client.query(
       `UPDATE knowledge_items SET
          status = $1, kind = $2, title = $3, author = $4, site_name = $5, excerpt = $6,
-         image_url = $7, canonical_url = $8, published_at = $9, word_count = $10, reading_min = $11,
-         lang = $12, content_text = $13, raw_html = $14, raw_fetched_at = $15, error = NULL, updated_at = $15
-       WHERE id = $16 AND org_id = $17`,
+         image_url = $7, favicon = $8, canonical_url = $9, published_at = $10, word_count = $11, reading_min = $12,
+         lang = $13, content_text = $14, raw_html = $15, raw_fetched_at = $16, error = NULL, updated_at = $16
+       WHERE id = $17 AND org_id = $18`,
       [
         patch.status,
         patch.kind,
@@ -195,6 +212,7 @@ export async function saveExtraction(id: string, orgId: string, patch: Extractio
         patch.siteName,
         patch.excerpt,
         patch.imageUrl,
+        patch.favicon,
         patch.canonicalUrl,
         patch.publishedAt,
         patch.wordCount,
