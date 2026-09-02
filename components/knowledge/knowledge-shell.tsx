@@ -45,7 +45,7 @@ export function KnowledgeShell({ children }: { children: React.ReactNode }) {
     <div className="knowledge-surface min-h-dvh bg-background text-foreground">
       <a
         href="#kn-main"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-50 focus:rounded-md focus:bg-[var(--kn-ai)] focus:px-3 focus:py-2 focus:text-[color:oklch(0.2_0.02_75)]"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-50 focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-primary-foreground"
       >
         Skip to content
       </a>

@@ -61,14 +61,14 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
               active={favorite}
               onClick={toggleFavorite}
             >
-              <Heart className={cn("h-4 w-4", favorite && "fill-[var(--warn)] text-[var(--warn)]")} />
+              <Heart className={cn("h-4 w-4", favorite && "fill-[var(--kn-ai)] text-[var(--kn-ai)]")} />
             </IconButton>
             <a
               href={doc.url}
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Open original"
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground"
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             >
               <ExternalLink className="h-4 w-4" />
             </a>
@@ -76,15 +76,15 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
         </div>
 
         <article className="mx-auto max-w-2xl px-4 py-10 sm:px-8 sm:py-14">
-          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+          <div className="flex items-center gap-2 text-[13px] font-medium text-primary">
             <Kind className="h-3.5 w-3.5" />
             {doc.source}
             {doc.durationMin ? (
-              <>
+              <span className="flex items-center gap-1.5 font-normal text-muted-foreground">
                 <span aria-hidden>·</span>
                 <Clock className="h-3 w-3" />
                 {durationLabel(doc.kind, doc.durationMin)}
-              </>
+              </span>
             ) : null}
           </div>
 
@@ -178,7 +178,7 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
               ) : null}
               {doc.topics.length > 0 ? (
                 <div>
-                  <dt className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Topics</dt>
+                  <dt className="text-[12px] font-medium text-muted-foreground">Topics</dt>
                   <dd className="mt-2 flex flex-wrap gap-1.5">
                     {doc.topics.map((t) => (
                       <span key={t} className="rounded-md bg-secondary/60 px-2 py-1 text-xs text-foreground/80">
@@ -191,7 +191,7 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
             </dl>
           ) : (
             <div className="flex flex-col items-center gap-2 py-10 text-center">
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Highlights</p>
+              <p className="text-[12px] font-medium text-muted-foreground">Highlights</p>
               <p className="max-w-[220px] text-sm leading-relaxed text-muted-foreground">
                 Highlighting isn&apos;t available yet. When it ships, the passages you mark will collect here.
               </p>
@@ -230,7 +230,7 @@ function TabButton({
 function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{label}</dt>
+      <dt className="text-[12px] font-medium text-muted-foreground">{label}</dt>
       <dd className="mt-1 text-foreground/85">{value}</dd>
     </div>
   )
@@ -254,7 +254,7 @@ function IconButton({
       aria-label={label}
       className={cn(
         "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-        active ? "text-foreground" : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground",
+        active ? "text-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground",
       )}
     >
       {children}

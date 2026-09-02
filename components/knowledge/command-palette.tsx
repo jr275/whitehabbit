@@ -179,7 +179,7 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
           {/* Commands */}
           {commandMatches.length > 0 && (
             <>
-              <p className="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">
+              <p                 className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground">
                 {hasQuery ? "Commands" : "Quick actions"}
               </p>
               {commandMatches.map((cmd) => {
@@ -225,7 +225,7 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
           {/* Real library results */}
           {results.length > 0 && (
             <>
-              <p className="px-3 pb-1 pt-3 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">
+              <p className="px-3 pb-1 pt-3 text-[11px] font-medium text-muted-foreground">
                 In your library
               </p>
               {results.map((item) => {
@@ -255,7 +255,7 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-foreground">{item.title}</span>
-                      <span className="block truncate font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <span className="block truncate text-[12px] text-muted-foreground">
                         {item.source}
                       </span>
                     </span>

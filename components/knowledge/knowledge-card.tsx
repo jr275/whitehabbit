@@ -65,8 +65,8 @@ export function KnowledgeCard({
     <article
       style={{ animationDelay: `${Math.min(index, 12) * 35}ms` }}
       className={cn(
-        "kn-rise group relative overflow-hidden rounded-2xl border bg-[var(--kn-paper)] transition-all duration-300",
-        "border-[var(--kn-edge)] hover:border-foreground/20 hover:shadow-[0_18px_50px_-24px_rgba(0,0,0,0.9)]",
+        "kn-rise group relative overflow-hidden rounded-2xl border bg-card shadow-sm transition-all duration-300",
+        "border-[var(--kn-edge)] hover:-translate-y-0.5 hover:shadow-[0_20px_44px_-28px_oklch(0.3_0.06_40/0.4)]",
         selected && "border-primary/60 ring-1 ring-primary/40",
         isList ? "flex items-stretch" : "flex flex-col",
       )}
@@ -117,7 +117,7 @@ export function KnowledgeCard({
               </span>
             </div>
           )}
-          <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-black/55 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-white/90 backdrop-blur">
+          <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1 text-[11px] font-medium text-white/95 backdrop-blur">
             <KindIcon className="size-3" />
             {KIND_META[item.kind].label}
           </span>
@@ -130,10 +130,10 @@ export function KnowledgeCard({
       {/* ── Body ──────────────────────────────────────────── */}
       <div className={cn("flex min-w-0 flex-1 flex-col gap-3 p-4", isList && "justify-center")}>
         {/* source */}
-        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-          {!showCover && <KindIcon className="size-3.5 text-foreground/70" />}
+        <div className="flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
+          {!showCover && <KindIcon className="size-3.5 text-primary/80" />}
           <span className="truncate">{item.source}</span>
-          {item.author && <span className="truncate text-muted-foreground/60">· {item.author}</span>}
+          {item.author && <span className="truncate font-normal text-muted-foreground/70">· {item.author}</span>}
         </div>
 
         {/* title — links to the reader once ready */}
@@ -204,7 +204,7 @@ export function KnowledgeCard({
                 {item.topics.slice(0, 4).map((t) => (
                   <span
                     key={t}
-                    className="rounded-md border border-border bg-secondary/50 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground"
+                    className="rounded-full bg-secondary px-2.5 py-0.5 text-[11px] text-secondary-foreground/80"
                   >
                     {t}
                   </span>
@@ -216,7 +216,7 @@ export function KnowledgeCard({
 
         {/* footer */}
         <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-          <span className="truncate font-mono text-[10px] text-muted-foreground">
+          <span className="truncate text-[11px] text-muted-foreground">
             {[duration, savedAgo(item.savedAt)].filter(Boolean).join(" · ")}
           </span>
           <div className="relative flex items-center gap-0.5 text-muted-foreground">

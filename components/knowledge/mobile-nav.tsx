@@ -22,7 +22,7 @@ export function MobileNav({ onOpenSave }: { onOpenSave: () => void }) {
         <button
           onClick={onOpenSave}
           aria-label="Save"
-          className="flex size-12 -translate-y-1 items-center justify-center rounded-2xl bg-[var(--kn-ai)] text-[color:oklch(0.2_0.02_75)] shadow-lg shadow-black/40 transition-transform active:scale-90"
+          className="flex size-12 -translate-y-1 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25 transition-transform active:scale-90"
         >
           <Plus className="size-6" strokeWidth={2.5} />
         </button>

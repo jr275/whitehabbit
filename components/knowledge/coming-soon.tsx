@@ -28,7 +28,7 @@ export function ComingSoon({ eyebrow, title, description, icon: Icon, bullets }:
           <Icon className="size-7" />
         </span>
         <div className="max-w-md space-y-2">
-          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--kn-ai)]">Not available yet</p>
+          <p className="text-[13px] font-medium text-primary">Not available yet</p>
           <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
             This surface is designed but not wired to a real service yet, so there&apos;s nothing to show — we&apos;d
             rather leave it honest than fill it with fake data.

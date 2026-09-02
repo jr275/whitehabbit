@@ -1,10 +1,10 @@
-import { LibraryView } from "@/components/knowledge/library-view"
+import { KnowledgeHome } from "@/components/knowledge/knowledge-home"
 
 export const metadata = {
-  title: "Your Library · Knowledge",
-  description: "Your personal knowledge, saved and organized automatically.",
+  title: "Home · Knowledge",
+  description: "Your personal knowledge library — pick up where you left off, or save something new.",
 }
 
 export default function KnowledgeHomePage() {
-  return <LibraryView />
+  return <KnowledgeHome />
 }

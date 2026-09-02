@@ -57,9 +57,9 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
     >
       <button aria-label="Close" className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="kn-rise relative w-full max-w-md overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl">
-        <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-          <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            <Link2 className="size-3.5" /> Save to library
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <Link2 className="size-4 text-primary" /> Save to library
           </span>
           <button
             onClick={onClose}
@@ -109,7 +109,7 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
                 <button
                   onClick={handleSave}
                   disabled={!url.trim()}
-                  className="h-9 rounded-lg bg-[var(--kn-ai)] px-4 text-sm font-medium text-[color:oklch(0.2_0.02_75)] transition-opacity disabled:opacity-40"
+                  className="h-9 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-40"
                 >
                   {stage === "error" ? "Try again" : "Save"}
                 </button>
