@@ -130,6 +130,70 @@ function extractBody(html: string): string | undefined {
   return best.length >= 200 ? best : undefined
 }
 
+/** Resolve a possibly-relative URL (e.g. "/img/a.jpg", "//cdn/x.png")
+ * against the page URL into an absolute http(s) URL. Returns undefined
+ * when the value is empty, a data: URI, or cannot be resolved — the
+ * caller then persists NULL rather than a broken/relative src. */
+function resolveUrl(maybe: string | undefined, base: string): string | undefined {
+  if (!maybe) return undefined
+  const v = maybe.trim()
+  if (!v || v.startsWith("data:")) return undefined
+  try {
+    const abs = new URL(v, base)
+    if (abs.protocol !== "http:" && abs.protocol !== "https:") return undefined
+    return abs.toString()
+  } catch {
+    return undefined
+  }
+}
+
+/** Priority-3 fallback when there's no og:image/twitter:image: a
+ * declared <link rel="image_src">, then the first reasonably-sized
+ * in-content <img>. Heuristic but real — it only ever returns a URL
+ * that genuinely appears in the page markup, never a stock/random one. */
+function findFeaturedImage(html: string): string | undefined {
+  const linkImg = attr(html, "link", "href", "rel", "image_src")
+  if (linkImg) return linkImg
+
+  // Prefer images inside the main content region, if identifiable.
+  const region =
+    html.match(/<article[\s\S]*?<\/article>/i)?.[0] ??
+    html.match(/<main[\s\S]*?<\/main>/i)?.[0] ??
+    html
+
+  for (const m of region.matchAll(/<img[^>]+>/gi)) {
+    const tag = m[0]
+    // Skip tiny/tracking pixels and sprites/icons by obvious signals.
+    if (/\b(?:width|height)=["']?(?:1|0)["']?/i.test(tag)) continue
+    if (/sprite|icon|logo|avatar|pixel|tracking|blank|spacer/i.test(tag)) continue
+    const src =
+      tag.match(/\bsrc=["']([^"']+)["']/i)?.[1] ??
+      tag.match(/\bdata-src=["']([^"']+)["']/i)?.[1] ??
+      // srcset — take the first candidate URL
+      tag.match(/\bsrcset=["']([^"'\s,]+)/i)?.[1]
+    const decoded = src ? decodeEntities(src).trim() : undefined
+    if (decoded) return decoded
+  }
+  return undefined
+}
+
+/** Best-effort favicon / site icon URL, resolved to absolute. Falls
+ * back to the origin's /favicon.ico, which is a real convention (not a
+ * fabricated asset). Used for the small source glyph, never as a cover. */
+export function extractFavicon(html: string, url: string): string | undefined {
+  const rels = ["apple-touch-icon", "icon", "shortcut icon"]
+  for (const rel of rels) {
+    const href = attr(html, "link", "href", "rel", rel)
+    const abs = resolveUrl(href, url)
+    if (abs) return abs
+  }
+  try {
+    return new URL("/favicon.ico", url).toString()
+  } catch {
+    return undefined
+  }
+}
+
 function inferKind(url: string, html: string): ExtractedContent["kind"] {
   const u = url.toLowerCase()
   if (u.endsWith(".pdf")) return "pdf"
@@ -160,8 +224,17 @@ export function extractFromHtml(html: string, url: string): ExtractedContent {
   const excerpt = meta(html, ["og:description", "twitter:description", "description"])
   const siteName = meta(html, ["og:site_name", "application-name"])
   const author = meta(html, ["author", "article:author", "twitter:creator"])
-  const imageUrl = meta(html, ["og:image", "og:image:url", "twitter:image", "twitter:image:src"])
-  const canonicalUrl = attr(html, "link", "href", "rel", "canonical") ?? meta(html, ["og:url"])
+  // Cover image priority: og:image → twitter:image → declared featured
+  // image / first in-content <img>. Whatever we find is resolved to an
+  // absolute URL against the page (many sites use relative og:image),
+  // and anything unresolvable becomes undefined → persisted as NULL so
+  // the card falls back to the editorial cover instead of a broken src.
+  const rawImage =
+    meta(html, ["og:image", "og:image:url", "og:image:secure_url", "twitter:image", "twitter:image:src"]) ??
+    findFeaturedImage(html)
+  const imageUrl = resolveUrl(rawImage, url)
+  const canonicalUrl =
+    resolveUrl(attr(html, "link", "href", "rel", "canonical"), url) ?? resolveUrl(meta(html, ["og:url"]), url)
   const publishedAt = parseDate(meta(html, ["article:published_time", "og:article:published_time", "datePublished", "date"]))
   const lang = html.match(/<html[^>]+lang=["']([^"']+)["']/i)?.[1]?.slice(0, 8)
 
