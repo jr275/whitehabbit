@@ -189,6 +189,40 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
           ) : (
             <UnextractedBlock url={doc.url} />
           )}
+
+          {/* Mobile-only details — the Info aside is desktop-only, so on
+              small screens surface the same source metadata + topics here
+              rather than leaving them unreachable. */}
+          <div className="mt-12 border-t border-[var(--kn-edge)] pt-8 lg:hidden">
+            <a
+              href={doc.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mb-6 flex items-center justify-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25"
+            >
+              <ExternalLink className="size-4" /> Open original
+            </a>
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
+              <Meta label="Source" value={doc.source} />
+              {doc.author ? <Meta label="Author" value={doc.author} /> : null}
+              {doc.domain ? <Meta label="Origin" value={doc.domain} /> : null}
+              <Meta label="Type" value={KIND_META[doc.kind].label} />
+              {doc.wordCount ? <Meta label="Words" value={doc.wordCount.toLocaleString()} /> : null}
+              <Meta label="Saved" value={savedAgo(doc.savedAt)} />
+            </dl>
+            {doc.topics.length > 0 ? (
+              <div className="mt-4">
+                <dt className="text-[12px] font-medium text-muted-foreground">Topics</dt>
+                <dd className="mt-2 flex flex-wrap gap-1.5">
+                  {doc.topics.map((t) => (
+                    <span key={t} className="rounded-md bg-secondary/60 px-2 py-1 text-xs text-foreground/80">
+                      {t}
+                    </span>
+                  ))}
+                </dd>
+              </div>
+            ) : null}
+          </div>
         </article>
       </div>
 
