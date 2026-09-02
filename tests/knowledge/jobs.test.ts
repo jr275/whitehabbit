@@ -223,7 +223,7 @@ describe("claimAndRunJob — success", () => {
     const job = await repo.enqueueIngestJob(item.id, alice.orgId, alice.userId)
 
     const summary = await claimAndRunJob({ jobId: job.id, fetchDeps: { transport: fakeHtmlTransport(REAL_ARTICLE_HTML) } })
-    assert.deepEqual(summary, { claimed: 1, succeeded: 1, retried: 0, failed: 0 })
+    assert.deepEqual(summary, { claimed: 1, succeeded: 1, retried: 0, failed: 0, stale: 0 })
 
     const doneJob = await repo.getJob(job.id)
     assert.equal(doneJob?.status, "done")
@@ -270,7 +270,7 @@ describe("claimAndRunJob — failure / retry / backoff", () => {
     const job = await repo.enqueueIngestJob(item.id, alice.orgId, alice.userId)
 
     const summary = await claimAndRunJob({ jobId: job.id, fetchDeps: { transport: failingTransport() } })
-    assert.deepEqual(summary, { claimed: 1, succeeded: 0, retried: 1, failed: 0 })
+    assert.deepEqual(summary, { claimed: 1, succeeded: 0, retried: 1, failed: 0, stale: 0 })
 
     const retried = await repo.getJob(job.id)
     assert.equal(retried?.status, "queued", "back to queued — not yet terminal")
@@ -322,7 +322,7 @@ describe("claimAndRunJob — failure / retry / backoff", () => {
 
     for (let n = 1; n <= 4; n++) {
       const summary = await claimAndRunJob({ jobId: job.id, fetchDeps: { transport: failingTransport() } })
-      assert.deepEqual(summary, { claimed: 1, succeeded: 0, retried: 1, failed: 0 }, `attempt ${n} should retry, not terminate`)
+      assert.deepEqual(summary, { claimed: 1, succeeded: 0, retried: 1, failed: 0, stale: 0 }, `attempt ${n} should retry, not terminate`)
       job = (await repo.getJob(job.id))!
       assert.equal(job.attempts, n)
       assert.equal(job.status, "queued")
@@ -333,7 +333,7 @@ describe("claimAndRunJob — failure / retry / backoff", () => {
 
     // 5th failure — attempts reaches max_attempts (5).
     const finalSummary = await claimAndRunJob({ jobId: job.id, fetchDeps: { transport: failingTransport() } })
-    assert.deepEqual(finalSummary, { claimed: 1, succeeded: 0, retried: 0, failed: 1 })
+    assert.deepEqual(finalSummary, { claimed: 1, succeeded: 0, retried: 0, failed: 1, stale: 0 })
 
     const terminal = await repo.getJob(job.id)
     assert.equal(terminal?.status, "failed")

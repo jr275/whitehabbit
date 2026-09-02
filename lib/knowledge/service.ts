@@ -129,11 +129,15 @@ export interface SaveResult {
 /** Create the row immediately in `saved` state, enqueue its durable
  * ingestion job, and return both — so the API can respond instantly,
  * the UI can render the new card, and the job already exists in
- * Postgres as the real durability commitment (see enqueueIngestJob's
- * own doc comment) BEFORE the caller even schedules after()'s fast-
- * path claim. Unless the same page (by canonical dedup key) is
- * already saved, in which case the existing item is returned untouched
- * with duplicate=true and no job is enqueued. */
+ * Postgres as the real durability commitment (see
+ * insertSavedItemWithJob's own doc comment) BEFORE the caller even
+ * schedules after()'s fast-path claim. The item and its job are
+ * created in ONE transaction — either both commit or neither does, so
+ * there is no window where the item exists with no way to ever get a
+ * job (the orphan gap the Commit 12A audit found and this fixes).
+ * Unless the same page (by canonical dedup key) is already saved, in
+ * which case the existing item is returned untouched with
+ * duplicate=true and no job is enqueued. */
 export async function saveUrl(params: { orgId: string; userId: string | null; url: string }): Promise<SaveResult> {
   const normalized = normalizeUrl(params.url)
   // Fail fast on obviously-unsafe URLs before we even persist, so the
@@ -173,18 +177,18 @@ export async function saveUrl(params: { orgId: string; userId: string | null; ur
   }
 
   try {
-    const row = await repo.insertSavedItem({
+    // Atomic: the item and its durable job are committed together, or
+    // neither is. This job row exists in Postgres before saveUrl
+    // returns, well before the caller's HTTP response is sent — if
+    // after()'s fast-path claim never runs at all, the item is never
+    // silently stuck, since it's a real, reclaimable queued job.
+    const { row, job } = await repo.insertSavedItemWithJob({
       orgId: params.orgId,
       userId: params.userId,
       url: normalized,
       normalizedUrl: normalizedKey,
       domain: domainOf(normalized),
     })
-    // The durable commitment: this job row exists in Postgres before
-    // saveUrl returns, well before the caller's HTTP response is
-    // sent. If after()'s fast-path claim never runs at all, the item
-    // is never silently stuck — it's a real, reclaimable queued job.
-    const job = await repo.enqueueIngestJob(row.id, params.orgId, params.userId)
     return { row, duplicate: false, jobId: job.id }
   } catch (err) {
     // Race: a concurrent save inserted the same canonical URL first and
@@ -418,6 +422,13 @@ export interface JobRunSummary {
   succeeded: number
   retried: number
   failed: number
+  /** A claimed job's outcome write was refused because this worker's
+   *  lease had already been reclaimed by someone else (see repo.ts's
+   *  completeJob/failJob lease fencing). Expected to be rare — it
+   *  means a run took longer than LEASE_MS — and is never counted as
+   *  succeeded/retried/failed, since this worker's outcome never
+   *  actually landed. */
+  stale: number
 }
 
 /**
@@ -430,7 +441,7 @@ export interface JobRunSummary {
  * processItem made is preserved here instead.
  */
 export async function claimAndRunJob(opts: ClaimAndRunOptions = {}, workerId: string = `worker_${randomUUID()}`): Promise<JobRunSummary> {
-  const summary: JobRunSummary = { claimed: 0, succeeded: 0, retried: 0, failed: 0 }
+  const summary: JobRunSummary = { claimed: 0, succeeded: 0, retried: 0, failed: 0, stale: 0 }
   try {
     const jobs = opts.jobId
       ? await repo.claimJobById(opts.jobId, workerId).then((j) => (j ? [j] : []))
@@ -438,7 +449,7 @@ export async function claimAndRunJob(opts: ClaimAndRunOptions = {}, workerId: st
     summary.claimed = jobs.length
 
     for (const job of jobs) {
-      await runClaimedJob(job, summary, opts.fetchDeps ?? {})
+      await runClaimedJob(job, summary, opts.fetchDeps ?? {}, workerId)
     }
   } catch (err) {
     // A claim itself failing (e.g. a transient DB error) is the same
@@ -453,29 +464,54 @@ export async function claimAndRunJob(opts: ClaimAndRunOptions = {}, workerId: st
 
 /** Runs one already-claimed job and records its outcome. Split out
  * from claimAndRunJob only so the per-job try/catch (one job failing
- * must never stop the rest of a batch) reads clearly. */
-async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetchDeps: FetchDeps): Promise<void> {
+ * must never stop the rest of a batch) reads clearly.
+ *
+ * `workerId` is the SAME id this exact job was claimed with a moment
+ * ago (claimAndRunJob generates one id per call and uses it for both
+ * the claim and every outcome write below) — so a normal, single,
+ * uninterrupted run always fences successfully against its own claim.
+ * The fence only ever refuses a DIFFERENT worker's stale write (see
+ * repo.ts's completeJob/failJob). */
+async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetchDeps: FetchDeps, workerId: string): Promise<void> {
   try {
     await runIngestJob(job.item_id, job.org_id, job.created_by, fetchDeps)
-    await repo.completeJob(job.id)
-    summary.succeeded++
+    const landed = await repo.completeJob(job.id, workerId)
+    if (landed) {
+      summary.succeeded++
+    } else {
+      // Our lease was already reclaimed by someone else by the time we
+      // finished — whoever holds the job now owns its outcome, not us.
+      // Never overwrite knowledge_items or the job row in this case.
+      logger.warn("knowledge_job_stale_complete", { jobId: job.id, itemId: job.item_id, workerId })
+      summary.stale++
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Processing failed unexpectedly."
     const attempts = job.attempts + 1
     const terminal = attempts >= job.max_attempts
 
     if (terminal) {
-      await repo.failJob(job.id, { attempts, error: message, retryAt: null })
-      // The one point where a durable job's outcome becomes visible
-      // on the UI-facing row — knowledge_items.status stays exactly
-      // what it always meant, only reached through a durable retry
-      // loop instead of a single best-effort attempt.
-      await repo.setStatus(job.item_id, job.org_id, job.created_by, "failed", message)
-      summary.failed++
+      const landed = await repo.failJob(job.id, workerId, { attempts, error: message, retryAt: null })
+      if (landed) {
+        // The one point where a durable job's outcome becomes visible
+        // on the UI-facing row — knowledge_items.status stays exactly
+        // what it always meant, only reached through a durable retry
+        // loop instead of a single best-effort attempt.
+        await repo.setStatus(job.item_id, job.org_id, job.created_by, "failed", message)
+        summary.failed++
+      } else {
+        logger.warn("knowledge_job_stale_fail", { jobId: job.id, itemId: job.item_id, workerId, terminal: true })
+        summary.stale++
+      }
     } else {
       const retryAt = Date.now() + computeBackoffMs(attempts)
-      await repo.failJob(job.id, { attempts, error: message, retryAt })
-      summary.retried++
+      const landed = await repo.failJob(job.id, workerId, { attempts, error: message, retryAt })
+      if (landed) {
+        summary.retried++
+      } else {
+        logger.warn("knowledge_job_stale_fail", { jobId: job.id, itemId: job.item_id, workerId, terminal: false })
+        summary.stale++
+      }
     }
   }
 }

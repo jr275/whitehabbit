@@ -29,7 +29,7 @@ import "server-only"
  * ================================================================== */
 
 import { randomUUID } from "node:crypto"
-import { query, queryOne, withTransaction } from "@/lib/db/client"
+import { getPool, query, queryOne, withTransaction } from "@/lib/db/client"
 import type { KnowledgeState } from "./types"
 
 export interface KnowledgeRow {
@@ -437,10 +437,73 @@ export const LEASE_MS = 90_000
  * principle; every row created by enqueueIngestJob gets this value. */
 export const DEFAULT_MAX_ATTEMPTS = 5
 
-/** Enqueues one durable ingestion job for an item — the durable
- * commitment point. Called BEFORE the HTTP response is returned by
- * both saveUrl and the retry route, so the job exists in Postgres
- * even if the calling function is torn down the instant after.
+/** Atomically creates a brand-new item AND its durable ingestion job
+ * in ONE transaction — the fix for the save-path orphan window the
+ * Commit 12A audit found: insertSavedItem() and enqueueIngestJob()
+ * were two independent round trips, so an item could commit while its
+ * job failed to enqueue, leaving a permanently stuck `saved` row with
+ * no job and no retry affordance (retry only ever shows for `failed`).
+ * Reuses withTransaction — the same helper saveExtraction already
+ * relies on for its own item+tags atomicity — rather than a second
+ * transaction abstraction.
+ *
+ * Deliberately NOT built on top of insertSavedItem()/enqueueIngestJob()
+ * themselves: those two are kept as their own standalone, independently
+ * testable functions (insertSavedItem in particular is used directly by
+ * tests that deliberately want an item with NO job attached), so this
+ * is its own small function with the same two INSERT statements, run
+ * through a shared client instead of the pool.
+ *
+ * The job INSERT here skips enqueueIngestJob's ON CONFLICT/retry-loop
+ * dance on purpose: itemId is freshly generated inside THIS SAME
+ * transaction, so no job can possibly already exist for it —
+ * uq_knowledge_jobs_item_open cannot be violated by construction, not
+ * just by luck. If either INSERT fails for any reason (including the
+ * pre-existing knowledge_items dedup race — a concurrent save of the
+ * identical URL tripping uq_knowledge_org_user_normalized), the WHOLE
+ * transaction rolls back: neither the item nor the job persists, and
+ * saveUrl's existing duplicate-recovery catch block (unchanged) takes
+ * over exactly as it did before this function existed. */
+export async function insertSavedItemWithJob(params: {
+  orgId: string
+  userId: string | null
+  url: string
+  normalizedUrl: string | null
+  domain: string | null
+}): Promise<{ row: KnowledgeRow; job: KnowledgeJobRow }> {
+  const itemId = `kn_${randomUUID()}`
+  const jobId = `knj_${randomUUID()}`
+  const now = Date.now()
+
+  return withTransaction(async (client) => {
+    const itemResult = await client.query<KnowledgeRow>(
+      `INSERT INTO knowledge_items (id, org_id, created_by, url, normalized_url, domain, status, kind, attempts, favorite, archived, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'saved', 'article', 0, FALSE, FALSE, $7, $7)
+       RETURNING ${SELECT_COLS}`,
+      [itemId, params.orgId, params.userId, params.url, params.normalizedUrl, params.domain, now],
+    )
+    const row = itemResult.rows[0]
+
+    const jobResult = await client.query<KnowledgeJobRow>(
+      `INSERT INTO knowledge_jobs (id, item_id, org_id, created_by, job_type, status, attempts, max_attempts, available_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'ingest', 'queued', 0, $5, $6, $6, $6)
+       RETURNING ${JOB_COLS}`,
+      [jobId, itemId, params.orgId, params.userId, DEFAULT_MAX_ATTEMPTS, now],
+    )
+    const job = jobResult.rows[0]
+
+    return { row, job }
+  })
+}
+
+/** Enqueues one durable ingestion job for an EXISTING item — used by
+ * the retry route (a new save uses insertSavedItemWithJob above
+ * instead, which creates both atomically for a brand-new item). Called
+ * BEFORE the item is reset to `saved` and before the HTTP response is
+ * returned, so the job exists in Postgres even if the calling function
+ * is torn down the instant after — and, just as importantly, so a
+ * failure here never destroys the item's prior `failed` state (see
+ * this function's callers).
  *
  * IDEMPOTENCY: uq_knowledge_jobs_item_open (a partial unique index on
  * item_id WHERE status='queued') is the database's own final
@@ -544,12 +607,24 @@ export async function claimJobById(jobId: string, workerId: string, now: number 
 }
 
 /** Marks a claimed job done — success. Clears the lease; there is
- * nothing left to reclaim once a job is terminal. */
-export async function completeJob(jobId: string): Promise<void> {
-  await query("UPDATE knowledge_jobs SET status = 'done', locked_at = NULL, locked_by = NULL, updated_at = $1 WHERE id = $2", [
-    Date.now(),
-    jobId,
-  ])
+ * nothing left to reclaim once a job is terminal.
+ *
+ * LEASE FENCING: the WHERE clause requires `locked_by = workerId` —
+ * the same worker id this job was claimed with. Without this, a
+ * "zombie" worker that overran its lease (LEASE_MS) and finishes
+ * AFTER a second worker has already reclaimed and is processing the
+ * same job could still silently overwrite that second worker's
+ * outcome with its own stale one, purely because completeJob wrote by
+ * id alone. With the fence, a stale worker's write matches zero rows
+ * — a real no-op the caller can detect via the returned boolean —
+ * instead of clobbering whoever legitimately holds the job now.
+ * Returns true if THIS worker's write actually took effect. */
+export async function completeJob(jobId: string, workerId: string): Promise<boolean> {
+  const result = await getPool().query(
+    "UPDATE knowledge_jobs SET status = 'done', locked_at = NULL, locked_by = NULL, updated_at = $1 WHERE id = $2 AND locked_by = $3",
+    [Date.now(), jobId, workerId],
+  )
+  return (result.rowCount ?? 0) > 0
 }
 
 /** Records a failed attempt. The CALLER (service.ts's claimAndRunJob)
@@ -562,26 +637,34 @@ export async function completeJob(jobId: string): Promise<void> {
  *   retryAt === null → terminal 'failed', lease cleared
  * Either way `attempts` and `last_error` are written from the
  * caller's own count — never recomputed here, so there is exactly one
- * place (service.ts) that decides what "one more failure" means. */
+ * place (service.ts) that decides what "one more failure" means.
+ *
+ * LEASE FENCING: same `locked_by = workerId` guard as completeJob,
+ * same reason — a stale worker must not be able to record a job as
+ * retried or terminally failed once someone else has reclaimed it.
+ * Returns true if THIS worker's write actually took effect. */
 export async function failJob(
   jobId: string,
+  workerId: string,
   outcome: { attempts: number; error: string; retryAt: number | null },
-): Promise<void> {
+): Promise<boolean> {
   const now = Date.now()
   if (outcome.retryAt !== null) {
-    await query(
+    const result = await getPool().query(
       `UPDATE knowledge_jobs
        SET status = 'queued', attempts = $1, last_error = $2, available_at = $3, locked_at = NULL, locked_by = NULL, updated_at = $4
-       WHERE id = $5`,
-      [outcome.attempts, outcome.error, outcome.retryAt, now, jobId],
+       WHERE id = $5 AND locked_by = $6`,
+      [outcome.attempts, outcome.error, outcome.retryAt, now, jobId, workerId],
     )
+    return (result.rowCount ?? 0) > 0
   } else {
-    await query(
+    const result = await getPool().query(
       `UPDATE knowledge_jobs
        SET status = 'failed', attempts = $1, last_error = $2, locked_at = NULL, locked_by = NULL, updated_at = $3
-       WHERE id = $4`,
-      [outcome.attempts, outcome.error, now, jobId],
+       WHERE id = $4 AND locked_by = $5`,
+      [outcome.attempts, outcome.error, now, jobId, workerId],
     )
+    return (result.rowCount ?? 0) > 0
   }
 }
 
