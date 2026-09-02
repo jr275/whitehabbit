@@ -29,8 +29,9 @@ import { after, before, describe, it } from "node:test"
 import assert from "node:assert/strict"
 import { randomBytes } from "node:crypto"
 
-import { canonicalizeUrlSafe } from "@/lib/knowledge/url"
+import { canonicalizeUrlSafe, MAX_CANONICAL_URL_BYTES } from "@/lib/knowledge/url"
 import * as repo from "@/lib/knowledge/repo"
+import { SaveValidationError, saveUrl } from "@/lib/knowledge/service"
 import { closeTestPool, createTenant, getTestPool, prepareDatabase, type TestTenant } from "../helpers/db"
 
 let alice: TestTenant
@@ -249,16 +250,18 @@ describe("dedup — created_by is recorded but not scoped", () => {
 })
 
 describe("dedup — canonical key length", () => {
-  it("rejects a canonical URL too long for the index, as a raw database error", async () => {
-    // SUSPECT (high) — a real, reachable production failure.
+  it("is why the limit exists: past the ceiling the index itself refuses", async () => {
+    // This is the failure MAX_CANONICAL_URL_BYTES prevents, asserted
+    // against the real index so the limit stays anchored to a measured
+    // fact rather than a remembered number. Reaching it now requires
+    // bypassing saveUrl, as this helper does.
     //
-    // canonicalizeUrl applies no length limit, and the dedup index is
-    // a btree whose row maximum is 2704 bytes. Past roughly 2670
-    // incompressible characters the INSERT fails with a Postgres
-    // error that service.saveUrl does not recognise (it only catches
-    // /duplicate key|unique/i), so it propagates to withApiHandler and
-    // the user gets "Something went wrong. Try again." — for a URL
-    // that will never succeed, however many times they retry.
+    // The dedup index is a btree whose row maximum is 2704 bytes. Past
+    // it the INSERT fails with a Postgres error that service.saveUrl
+    // does not recognise (it only catches /duplicate key|unique/i), so
+    // it would propagate to withApiHandler and the user would get
+    // "Something went wrong. Try again." — for a URL that will never
+    // succeed, however many times they retry.
     //
     // Incompressible on purpose: repeat('a', n) is TOAST-compressed to
     // almost nothing and inserts happily at 20,000 characters, which
@@ -286,6 +289,120 @@ describe("dedup — canonical key length", () => {
     const incompressible = randomBytes(1200).toString("hex") // 2400 chars
     const url = `https://example.com/${incompressible}`
     const row = await save(alice, url)
-    assert.ok(row.id, "just under the limit still saves")
+    assert.ok(row.id, "the index tolerates more than the guard allows — that gap is the headroom")
+  })
+
+  /* ── The guard, exercised through the REAL service.saveUrl ──────── *
+   * saveUrl is otherwise avoided in this file because assertSafeUrl
+   * does DNS. A literal public IP is the exception: the guard checks
+   * it directly and returns before any lookup, so these tests exercise
+   * the actual production path with no network at all. That is what
+   * makes "rejected BEFORE the database" provable rather than asserted
+   * about a copy of the code. */
+
+  const publicIpUrl = (pathBytes: number) => {
+    const prefix = "https://93.184.216.34/"
+    return prefix + "a".repeat(pathBytes - prefix.length)
+  }
+
+  async function countItems(orgId: string): Promise<number> {
+    const { rows } = await getTestPool().query<{ n: string }>(
+      "SELECT count(*)::text AS n FROM knowledge_items WHERE org_id = $1",
+      [orgId],
+    )
+    return Number(rows[0].n)
+  }
+
+  it("saveUrl rejects an over-long URL with a message the user can act on", async () => {
+    const tenant = await createTenant("too-long")
+    await assert.rejects(
+      () => saveUrl({ orgId: tenant.orgId, userId: tenant.userId, url: publicIpUrl(MAX_CANONICAL_URL_BYTES + 1) }),
+      (err: unknown) => {
+        assert.ok(err instanceof SaveValidationError, "a 400, not a 500")
+        assert.match(err.message, /too long/i)
+        return true
+      },
+    )
+  })
+
+  it("saveUrl rejects BEFORE writing anything", async () => {
+    // The ordering is the point: input → canonicalise → validate →
+    // dedup → persist. If the check ran after the insert the row count
+    // would move, and the user would get a 500 from Postgres instead.
+    const tenant = await createTenant("no-write")
+    const before = await countItems(tenant.orgId)
+    await assert.rejects(() =>
+      saveUrl({ orgId: tenant.orgId, userId: tenant.userId, url: publicIpUrl(MAX_CANONICAL_URL_BYTES + 500) }),
+    )
+    assert.equal(await countItems(tenant.orgId), before, "nothing was persisted")
+  })
+
+  it("saveUrl rejects an enormous incompressible URL without reaching the index", async () => {
+    // repeat("a", n) is TOAST-compressed to almost nothing and would
+    // insert happily at 20,000 characters, which makes a naive test
+    // pass and hides the index limit entirely. This one is genuinely
+    // incompressible, and is far past the btree maximum — yet the user
+    // still gets a validation error, never "index row size exceeds".
+    const tenant = await createTenant("enormous")
+    const url = `https://93.184.216.34/${randomBytes(4000).toString("hex")}`
+    assert.ok(canonicalizeUrlSafe(url)!.length > 2704, "past the btree maximum, not merely past the guard")
+    await assert.rejects(
+      () => saveUrl({ orgId: tenant.orgId, userId: tenant.userId, url }),
+      (err: unknown) => {
+        assert.ok(err instanceof SaveValidationError)
+        assert.doesNotMatch(err.message, /index row size|exceeds btree/i, "no raw Postgres error reaches the user")
+        return true
+      },
+    )
+    assert.equal(await countItems(tenant.orgId), 0)
+  })
+
+  it("saveUrl still accepts a URL at the limit", async () => {
+    const tenant = await createTenant("at-limit")
+    const result = await saveUrl({
+      orgId: tenant.orgId,
+      userId: tenant.userId,
+      url: publicIpUrl(MAX_CANONICAL_URL_BYTES),
+    })
+    assert.equal(result.duplicate, false)
+    assert.equal(await countItems(tenant.orgId), 1, "the limit is inclusive")
+  })
+})
+
+describe("dedup — hash routes are distinct documents", () => {
+  it("saves two hashbang articles as two rows", async () => {
+    // The end-to-end consequence of the canonicalisation fix. Before
+    // it, the second save collided with the first on the unique index
+    // and the user was told the article was already in their library.
+    const tenant = await createTenant("spa")
+    const slug = randomBytes(6).toString("hex")
+    const one = await save(tenant, `https://example.com/${slug}#!/artigo/1`)
+    const two = await save(tenant, `https://example.com/${slug}#!/artigo/2`)
+    assert.notEqual(one.id, two.id)
+    assert.notEqual(one.normalized_url, two.normalized_url, "two keys, so the index permits both")
+
+    const { rows } = await repo.listItems(tenant.orgId, { limit: 50, offset: 0 })
+    assert.equal(rows.length, 2)
+  })
+
+  it("still collapses the SAME route saved twice", async () => {
+    // The fix must not cost dedup. The index is the one that decides.
+    const tenant = await createTenant("spa-dupe")
+    const slug = randomBytes(6).toString("hex")
+    await save(tenant, `https://example.com/${slug}#!/artigo/1`)
+    await assert.rejects(
+      () => save(tenant, `https://www.example.com/${slug}/#!/artigo/1`),
+      (err: unknown) => {
+        assert.match(err instanceof Error ? err.message : String(err), /duplicate key|unique/i)
+        return true
+      },
+    )
+  })
+
+  it("keeps an ordinary anchor collapsing, as before", async () => {
+    const tenant = await createTenant("anchor")
+    const slug = randomBytes(6).toString("hex")
+    await save(tenant, `https://example.com/${slug}#intro`)
+    await assert.rejects(() => save(tenant, `https://example.com/${slug}#comments`))
   })
 })

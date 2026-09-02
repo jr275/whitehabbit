@@ -21,7 +21,7 @@
  * ================================================================== */
 
 import type { KnowledgeDocument, KnowledgeItem, KnowledgeKind, KnowledgeListResult } from "./types"
-import { canonicalizeUrlSafe } from "./url"
+import { canonicalizeUrlSafe, isCanonicalUrlTooLong } from "./url"
 
 const STORAGE_KEY = "knowledge.guest.items.v1"
 
@@ -189,6 +189,11 @@ export function guestSaveUrl(rawUrl: string): { item: KnowledgeItem; duplicate: 
   // (non-archived) items, and return the existing one instead of a
   // duplicate.
   const key = canonicalizeUrlSafe(url.href)
+  // Same ceiling as the server, from the same shared function. There is
+  // no btree here — localStorage would take any length — but a guest
+  // library is meant to be exported into a real account later, and a URL
+  // this store accepts and saveUrl refuses is a row that cannot migrate.
+  if (key && isCanonicalUrlTooLong(key)) throw new Error("That URL is too long to save.")
   if (key) {
     const existing = readAll().find((r) => !r.archived && canonicalizeUrlSafe(r.url) === key)
     if (existing) return { item: toItem(existing), duplicate: true }

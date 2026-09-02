@@ -17,7 +17,7 @@ import { logger } from "@/lib/observability/logger"
 import { extractFavicon, extractFromHtml } from "./extract"
 import * as repo from "./repo"
 import type { KnowledgeRow } from "./repo"
-import { canonicalizeUrlSafe } from "./url"
+import { canonicalizeUrlSafe, isCanonicalUrlTooLong } from "./url"
 
 const FETCH_TIMEOUT_MS = 15_000
 const MAX_BYTES = 5_000_000 // 5 MB cap — enough for real articles, refuses payload bombs
@@ -127,6 +127,17 @@ export async function saveUrl(params: { orgId: string; userId: string | null; ur
   }
 
   const normalizedKey = canonicalizeUrlSafe(normalized)
+
+  // The dedup key is indexed, and a btree index row has a hard byte
+  // ceiling. Refuse here, before the database does: past the ceiling
+  // Postgres raises an error saveUrl cannot interpret and the user gets
+  // a 500 for a URL that will never save however often they retry.
+  // Rejected, never truncated — a truncated key silently collides with
+  // every other URL sharing its prefix, which turns "too long" into
+  // "opens somebody else's article".
+  if (normalizedKey && isCanonicalUrlTooLong(normalizedKey)) {
+    throw new SaveValidationError("That URL is too long to save.")
+  }
 
   // Already saved? Return the existing item rather than a duplicate.
   if (normalizedKey) {
