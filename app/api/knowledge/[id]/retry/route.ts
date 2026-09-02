@@ -21,17 +21,18 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     await enforceRateLimit("knowledge_retry", organizationId)
     const { id } = await params
 
-    const row = await repo.getItem(id, organizationId)
+    // S5: owner-scoped — retrying another user's item 404s, same as GET.
+    const row = await repo.getItem(id, organizationId, userId)
     if (!row) throw new NotFoundError()
 
-    await repo.setStatus(id, organizationId, "saved", null)
+    await repo.setStatus(id, organizationId, userId, "saved", null)
     await recordAudit({ orgId: organizationId, userId, action: "knowledge.retry", resourceType: "knowledge_item", resourceId: id })
 
     after(async () => {
-      await processItem(id, organizationId)
+      await processItem(id, organizationId, userId)
     })
 
-    const fresh = (await repo.getItem(id, organizationId)) ?? row
+    const fresh = (await repo.getItem(id, organizationId, userId)) ?? row
     return NextResponse.json({ item: rowToItem(fresh, []) })
   })
 }

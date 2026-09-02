@@ -6,9 +6,10 @@ import "server-only"
  *                              { favorite?: boolean, archived?: boolean }
  * DELETE /api/knowledge/:id  — permanently remove the item.
  *
- * Every handler is org-scoped through requireSession() + the repo's
- * org-filtered queries: another org's item is indistinguishable from a
- * nonexistent one (404), never leaked. */
+ * Every handler is owner-scoped (org AND user, S5) through
+ * requireSession() + the repo's own (org, user)-filtered queries:
+ * another org's item, or another user's item in the SAME org, is
+ * indistinguishable from a nonexistent one (404), never leaked. */
 
 import { NextResponse } from "next/server"
 import { NotFoundError, ValidationError, withApiHandler } from "@/lib/api-error"
@@ -19,16 +20,18 @@ import { requireSession } from "@/lib/session"
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   return withApiHandler("knowledge.get", async () => {
-    const { organizationId } = await requireSession()
+    const { organizationId, userId } = await requireSession()
     const { id } = await params
 
-    const row = await repo.getItem(id, organizationId)
+    // S5: owner-scoped — another user's item in the same org is
+    // indistinguishable from a nonexistent one.
+    const row = await repo.getItem(id, organizationId, userId)
     if (!row) throw new NotFoundError()
 
     // Reading is a side effect of opening a ready item — set first-open.
-    if (row.status === "ready" && !row.read_at) await repo.markRead(id, organizationId)
+    if (row.status === "ready" && !row.read_at) await repo.markRead(id, organizationId, userId)
 
-    const tags = await repo.getTags(id, organizationId)
+    const tags = await repo.getTags(id, organizationId, userId)
     return NextResponse.json({ document: rowToDocument({ ...row, read_at: row.read_at ?? String(Date.now()) }, tags) })
   })
 }
@@ -43,18 +46,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       throw new ValidationError("Provide favorite and/or archived boolean.")
     }
 
-    let row = await repo.getItem(id, organizationId)
+    let row = await repo.getItem(id, organizationId, userId)
     if (!row) throw new NotFoundError()
 
     if (typeof body.favorite === "boolean") {
-      row = (await repo.setFavorite(id, organizationId, body.favorite)) ?? row
+      row = (await repo.setFavorite(id, organizationId, userId, body.favorite)) ?? row
     }
     if (typeof body.archived === "boolean") {
-      row = (await repo.setArchived(id, organizationId, body.archived)) ?? row
+      row = (await repo.setArchived(id, organizationId, userId, body.archived)) ?? row
       await recordAudit({ orgId: organizationId, userId, action: body.archived ? "knowledge.archive" : "knowledge.unarchive", resourceType: "knowledge_item", resourceId: id })
     }
 
-    const tags = await repo.getTags(id, organizationId)
+    const tags = await repo.getTags(id, organizationId, userId)
     return NextResponse.json({ item: rowToItem(row, tags) })
   })
 }
@@ -64,7 +67,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     const { organizationId, userId } = await requireSession()
     const { id } = await params
 
-    const deleted = await repo.deleteItem(id, organizationId)
+    const deleted = await repo.deleteItem(id, organizationId, userId)
     if (!deleted) throw new NotFoundError()
     await recordAudit({ orgId: organizationId, userId, action: "knowledge.delete", resourceType: "knowledge_item", resourceId: id })
 

@@ -10,15 +10,18 @@ export const metadata = {
 
 export default async function TopicsPage() {
   let organizationId: string
+  let userId: string
   try {
-    ;({ organizationId } = await requireSession())
+    ;({ organizationId, userId } = await requireSession())
   } catch (err) {
     // No session → derive topics client-side from the guest library.
     if (err instanceof UnauthenticatedError) return <GuestTopics />
     throw err
   }
 
-  const counts = await listTagCounts(organizationId)
+  // S5: topics are derived from THIS user's own saved items only —
+  // never an org-wide aggregate that would leak a colleague's tags.
+  const counts = await listTagCounts(organizationId, userId)
   const topics = tagsToTopics(counts).sort((a, b) => b.count - a.count)
   const max = topics.reduce((m, t) => Math.max(m, t.count), 1)
 

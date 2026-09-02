@@ -140,9 +140,11 @@ export async function saveUrl(params: { orgId: string; userId: string | null; ur
     throw new SaveValidationError("That URL is too long to save.")
   }
 
-  // Already saved? Return the existing item rather than a duplicate.
+  // Already saved BY THIS USER? Return their existing item rather than
+  // a duplicate. Scoped by (org, user) — S5: a colleague's item with
+  // the same canonical key must never come back here as "yours".
   if (normalizedKey) {
-    const existing = await repo.findByNormalizedUrl(params.orgId, normalizedKey)
+    const existing = await repo.findByNormalizedUrl(params.orgId, params.userId, normalizedKey)
     if (existing) return { row: existing, duplicate: true }
   }
 
@@ -160,7 +162,7 @@ export async function saveUrl(params: { orgId: string; userId: string | null; ur
     // tripped the partial unique index. Resolve to that existing item
     // instead of surfacing a raw constraint error.
     if (normalizedKey && err instanceof Error && /duplicate key|unique/i.test(err.message)) {
-      const existing = await repo.findByNormalizedUrl(params.orgId, normalizedKey)
+      const existing = await repo.findByNormalizedUrl(params.orgId, params.userId, normalizedKey)
       if (existing) return { row: existing, duplicate: true }
     }
     throw err
@@ -241,14 +243,21 @@ function decodeUtf8(body: Buffer): string {
  * Persists each transition; on any failure sets status=failed with a
  * real, human-readable reason. Never throws to its caller — a
  * background invocation must not crash the request that scheduled it.
+ *
+ * userId is the item's real owner, already known by both callers (the
+ * save route just inserted the row for this exact user; the retry
+ * route already re-validated ownership via a user-scoped getItem
+ * before scheduling this). Threaded through so every repo call this
+ * makes carries its own (org, user) predicate — not a background job
+ * that trusts an earlier check happened somewhere else.
  */
-export async function processItem(id: string, orgId: string): Promise<void> {
+export async function processItem(id: string, orgId: string, userId: string | null): Promise<void> {
   try {
-    await repo.incrementAttempts(id, orgId)
-    const item = await repo.getItem(id, orgId)
-    if (!item) return // deleted before processing ran — nothing to do
+    await repo.incrementAttempts(id, orgId, userId)
+    const item = await repo.getItem(id, orgId, userId)
+    if (!item) return // deleted before processing ran, or ownership no longer checks out — nothing to do
 
-    await repo.setStatus(id, orgId, "fetching")
+    await repo.setStatus(id, orgId, userId, "fetching")
 
     let fetched: { html: string; contentType: string }
     try {
@@ -258,11 +267,11 @@ export async function processItem(id: string, orgId: string): Promise<void> {
       // guardedFetch has already logged the detail; what lands on the
       // row is the same message a stranger would see.
       const reason = err instanceof SaveValidationError ? err.message : "Could not fetch the source."
-      await repo.setStatus(id, orgId, "failed", reason)
+      await repo.setStatus(id, orgId, userId, "failed", reason)
       return
     }
 
-    await repo.setStatus(id, orgId, "extracting")
+    await repo.setStatus(id, orgId, userId, "extracting")
 
     const isHtml = /text\/html|application\/xhtml/i.test(fetched.contentType)
     const domain = item.domain ?? undefined
@@ -272,7 +281,7 @@ export async function processItem(id: string, orgId: string): Promise<void> {
       // (PDF, video page without OG, etc). Persist it honestly as ready
       // with what we can derive — no fabricated body text.
       const kind = item.url.toLowerCase().endsWith(".pdf") ? "pdf" : "document"
-      await repo.saveExtraction(id, orgId, {
+      await repo.saveExtraction(id, orgId, userId, {
         status: "ready",
         kind,
         title: domain ? `${domain} — saved file` : item.url,
@@ -297,7 +306,7 @@ export async function processItem(id: string, orgId: string): Promise<void> {
     // Reading time is only honest for text kinds — never label a video
     // or PDF with an invented "N min read" derived from page chrome.
     const textKind = extracted.kind === "article" || extracted.kind === "document"
-    await repo.saveExtraction(id, orgId, {
+    await repo.saveExtraction(id, orgId, userId, {
       status: "ready",
       kind: extracted.kind,
       title: extracted.title ?? (domain ? `Untitled — ${domain}` : "Untitled"),
@@ -319,7 +328,7 @@ export async function processItem(id: string, orgId: string): Promise<void> {
     // Last-resort guard: any unexpected error still leaves a real,
     // honest failed state rather than an item stuck "extracting".
     try {
-      await repo.setStatus(id, orgId, "failed", err instanceof Error ? err.message : "Processing failed unexpectedly.")
+      await repo.setStatus(id, orgId, userId, "failed", err instanceof Error ? err.message : "Processing failed unexpectedly.")
     } catch {
       /* swallow — nothing else we can do in a background task */
     }

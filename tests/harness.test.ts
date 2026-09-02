@@ -90,18 +90,30 @@ describe("test database", () => {
     assert.ok(!tables.includes("knowledge_artifacts"), "knowledge_artifacts belongs to the abandoned M1 branch")
   })
 
-  it("applies 0004_knowledge_dedupe's columns and partial unique index", async () => {
+  it("applies 0004_knowledge_dedupe's columns, and 0005's user-scoped dedup index that superseded 0004's own", async () => {
     const { rows: cols } = await getTestPool().query<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns
        WHERE table_name = 'knowledge_items' AND column_name IN ('normalized_url', 'favicon')`,
     )
     assert.equal(cols.length, 2, "0004 adds normalized_url and favicon")
 
+    // 0004's own uq_knowledge_org_normalized (org_id, normalized_url)
+    // was DROPPED by 0005_knowledge_user_scope.sql (S5): it enforced
+    // uniqueness across an org's WHOLE library, which is exactly the
+    // bug S5 fixes — two colleagues could never each have their own
+    // active row for the same public URL. 0005's replacement adds
+    // created_by to the same constraint; asserting for the OLD name
+    // here would be asserting for the bug, not the schema.
+    const { rows: oldIdx } = await getTestPool().query<{ indexname: string }>(
+      `SELECT indexname FROM pg_indexes WHERE tablename = 'knowledge_items' AND indexname = 'uq_knowledge_org_normalized'`,
+    )
+    assert.equal(oldIdx.length, 0, "0005 must have dropped 0004's org-only index")
+
     const { rows: idx } = await getTestPool().query<{ indexname: string }>(
       `SELECT indexname FROM pg_indexes
-       WHERE tablename = 'knowledge_items' AND indexname = 'uq_knowledge_org_normalized'`,
+       WHERE tablename = 'knowledge_items' AND indexname = 'uq_knowledge_org_user_normalized'`,
     )
-    assert.equal(idx.length, 1, "0004 adds the dedup index")
+    assert.equal(idx.length, 1, "0005 adds the user-scoped dedup index")
   })
 
   it("creates isolated tenants", async () => {

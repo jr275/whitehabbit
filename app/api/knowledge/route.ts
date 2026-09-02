@@ -25,7 +25,7 @@ const KINDS = new Set(["article", "video", "pdf", "podcast", "social", "document
 
 export async function GET(req: Request) {
   return withApiHandler("knowledge.list", async () => {
-    const { organizationId } = await requireSession()
+    const { organizationId, userId } = await requireSession()
     const { searchParams } = new URL(req.url)
 
     const rawLimit = Number(searchParams.get("limit"))
@@ -37,11 +37,12 @@ export async function GET(req: Request) {
     const kindParam = searchParams.get("kind")
     const kind = kindParam && KINDS.has(kindParam) ? kindParam : null
 
-    const { rows, total } = await repo.listItems(organizationId, { limit, offset, filter, kind })
+    // S5: the library is private per user — never the whole org's.
+    const { rows, total } = await repo.listItems(organizationId, userId, { limit, offset, filter, kind })
     // Fetch tags per row in parallel — small N (page size), each a
     // single indexed query.
     const items = await Promise.all(
-      rows.map(async (row) => rowToItem(row, await repo.getTags(row.id, organizationId))),
+      rows.map(async (row) => rowToItem(row, await repo.getTags(row.id, organizationId, userId))),
     )
 
     const nextOffset = offset + rows.length
@@ -72,10 +73,11 @@ export async function POST(req: Request) {
 
     const { row, duplicate } = result
 
-    // Already in the library — return the existing item, don't re-ingest,
-    // don't re-audit. The client surfaces "Already in your library".
+    // Already in THIS USER's library — return their existing item,
+    // don't re-ingest, don't re-audit. The client surfaces "Already in
+    // your library".
     if (duplicate) {
-      const tags = await repo.getTags(row.id, organizationId)
+      const tags = await repo.getTags(row.id, organizationId, userId)
       return NextResponse.json({ item: rowToItem(row, tags), duplicate: true }, { status: 200 })
     }
 
@@ -84,7 +86,7 @@ export async function POST(req: Request) {
     // Run ingestion AFTER the response is flushed — the user sees the
     // new card instantly and polls for real state transitions.
     after(async () => {
-      await processItem(row.id, organizationId)
+      await processItem(row.id, organizationId, userId)
     })
 
     return NextResponse.json({ item: rowToItem(row, []), duplicate: false }, { status: 201 })

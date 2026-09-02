@@ -2,10 +2,11 @@
  * CHARACTERIZATION — duplicate detection
  *
  * Runs against a REAL PostgreSQL, because most of what "dedup" means
- * here is not application code: it is the partial unique index
- * uq_knowledge_org_normalized created by 0004_knowledge_dedupe.sql.
- * A mocked client would assert nothing about the thing that actually
- * decides.
+ * here is not application code: it is the partial unique index (now
+ * uq_knowledge_org_user_normalized, on (org_id, created_by,
+ * normalized_url) — see migrations/0005_knowledge_user_scope.sql,
+ * which replaced 0004_knowledge_dedupe.sql's org-only index). A mocked
+ * client would assert nothing about the thing that actually decides.
  *
  * Dedup is two layers, and both are characterised here:
  *
@@ -14,15 +15,22 @@
  *   2. the partial unique index enforces it, and is the backstop for
  *      the race the read-then-insert in service.saveUrl cannot win.
  *
- * As in url.test.ts: these tests DESCRIBE today's behaviour. Where it
- * looks wrong the assertion still encodes the current value, marked
- * SUSPECT. No behaviour is changed in this commit.
+ * As in url.test.ts: most of these tests DESCRIBE today's behaviour;
+ * where it looked wrong the assertion used to encode the current
+ * value, marked SUSPECT. Commit 9 (S3/S4) and Commit 10 (S5) each
+ * fixed exactly the assertions marked that way in their own area,
+ * in place — not deleted, not left stale.
  *
- * service.saveUrl itself is deliberately NOT exercised: it calls
- * assertSafeUrl, which performs real DNS, and a test suite that needs
- * the public internet is a test suite that fails for reasons that have
- * nothing to do with the code. Its dedup is the composition tested
- * here — canonicalise, look up, insert, catch the unique violation.
+ * service.saveUrl itself is mostly avoided in the length/tenancy tests
+ * above: it calls assertSafeUrl, which performs real DNS, and a test
+ * suite that needs the public internet is a test suite that fails for
+ * reasons that have nothing to do with the code. Its own dedup is the
+ * composition tested via the save()/findExisting() helpers below —
+ * canonicalise, look up, insert, catch the unique violation. Later
+ * blocks (S3/S4, and the S5 API-boundary suite at the end of this
+ * file) DO call saveUrl directly, using either a literal public IP
+ * (the SSRF guard checks it with no lookup) or an ordinary hostname
+ * for inputs that are rejected before DNS is ever reached.
  * ================================================================== */
 
 import { after, before, describe, it } from "node:test"
@@ -78,10 +86,11 @@ async function addMember(orgId: string, label: string): Promise<string> {
   return userId
 }
 
-/** The read half of service.saveUrl's read-then-insert. */
+/** The read half of service.saveUrl's read-then-insert — scoped to the
+ * tenant's own user, exactly as the real service does (S5). */
 async function findExisting(tenant: TestTenant, url: string) {
   const key = canonicalizeUrlSafe(url)
-  return key ? repo.findByNormalizedUrl(tenant.orgId, key) : null
+  return key ? repo.findByNormalizedUrl(tenant.orgId, tenant.userId, key) : null
 }
 
 async function countItems(orgId: string): Promise<number> {
@@ -150,7 +159,7 @@ describe("dedup — the partial unique index", () => {
     // key. Deliberate: re-saving something you archived is a new save.
     const url = `https://example.com/archived-${randomBytes(6).toString("hex")}`
     const first = await save(alice, url)
-    await repo.setArchived(first.id, alice.orgId, true)
+    await repo.setArchived(first.id, alice.orgId, alice.userId, true)
 
     const second = await save(alice, url)
     assert.notEqual(second.id, first.id, "archiving the first must free the key")
@@ -215,45 +224,45 @@ describe("dedup — tenancy", () => {
   })
 })
 
-describe("dedup — created_by is recorded but not scoped", () => {
-  it("deduplicates ACROSS users inside one organization", async () => {
-    // SUSPECT (high) — this is the org-vs-user scoping decision, not a
-    // canonicaliser bug, and it is characterised here so the change is
-    // provable when it lands.
-    //
-    // Today two members of one org share a single library: the second
-    // person to save a page is told it is "already in your library",
-    // and it is — but it is someone else's. Under a per-user scope
-    // this test must flip to expecting two rows.
+describe("dedup — FIXED (S5, Commit 10): scoped by user, not just by org", () => {
+  it("does NOT deduplicate across users inside one organization — each colleague gets their own item", async () => {
+    // Was SUSPECT (high): two members of one org used to share a
+    // single library — the second person to save a page was told it
+    // was "already in your library", and it was, but it was someone
+    // else's. Fixed at both layers: the read (findByNormalizedUrl,
+    // now scoped by (org, user)) AND the database constraint itself
+    // (migrations/0005_knowledge_user_scope.sql moves the unique index
+    // from (org_id, normalized_url) to (org_id, created_by,
+    // normalized_url)) — without the migration, this save would still
+    // raise a real duplicate-key error from the database.
     const url = `https://example.com/two-users-${randomBytes(6).toString("hex")}`
     const colleague = await addMember(alice.orgId, "colleague")
 
-    // Same org, a different author.
     const mine = await save(alice, url, alice.userId)
     assert.equal(mine.created_by, alice.userId, "created_by IS written")
 
-    await assert.rejects(
-      () => save(alice, url, colleague),
-      /duplicate key|unique/i,
-      "CURRENT BEHAVIOUR: a different user cannot save a page a colleague already saved",
-    )
+    const theirs = await save(alice, url, colleague)
+    assert.notEqual(theirs.id, mine.id, "a colleague's save of the same public page is a genuinely new item, not a collision")
+    assert.equal(theirs.created_by, colleague)
+    assert.equal(theirs.normalized_url, mine.normalized_url, "same key — it really is the same page, just two owners")
 
+    // Each user's own lookup finds only their own row.
     const found = await findExisting(alice, url)
-    assert.equal(found?.created_by, alice.userId, "CURRENT BEHAVIOUR: the lookup ignores who is asking")
+    assert.equal(found?.created_by, alice.userId, "alice's lookup finds HER row")
+    assert.notEqual(found?.id, theirs.id)
   })
 
-  it("returns every member's items from a list query", async () => {
-    // repo.listItems filters on org_id alone. Recorded, not judged.
+  it("returns only the calling user's items from a list query — never a colleague's", async () => {
     const solo = await createTenant("solo")
     const slug = randomBytes(6).toString("hex")
     const colleague = await addMember(solo.orgId, "solo-colleague")
-    await save(solo, `https://example.com/by-owner-${slug}`, solo.userId)
+    const owner = await save(solo, `https://example.com/by-owner-${slug}`, solo.userId)
     await save(solo, `https://example.com/by-colleague-${slug}`, colleague)
 
-    const { rows } = await repo.listItems(solo.orgId, { limit: 50, offset: 0 })
-    const authors = new Set(rows.map((r) => r.created_by))
-    assert.equal(rows.length, 2)
-    assert.equal(authors.size, 2, "CURRENT BEHAVIOUR: one library, two authors")
+    const { rows } = await repo.listItems(solo.orgId, solo.userId, { limit: 50, offset: 0 })
+    assert.equal(rows.length, 1, "one library each, not one shared library")
+    assert.equal(rows[0].id, owner.id)
+    assert.ok(rows.every((r) => r.created_by === solo.userId))
   })
 })
 
@@ -381,7 +390,7 @@ describe("dedup — hash routes are distinct documents", () => {
     assert.notEqual(one.id, two.id)
     assert.notEqual(one.normalized_url, two.normalized_url, "two keys, so the index permits both")
 
-    const { rows } = await repo.listItems(tenant.orgId, { limit: 50, offset: 0 })
+    const { rows } = await repo.listItems(tenant.orgId, tenant.userId, { limit: 50, offset: 0 })
     assert.equal(rows.length, 2)
   })
 
@@ -448,7 +457,7 @@ describe("dedup — S3/S4 (Commit 9): credentials and non-http schemes never rea
     const result = await saveUrl({ orgId: tenant.orgId, userId: tenant.userId, url: "https://example.com/article" })
     assert.equal(result.duplicate, false)
     assert.equal(await countItems(tenant.orgId), 1)
-    const row = await repo.getItem(result.row.id, tenant.orgId)
+    const row = await repo.getItem(result.row.id, tenant.orgId, tenant.userId)
     assert.ok(row)
     assert.doesNotMatch(row!.url, /@/, "no userinfo makes it into the stored url either")
     assert.doesNotMatch(row!.normalized_url ?? "", /@/, "or into the dedup key")
@@ -459,7 +468,185 @@ describe("dedup — S3/S4 (Commit 9): credentials and non-http schemes never rea
     const result = await saveUrl({ orgId: tenant.orgId, userId: tenant.userId, url: "http://example.com/plain-http" })
     assert.equal(result.duplicate, false)
     assert.equal(await countItems(tenant.orgId), 1)
-    const row = await repo.getItem(result.row.id, tenant.orgId)
+    const row = await repo.getItem(result.row.id, tenant.orgId, tenant.userId)
     assert.equal(row?.url, "http://example.com/plain-http")
+  })
+})
+
+describe("S5 (Commit 10) — every real access path is scoped by (org, user), not just org", () => {
+  // The minimum scenario the brief asks for: two real members of the
+  // SAME organization (addMember() — a genuine users/memberships row,
+  // not a second org). userA creates an item; userB, despite sharing
+  // orgA.orgId, must be unable to list it, search it, read it, mutate
+  // it, favorite/archive it, touch its tags, or retry it — every one
+  // of those a real repo call, the actual boundary (not a copy of it).
+  // Not-found is the required shape throughout: null/zero-rows/[]/
+  // false, never a thrown "forbidden" that would confirm the item
+  // exists (see lib/api-error.ts's NotFoundError — the routes turn
+  // exactly these results into a 404 with no extra code, unchanged).
+
+  it("list: userB never sees userA's item, and still sees their own", async () => {
+    const orgA = await createTenant("s5-list-a")
+    const userB = await addMember(orgA.orgId, "s5-list-b")
+    const itemA = await save(orgA, `https://example.com/s5-list-${randomBytes(6).toString("hex")}`)
+    const itemB = await save({ orgId: orgA.orgId, userId: userB }, `https://example.com/s5-list-b-${randomBytes(6).toString("hex")}`)
+
+    const { rows: bRows } = await repo.listItems(orgA.orgId, userB, { limit: 50, offset: 0 })
+    assert.ok(bRows.every((r) => r.id !== itemA.id), "userB's list must never include userA's item")
+    assert.ok(bRows.some((r) => r.id === itemB.id), "userB still sees their own item")
+
+    const { rows: aRows } = await repo.listItems(orgA.orgId, orgA.userId, { limit: 50, offset: 0 })
+    assert.ok(aRows.every((r) => r.id !== itemB.id), "userA's list must never include userB's item")
+    assert.ok(aRows.some((r) => r.id === itemA.id), "userA still sees their own item")
+  })
+
+  it("search: userB's search never surfaces userA's title/excerpt/content/domain/tags", async () => {
+    const orgA = await createTenant("s5-search-a")
+    const userB = await addMember(orgA.orgId, "s5-search-b")
+    const needle = `Findable${randomBytes(4).toString("hex")}`
+    const itemA = await save(orgA, `https://example.com/s5-search-${randomBytes(6).toString("hex")}`)
+    await getTestPool().query("UPDATE knowledge_items SET title = $1 WHERE id = $2", [needle, itemA.id])
+    await getTestPool().query("INSERT INTO knowledge_item_tags (item_id, org_id, tag) VALUES ($1, $2, $3)", [itemA.id, orgA.orgId, needle])
+
+    // By title.
+    const byTitle = await repo.searchItems(orgA.orgId, userB, needle)
+    assert.equal(byTitle.length, 0, "userB's search must not find userA's title")
+    // By tag.
+    const byTag = await repo.searchItems(orgA.orgId, userB, needle)
+    assert.equal(byTag.length, 0, "userB's search must not find userA's tag either — no lateral path through tags")
+
+    // userA's own search DOES find it.
+    const ownSearch = await repo.searchItems(orgA.orgId, orgA.userId, needle)
+    assert.ok(ownSearch.some((r) => r.id === itemA.id))
+  })
+
+  it("get by id: userB gets null (the route's own 404), not userA's row", async () => {
+    const orgA = await createTenant("s5-get-a")
+    const userB = await addMember(orgA.orgId, "s5-get-b")
+    const itemA = await save(orgA, `https://example.com/s5-get-${randomBytes(6).toString("hex")}`)
+
+    assert.equal(await repo.getItem(itemA.id, orgA.orgId, userB), null)
+    assert.ok(await repo.getItem(itemA.id, orgA.orgId, orgA.userId), "userA still reads their own item")
+  })
+
+  it("update (favorite/archive): userB's write affects zero rows and never changes userA's item", async () => {
+    const orgA = await createTenant("s5-update-a")
+    const userB = await addMember(orgA.orgId, "s5-update-b")
+    const itemA = await save(orgA, `https://example.com/s5-update-${randomBytes(6).toString("hex")}`)
+
+    const favResult = await repo.setFavorite(itemA.id, orgA.orgId, userB, true)
+    assert.equal(favResult, null, "setFavorite as userB returns null — no row matched")
+    const archResult = await repo.setArchived(itemA.id, orgA.orgId, userB, true)
+    assert.equal(archResult, null, "setArchived as userB returns null — no row matched")
+
+    const stillA = await repo.getItem(itemA.id, orgA.orgId, orgA.userId)
+    assert.equal(stillA?.favorite, false, "userA's item was never favorited by userB's attempt")
+    assert.equal(stillA?.archived, false, "userA's item was never archived by userB's attempt")
+
+    // userA's own favorite/archive on their own item DOES work.
+    assert.equal((await repo.setFavorite(itemA.id, orgA.orgId, orgA.userId, true))?.favorite, true)
+  })
+
+  it("delete: userB's delete affects zero rows; the item survives for userA", async () => {
+    const orgA = await createTenant("s5-delete-a")
+    const userB = await addMember(orgA.orgId, "s5-delete-b")
+    const itemA = await save(orgA, `https://example.com/s5-delete-${randomBytes(6).toString("hex")}`)
+
+    assert.equal(await repo.deleteItem(itemA.id, orgA.orgId, userB), false, "userB's delete must report nothing was deleted")
+    assert.ok(await repo.getItem(itemA.id, orgA.orgId, orgA.userId), "the item still exists — userB never actually deleted it")
+    assert.equal(await repo.deleteItem(itemA.id, orgA.orgId, orgA.userId), true, "userA CAN delete their own item")
+  })
+
+  it("tags: userB cannot read, and the ownership-check makes a tag write on userA's item a real no-op", async () => {
+    const orgA = await createTenant("s5-tags-a")
+    const userB = await addMember(orgA.orgId, "s5-tags-b")
+    const itemA = await save(orgA, `https://example.com/s5-tags-${randomBytes(6).toString("hex")}`)
+    await getTestPool().query("INSERT INTO knowledge_item_tags (item_id, org_id, tag) VALUES ($1, $2, 'secret-tag')", [itemA.id, orgA.orgId])
+
+    assert.deepEqual(await repo.getTags(itemA.id, orgA.orgId, userB), [], "userB reads no tags for userA's item")
+    assert.deepEqual(await repo.getTags(itemA.id, orgA.orgId, orgA.userId), ["secret-tag"], "userA reads their own real tag")
+
+    // saveExtraction is the one path that rewrites tags — attempted as
+    // userB, against userA's item, it must not touch that item's tags
+    // at all (the UPDATE it's paired with affects zero rows first).
+    await repo.saveExtraction(itemA.id, orgA.orgId, userB, {
+      status: "ready", kind: "article", title: "hijacked", author: null, siteName: null, excerpt: null,
+      imageUrl: null, favicon: null, canonicalUrl: null, publishedAt: null, wordCount: null, readingMin: null,
+      lang: null, contentText: null, rawHtml: null, tags: ["attacker-tag"],
+    })
+    const afterAttempt = await repo.getItem(itemA.id, orgA.orgId, orgA.userId)
+    assert.notEqual(afterAttempt?.title, "hijacked", "userB's saveExtraction must not have touched userA's item")
+    assert.deepEqual(await repo.getTags(itemA.id, orgA.orgId, orgA.userId), ["secret-tag"], "and userA's real tag survives untouched")
+  })
+
+  it("topic aggregates: userB's tag counts never include userA's tags", async () => {
+    const orgA = await createTenant("s5-topics-a")
+    const userB = await addMember(orgA.orgId, "s5-topics-b")
+    const itemA = await save(orgA, `https://example.com/s5-topics-${randomBytes(6).toString("hex")}`)
+    await getTestPool().query("INSERT INTO knowledge_item_tags (item_id, org_id, tag) VALUES ($1, $2, 'a-only-topic')", [itemA.id, orgA.orgId])
+
+    const bCounts = await repo.listTagCounts(orgA.orgId, userB)
+    assert.ok(bCounts.every((t) => t.tag !== "a-only-topic"), "userB's Topics never surfaces userA's tag")
+    const aCounts = await repo.listTagCounts(orgA.orgId, orgA.userId)
+    assert.ok(aCounts.some((t) => t.tag === "a-only-topic"), "userA's own Topics does show it")
+  })
+
+  it("retry/reprocess: setStatus and incrementAttempts as userB are no-ops on userA's item", async () => {
+    const orgA = await createTenant("s5-retry-a")
+    const userB = await addMember(orgA.orgId, "s5-retry-b")
+    const itemA = await save(orgA, `https://example.com/s5-retry-${randomBytes(6).toString("hex")}`)
+    await repo.setStatus(itemA.id, orgA.orgId, orgA.userId, "failed", "some real failure")
+
+    await repo.setStatus(itemA.id, orgA.orgId, userB, "saved", null) // userB "retrying" userA's item
+    await repo.incrementAttempts(itemA.id, orgA.orgId, userB)
+
+    const stillFailed = await repo.getItem(itemA.id, orgA.orgId, orgA.userId)
+    assert.equal(stillFailed?.status, "failed", "userB's retry attempt must not resurrect userA's item")
+    assert.equal(stillFailed?.attempts, 0, "and must not have incremented userA's attempt counter")
+  })
+
+  it("dedup key lookup: userB's save of the SAME public url as userA creates userB's OWN item, not a false 'duplicate'", async () => {
+    const orgA = await createTenant("s5-dedup-a")
+    const userB = await addMember(orgA.orgId, "s5-dedup-b")
+    const url = `https://example.com/s5-dedup-${randomBytes(6).toString("hex")}`
+    const itemA = await save(orgA, url)
+
+    const bLookup = await repo.findByNormalizedUrl(orgA.orgId, userB, canonicalizeUrlSafe(url)!)
+    assert.equal(bLookup, null, "userB's dedup lookup must not resolve to userA's row")
+
+    const itemB = await save({ orgId: orgA.orgId, userId: userB }, url)
+    assert.notEqual(itemB.id, itemA.id)
+  })
+
+  it("countSavedSince: userB's count never includes userA's saves", async () => {
+    const orgA = await createTenant("s5-count-a")
+    const userB = await addMember(orgA.orgId, "s5-count-b")
+    const since = Date.now() - 1000
+    await save(orgA, `https://example.com/s5-count-${randomBytes(6).toString("hex")}`)
+
+    assert.equal(await repo.countSavedSince(orgA.orgId, userB, since), 0)
+    assert.equal(await repo.countSavedSince(orgA.orgId, orgA.userId, since), 1)
+  })
+
+  it("the reverse direction holds too: userA (the item creator) cannot reach an item userB creates afterward", async () => {
+    const orgA = await createTenant("s5-reverse-a")
+    const userB = await addMember(orgA.orgId, "s5-reverse-b")
+    await save(orgA, `https://example.com/s5-reverse-a1-${randomBytes(6).toString("hex")}`)
+    const itemB = await save({ orgId: orgA.orgId, userId: userB }, `https://example.com/s5-reverse-b1-${randomBytes(6).toString("hex")}`)
+
+    assert.equal(await repo.getItem(itemB.id, orgA.orgId, orgA.userId), null, "userA cannot read userB's item")
+    assert.equal(await repo.setFavorite(itemB.id, orgA.orgId, orgA.userId, true), null, "userA cannot favorite userB's item")
+    assert.equal(await repo.deleteItem(itemB.id, orgA.orgId, orgA.userId), false, "userA cannot delete userB's item")
+    assert.ok(await repo.getItem(itemB.id, orgA.orgId, userB), "userB still has their own item, untouched by userA's attempts")
+  })
+
+  it("cross-ORG isolation still holds — a different org's user cannot reach either user's item, S5 did not weaken it", async () => {
+    const orgA = await createTenant("s5-crossorg-a")
+    const orgC = await createTenant("s5-crossorg-c")
+    const itemA = await save(orgA, `https://example.com/s5-crossorg-${randomBytes(6).toString("hex")}`)
+
+    assert.equal(await repo.getItem(itemA.id, orgC.orgId, orgC.userId), null, "a different org, even with a real user id, gets nothing")
+    // Even guessing userA's own real userId against the wrong org fails — org_id is still checked.
+    assert.equal(await repo.getItem(itemA.id, orgC.orgId, orgA.userId), null)
   })
 })
