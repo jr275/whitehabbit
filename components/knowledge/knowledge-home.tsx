@@ -3,6 +3,7 @@
 import { ArrowRight, Plus, Search } from "lucide-react"
 import Link from "next/link"
 import { useSession } from "next-auth/react"
+import { useEffect, useState } from "react"
 import { openCommandPalette, openSaveDialog } from "@/lib/knowledge/config"
 import { useKnowledgeLibrary } from "@/lib/knowledge/use-knowledge"
 import type { KnowledgeItem } from "@/lib/knowledge/types"
@@ -16,6 +17,18 @@ function greeting(now = new Date()): string {
   return "Good evening"
 }
 
+/** Time-of-day depends on the *viewer's* local clock, which differs from
+ * the server's. Computing it during render causes an SSR/client hydration
+ * mismatch, so we render a stable neutral greeting on the server + first
+ * paint, then swap to the localized one after mount. */
+function useGreeting(): string {
+  const [text, setText] = useState("Welcome back")
+  useEffect(() => {
+    setText(greeting())
+  }, [])
+  return text
+}
+
 function firstName(email?: string | null): string | null {
   if (!email) return null
   const handle = email.split("@")[0]?.replace(/[._-]+/g, " ").trim()
@@ -27,6 +40,7 @@ export function KnowledgeHome() {
   const { items, status, total, toggleFavorite, archive, remove, retry } = useKnowledgeLibrary({ filter: "all" })
   const { data: session } = useSession()
   const name = firstName(session?.user?.email)
+  const hello = useGreeting()
 
   const ready = items.filter((i) => i.state === "ready")
   const unread = ready.filter((i) => i.readState === "unread").slice(0, 3)
@@ -41,7 +55,7 @@ export function KnowledgeHome() {
       <section className="border-b border-[var(--kn-edge)]">
         <div className="mx-auto max-w-[1500px] px-4 py-14 sm:px-6 sm:py-16 lg:px-8">
           <p className="text-sm font-medium text-primary">
-            {greeting()}
+            {hello}
             {name ? `, ${name}` : ""}
           </p>
           <h1 className="mt-3 max-w-2xl text-balance font-serif text-4xl font-medium leading-[1.05] tracking-tight text-foreground sm:text-5xl">
