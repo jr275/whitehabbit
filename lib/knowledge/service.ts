@@ -11,7 +11,7 @@ import "server-only"
  * ================================================================== */
 
 import { assertSafeUrl, UnsafeUrlError } from "@/lib/security/ssrf-guard"
-import { extractFromHtml } from "./extract"
+import { extractFavicon, extractFromHtml } from "./extract"
 import * as repo from "./repo"
 import type { KnowledgeRow } from "./repo"
 
@@ -64,6 +64,81 @@ export async function saveUrl(params: { orgId: string; userId: string | null; ur
     throw err
   }
   return repo.insertSavedItem({ orgId: params.orgId, userId: params.userId, url: normalized, domain: domainOf(normalized) })
+}
+
+/** Read-only page metadata — the DB-free counterpart to processItem().
+ * Normalizes + SSRF-guards + size/timeout-caps the fetch, then returns
+ * only the presentational metadata a card needs (never body text, never
+ * secrets). Powers the public /api/knowledge/preview route so guest mode
+ * can show a real thumbnail without doing (CORS-blocked, unsafe) browser
+ * scraping. Throws SaveValidationError for bad/unsafe/unreachable URLs. */
+export interface PageMetadata {
+  url: string
+  canonicalUrl: string | null
+  domain: string | null
+  title: string | null
+  excerpt: string | null
+  siteName: string | null
+  author: string | null
+  imageUrl: string | null
+  favicon: string | null
+  kind: string
+}
+
+export async function fetchPageMetadata(rawUrl: string): Promise<PageMetadata> {
+  const normalized = normalizeUrl(rawUrl)
+  let safe: URL
+  try {
+    safe = await assertSafeUrl(normalized)
+  } catch (err) {
+    if (err instanceof UnsafeUrlError) throw new SaveValidationError(err.message)
+    throw err
+  }
+
+  let fetched: { html: string; contentType: string }
+  try {
+    fetched = await fetchWithLimits(safe)
+  } catch (err) {
+    const reason =
+      err instanceof Error && err.name === "AbortError"
+        ? "The source took too long to respond."
+        : err instanceof Error
+          ? err.message
+          : "Could not fetch the source."
+    throw new SaveValidationError(reason)
+  }
+
+  const domain = domainOf(normalized)
+  const isHtml = /text\/html|application\/xhtml/i.test(fetched.contentType)
+  if (!isHtml) {
+    // A real resource but not HTML we can read metadata from (PDF, etc).
+    return {
+      url: normalized,
+      canonicalUrl: null,
+      domain,
+      title: null,
+      excerpt: null,
+      siteName: domain,
+      author: null,
+      imageUrl: null,
+      favicon: null,
+      kind: normalized.toLowerCase().endsWith(".pdf") ? "pdf" : "document",
+    }
+  }
+
+  const x = extractFromHtml(fetched.html, normalized)
+  return {
+    url: normalized,
+    canonicalUrl: x.canonicalUrl ?? null,
+    domain,
+    title: x.title ?? null,
+    excerpt: x.excerpt ?? null,
+    siteName: x.siteName ?? domain,
+    author: x.author ?? null,
+    imageUrl: x.imageUrl ?? null,
+    favicon: extractFavicon(fetched.html, normalized) ?? null,
+    kind: x.kind,
+  }
 }
 
 async function fetchWithLimits(url: URL): Promise<{ html: string; contentType: string }> {

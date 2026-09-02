@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import * as api from "./client"
+import { GUEST_UPDATED_EVENT } from "./guest-store"
 import type { KnowledgeItem, PrimaryFilter } from "./types"
 
 const POLL_INTERVAL_MS = 2000
@@ -151,6 +152,20 @@ export function useKnowledgeLibrary(opts: UseLibraryOptions = {}): LibraryState 
     window.addEventListener("knowledge:saved", onSaved as EventListener)
     return () => window.removeEventListener("knowledge:saved", onSaved as EventListener)
   }, [insert])
+
+  // Guest thumbnail enrichment/backfill patches items in place (a real
+  // title + cover discovered server-side). Merge by id without changing
+  // order or total; ignore ids not currently shown. Never fires for
+  // authenticated items, so it's a no-op there.
+  useEffect(() => {
+    function onUpdated(e: Event) {
+      const detail = (e as CustomEvent<KnowledgeItem>).detail
+      if (!detail || typeof detail.id !== "string") return
+      setItems((prev) => prev.map((i) => (i.id === detail.id ? detail : i)))
+    }
+    window.addEventListener(GUEST_UPDATED_EVENT, onUpdated as EventListener)
+    return () => window.removeEventListener(GUEST_UPDATED_EVENT, onUpdated as EventListener)
+  }, [])
 
   const toggleFavorite = useCallback(async (item: KnowledgeItem) => {
     const next = !item.favorite

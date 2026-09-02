@@ -51,6 +51,7 @@ export function KnowledgeCard({
   onSelect,
 }: KnowledgeCardProps) {
   const [coverFailed, setCoverFailed] = useState(false)
+  const [coverLoaded, setCoverLoaded] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const KindIcon = KIND_META[item.kind].icon
   const listenable = item.kind === "podcast" || item.kind === "video"
@@ -102,7 +103,11 @@ export function KnowledgeCard({
       )}
 
       {/* ── Visual (cover, or an honest typographic fallback) ─── */}
-      {(hasCover || ready) && (
+      {/* The 16:9 area is reserved from the moment the card mounts —
+          during discovery it shows a discreet skeleton, so the real
+          thumbnail (or the editorial fallback) fades into the SAME box
+          with no layout shift. */}
+      {(hasCover || ready || processing) && (
         <div
           className={cn(
             "relative shrink-0 overflow-hidden",
@@ -117,9 +122,14 @@ export function KnowledgeCard({
                 alt=""
                 loading="lazy"
                 referrerPolicy="no-referrer"
+                onLoad={() => setCoverLoaded(true)}
                 onError={() => setCoverFailed(true)}
-                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                className={cn(
+                  "h-full w-full object-cover transition-all duration-500 group-hover:scale-[1.03]",
+                  coverLoaded ? "opacity-100" : "opacity-0",
+                )}
               />
+              {!coverLoaded && <CoverSkeleton kind={item.kind} isList={isList} muted />}
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent" />
               {listenable && (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -133,12 +143,17 @@ export function KnowledgeCard({
                 {KIND_META[item.kind].label}
               </span>
             </>
-          ) : (
+          ) : ready ? (
             /* No og:image — a calm paper panel with the kind glyph. Never a
                fabricated photo; it reads as an intentional "cover" state. */
             <FallbackCover kind={item.kind} isList={isList} />
+          ) : (
+            /* Still discovering the preview — a discreet reserved skeleton
+               in the same box, so the eventual image/fallback never shifts
+               layout. */
+            <CoverSkeleton kind={item.kind} isList={isList} />
           )}
-          {item.readState === "unread" && (
+          {ready && item.readState === "unread" && (
             <span
               className={cn(
                 "absolute size-2 rounded-full bg-primary",
@@ -319,6 +334,19 @@ function FallbackCover({ kind, isList }: { kind: KnowledgeItem["kind"]; isList: 
           {KIND_META[kind].label}
         </span>
       )}
+    </div>
+  )
+}
+
+/** Discreet reserved cover placeholder shown while a preview is being
+ * discovered (or an image is still decoding). Same box as the real
+ * cover, so nothing shifts when the image/fallback arrives. */
+function CoverSkeleton({ kind, isList, muted }: { kind: KnowledgeItem["kind"]; isList: boolean; muted?: boolean }) {
+  const KindIcon = KIND_META[kind].icon
+  return (
+    <div className={cn("absolute inset-0 flex items-center justify-center overflow-hidden bg-[var(--kn-well)]", muted && "opacity-100")}>
+      <div className="kn-shimmer pointer-events-none absolute inset-0 opacity-60" />
+      <KindIcon className={cn("relative text-primary/20", isList ? "size-6" : "size-9")} strokeWidth={1.25} />
     </div>
   )
 }

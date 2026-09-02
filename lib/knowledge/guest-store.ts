@@ -26,8 +26,18 @@ const STORAGE_KEY = "knowledge.guest.items.v1"
 
 /** What we persist per item: the full document superset, so the reader
  *  and the library read from one record. Guest docs simply have no
- *  extracted body (contentText/wordCount stay undefined). */
-type GuestRecord = KnowledgeDocument
+ *  extracted body (contentText/wordCount stay undefined).
+ *
+ *  `_coverAttempted` is guest-only bookkeeping (stripped before the item
+ *  reaches the UI): once we've tried the server-side metadata lookup for
+ *  an item — whether it found an image or not — we never re-fetch it, so
+ *  reopening the Library never re-scrapes pages. */
+type GuestRecord = KnowledgeDocument & { _coverAttempted?: boolean }
+
+/** Fired (client-side only) after a guest item is enriched in place, so
+ *  the Library can merge the update even when it isn't polling — e.g. a
+ *  silent thumbnail backfill of already-"ready" items. */
+export const GUEST_UPDATED_EVENT = "knowledge:guest-updated"
 
 export interface ListLike {
   limit?: number
@@ -65,13 +75,15 @@ function writeAll(records: GuestRecord[]): void {
   }
 }
 
-/** Strip the document-only fields to hand a card-level item to the UI. */
+/** Strip the document-only + internal fields to hand a card-level item
+ *  to the UI. */
 function toItem(rec: GuestRecord): KnowledgeItem {
   const {
     contentText: _c,
     publishedAt: _p,
     wordCount: _w,
     attempts: _a,
+    _coverAttempted: _ca,
     ...item
   } = rec
   return item
@@ -115,6 +127,11 @@ function newId(): string {
 /* ── Public API (mirrors the shapes client.ts expects) ───────────── */
 
 export function guestList(params: ListLike = {}): KnowledgeListResult {
+  // First read of the guest library also kicks a one-time, bounded
+  // thumbnail backfill for older items that never had a lookup. Gated
+  // internally, so this never re-scrapes on subsequent reads/reloads.
+  guestBackfillCovers()
+
   const { limit = 24, offset = 0, filter = "all", kind = null } = params
   let records = readAll().filter((r) => !r.archived)
 
@@ -165,19 +182,23 @@ export function guestSearch(q: string): KnowledgeItem[] {
 export function guestSaveUrl(rawUrl: string): KnowledgeItem {
   const url = normalizeUrl(rawUrl)
   const domain = url.hostname.replace(/^www\./, "")
+  const id = newId()
   const record: GuestRecord = {
-    id: newId(),
+    id,
     kind: detectKind(url),
-    // "ready" so the item is immediately usable/openable. There is no
-    // pipeline in guest mode, so it never sits in a fake "processing"
-    // state — and the reader honestly shows that no text was extracted.
-    state: "ready",
+    // Honestly "fetching": the server-side metadata lookup (title +
+    // thumbnail) is genuinely in flight. The existing Library poller
+    // reuses this state to show a discreet processing card and picks up
+    // the enriched, "ready" record when the lookup resolves — no fake
+    // progress, no layout shift (the 16:9 cover area is reserved).
+    state: "fetching",
     readState: "unread",
     favorite: false,
     archived: false,
     url: url.href,
     domain,
-    // No fabricated metadata: an honest placeholder title + the real URL.
+    // No fabricated metadata: an honest placeholder title + the real URL
+    // until (and unless) the lookup returns real values.
     title: "Saved link",
     excerpt: url.href,
     source: domain,
@@ -185,9 +206,95 @@ export function guestSaveUrl(rawUrl: string): KnowledgeItem {
     savedAt: new Date().toISOString(),
     attempts: 0,
   }
-  const records = readAll()
-  writeAll([record, ...records])
+  writeAll([record, ...readAll()])
+  // Fire-and-forget: discover a real title/thumbnail server-side. Never
+  // throws — on any failure the item settles to "ready" with the
+  // editorial fallback cover.
+  void enrichGuestItem(id)
   return toItem(record)
+}
+
+/* ── Server-assisted metadata/thumbnail enrichment ───────────────── *
+ * Guest mode can't scrape a page in the browser (CORS + safety), so it
+ * asks the public, SSRF-guarded /api/knowledge/preview route for just
+ * the presentational metadata and merges what comes back. It only ever
+ * ADDS real values pulled from the page — it never invents any. */
+
+interface PreviewMetadata {
+  url: string
+  canonicalUrl: string | null
+  domain: string | null
+  title: string | null
+  excerpt: string | null
+  siteName: string | null
+  author: string | null
+  imageUrl: string | null
+  favicon: string | null
+  kind: string
+}
+
+const VALID_KINDS: KnowledgeKind[] = ["article", "video", "pdf", "podcast", "social", "document"]
+
+/** Look up metadata for one stored guest item and patch it in place.
+ *  Always resolves the item to a terminal "ready" state and flags it as
+ *  attempted so it is never re-fetched. Safe to call for any id. */
+export async function enrichGuestItem(id: string): Promise<void> {
+  if (typeof window === "undefined") return
+  const current = readAll().find((r) => r.id === id)
+  if (!current) return
+
+  let meta: PreviewMetadata | null = null
+  try {
+    const res = await fetch(`/api/knowledge/preview?url=${encodeURIComponent(current.url)}`, { cache: "no-store" })
+    if (res.ok) meta = ((await res.json()) as { metadata?: PreviewMetadata }).metadata ?? null
+  } catch {
+    /* offline / blocked — fall through to the editorial fallback */
+  }
+
+  const records = readAll()
+  let updated: GuestRecord | null = null
+  const next = records.map((r) => {
+    if (r.id !== id) return r
+    const kind = meta && VALID_KINDS.includes(meta.kind as KnowledgeKind) ? (meta.kind as KnowledgeKind) : r.kind
+    updated = {
+      ...r,
+      state: "ready",
+      _coverAttempted: true,
+      kind,
+      // Only overwrite the placeholder with REAL values when present.
+      title: meta?.title?.trim() || r.title,
+      excerpt: meta?.excerpt?.trim() || r.excerpt,
+      source: meta?.siteName?.trim() || r.source,
+      author: meta?.author?.trim() || r.author,
+      cover: meta?.imageUrl || r.cover,
+    }
+    return updated
+  })
+  if (!updated) return
+  writeAll(next)
+  window.dispatchEvent(new CustomEvent<KnowledgeItem>(GUEST_UPDATED_EVENT, { detail: toItem(updated) }))
+}
+
+/* One-time, per-session backfill of items saved BEFORE this feature (or
+ * whose earlier lookup never ran) — those with no cover and no prior
+ * attempt. Bounded, sequential, and gated by the persisted
+ * `_coverAttempted` flag so reopening the Library never re-scrapes. */
+let backfillStarted = false
+const BACKFILL_MAX = 12
+
+export function guestBackfillCovers(): void {
+  if (typeof window === "undefined" || backfillStarted) return
+  backfillStarted = true
+  const pending = readAll()
+    .filter((r) => !r.archived && !r.cover && !r._coverAttempted)
+    .slice(0, BACKFILL_MAX)
+  if (pending.length === 0) return
+  void (async () => {
+    for (const rec of pending) {
+      await enrichGuestItem(rec.id)
+      await new Promise((r) => setTimeout(r, 250)) // gentle throttle
+    }
+  })()
 }
 
 export function guestGetDocument(id: string): KnowledgeDocument | null {
