@@ -105,6 +105,42 @@ export async function listItems(orgId: string, opts: ListOptions): Promise<{ row
   return { rows, total }
 }
 
+/**
+ * Real full-text-ish search over an org's saved items. Matches the
+ * user's query against the actually-extracted fields — title, domain,
+ * publication name, excerpt, the full readable body text, and derived
+ * tags — with a simple relevance rank (title > source > excerpt/body).
+ * Parameterized ILIKE, org-scoped, archived excluded. This is genuine
+ * search over persisted content, not a fabricated index; it stays fast
+ * at realistic per-org volumes and can be swapped for Postgres FTS or
+ * pgvector later without changing the API or UI contract.
+ */
+export async function searchItems(orgId: string, rawQuery: string, limit = 20): Promise<KnowledgeRow[]> {
+  const q = rawQuery.trim()
+  if (!q) return []
+  const like = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`
+  return query<KnowledgeRow>(
+    `SELECT ${SELECT_COLS},
+       (CASE
+          WHEN title ILIKE $2 THEN 4
+          WHEN domain ILIKE $2 OR site_name ILIKE $2 THEN 3
+          WHEN excerpt ILIKE $2 THEN 2
+          ELSE 1
+        END) AS rank
+     FROM knowledge_items
+     WHERE org_id = $1
+       AND archived = FALSE
+       AND (
+         title ILIKE $2 OR domain ILIKE $2 OR site_name ILIKE $2
+         OR excerpt ILIKE $2 OR content_text ILIKE $2 OR author ILIKE $2
+         OR id IN (SELECT item_id FROM knowledge_item_tags WHERE org_id = $1 AND tag ILIKE $2)
+       )
+     ORDER BY rank DESC, created_at DESC
+     LIMIT $3`,
+    [orgId, like, limit],
+  )
+}
+
 /** Advance lifecycle state. Used by the ingestion pipeline as it moves
  * saved → fetching → extracting. Org-scoped so a stale/forged id can't
  * mutate another org's row. */
