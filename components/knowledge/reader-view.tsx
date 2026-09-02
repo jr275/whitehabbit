@@ -12,6 +12,7 @@ import {
   Heart,
   Loader2,
   Play,
+  Sparkles,
 } from "lucide-react"
 import type { KnowledgeDocument } from "@/lib/knowledge/types"
 import { KIND_META, durationLabel, savedAgo } from "@/lib/knowledge/config"
@@ -171,6 +172,13 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
 
           <MetaRow doc={doc} />
 
+          {/* ── AI Summary — the existing, backend-provided summary,
+              surfaced honestly. Consumes doc.aiSummary only; no new
+              model calls, no fabrication. Hidden entirely when absent. */}
+          {!processing && !failed && doc.aiSummary?.trim() ? (
+            <AiSummaryCard summary={doc.aiSummary.trim()} />
+          ) : null}
+
           {/* ── Body, routed by real state then kind ────────────── */}
           {processing ? (
             <ProcessingBlock />
@@ -309,6 +317,24 @@ function SourceLine({ doc }: { doc: KnowledgeDocument }) {
       )}
       <span className="truncate">{doc.domain ?? doc.source}</span>
     </div>
+  )
+}
+
+/** Quiet, on-brand presentation of the item's existing AI summary.
+ *  Single accent (Apple blue), no gradient — it reads as a calm digest
+ *  above the full piece, never competing with the headline. */
+function AiSummaryCard({ summary }: { summary: string }) {
+  return (
+    <aside
+      aria-label="AI summary"
+      className="mt-8 rounded-2xl border border-[var(--kn-ai)]/25 bg-[var(--kn-ai)]/[0.06] p-5 sm:p-6"
+    >
+      <div className="flex items-center gap-2 text-[13px] font-medium text-[var(--kn-ai)]">
+        <Sparkles className="size-3.5" />
+        Summary
+      </div>
+      <p className="mt-2.5 text-pretty text-[0.95rem] leading-relaxed text-foreground/85">{summary}</p>
+    </aside>
   )
 }
 
