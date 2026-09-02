@@ -32,6 +32,30 @@ export class ValidationError extends Error {
   }
 }
 
+/** A real feature that depends on an external credential this
+ * deployment hasn't configured — e.g. AI Summary without
+ * ANTHROPIC_API_KEY set. Distinct from DatabaseNotConfiguredError
+ * (a platform-wide outage) — this is one feature being honestly
+ * unavailable, not the whole app. */
+export class AiNotConfiguredError extends Error {
+  constructor(message = "This AI feature is not configured for this deployment.") {
+    super(message)
+    this.name = "AiNotConfiguredError"
+  }
+}
+
+/** A real call to an external service (e.g. the Anthropic Messages
+ * API) failed — network error, non-2xx, or an unusable response body.
+ * The message is always a safe, generic one set by the caller; the
+ * real detail is logged server-side, never returned (same discipline
+ * as lib/knowledge/service.ts's guardedFetch). */
+export class UpstreamServiceError extends Error {
+  constructor(message = "The request couldn't be completed. Try again.") {
+    super(message)
+    this.name = "UpstreamServiceError"
+  }
+}
+
 export function withApiHandler(routeName: string, handler: (requestId: string) => Promise<NextResponse>): Promise<NextResponse> {
   const requestId = newRequestId()
   return handler(requestId).catch((err) => {
@@ -49,6 +73,12 @@ export function withApiHandler(routeName: string, handler: (requestId: string) =
     }
     if (err instanceof RateLimitedError) {
       return NextResponse.json({ error: err.message }, { status: 429 })
+    }
+    if (err instanceof AiNotConfiguredError) {
+      return NextResponse.json({ error: err.message }, { status: 503 })
+    }
+    if (err instanceof UpstreamServiceError) {
+      return NextResponse.json({ error: err.message }, { status: 502 })
     }
     if (err instanceof DatabaseNotConfiguredError) {
       logger.error("database_not_configured", { requestId, route: routeName })
