@@ -12,6 +12,30 @@ import { KnowledgeCard } from "./knowledge-card"
 
 type LibraryLayout = "grid" | "list"
 
+/* Lightweight session persistence so returning from the Reader keeps the
+ * user's place: view mode, type filter and search. Scoped to sessionStorage
+ * (not URL) to stay invisible and disposable; view mode persists globally
+ * while filter/search are only restored on the main (unlocked) Library. */
+const SS = { layout: "kn:lib:layout", kind: "kn:lib:kind", query: "kn:lib:query" } as const
+
+function ssGet(key: string): string | null {
+  if (typeof window === "undefined") return null
+  try {
+    return window.sessionStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function ssSet(key: string, value: string): void {
+  if (typeof window === "undefined") return
+  try {
+    window.sessionStorage.setItem(key, value)
+  } catch {
+    /* private mode / quota — persistence is best-effort */
+  }
+}
+
 const KIND_FILTERS: { id: KnowledgeKind; label: string }[] = [
   { id: "article", label: "Articles" },
   { id: "video", label: "Videos" },
@@ -39,9 +63,24 @@ export function LibraryView({
   eyebrow,
   subtitle = "Everything you've saved.",
 }: LibraryViewProps) {
-  const [layout, setLayout] = useState<LibraryLayout>("grid")
-  const [kind, setKind] = useState<KnowledgeKind | null>(null)
-  const [query, setQuery] = useState("")
+  // Restore prior context (view mode always; filter/search only on the
+  // main Library, so locked pages like Favorites never inherit a stray one).
+  const [layout, setLayout] = useState<LibraryLayout>(() => (ssGet(SS.layout) === "list" ? "list" : "grid"))
+  const [kind, setKind] = useState<KnowledgeKind | null>(() =>
+    lockedFilter ? null : ((ssGet(SS.kind) as KnowledgeKind | null) || null),
+  )
+  const [query, setQuery] = useState(() => (lockedFilter ? "" : ssGet(SS.query) || ""))
+
+  // Persist context as it changes so the Reader → Library return is seamless.
+  useEffect(() => {
+    ssSet(SS.layout, layout)
+  }, [layout])
+  useEffect(() => {
+    if (!lockedFilter) ssSet(SS.kind, kind ?? "")
+  }, [kind, lockedFilter])
+  useEffect(() => {
+    if (!lockedFilter) ssSet(SS.query, query)
+  }, [query, lockedFilter])
 
   const {
     items,
