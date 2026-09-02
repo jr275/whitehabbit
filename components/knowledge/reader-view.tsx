@@ -11,12 +11,7 @@ import {
   FileType2,
   Heart,
   Loader2,
-  Pause,
   Play,
-  SkipBack,
-  SkipForward,
-  Sparkles,
-  Volume2,
 } from "lucide-react"
 import type { KnowledgeDocument } from "@/lib/knowledge/types"
 import { KIND_META, durationLabel, savedAgo } from "@/lib/knowledge/config"
@@ -319,9 +314,6 @@ function ArticleBody({ body, cover, title }: { body: string[]; cover?: string; t
         />
       ) : null}
 
-      <ListenBar />
-      <AiSummaryCard />
-
       <div className="mt-8 space-y-6 text-[1.15rem] leading-[1.75] text-foreground/85 [word-break:break-word] selection:bg-[var(--kn-ai)]/25">
         {body.map((p, i) => (
           <p
@@ -336,97 +328,6 @@ function ArticleBody({ body, cover, title }: { body: string[]; cover?: string; t
         ))}
       </div>
     </>
-  )
-}
-
-/** Read Aloud — inert UI shell (no speech logic yet). Presented as a real
- *  playback bar so it can be wired to a narration hook later, but honestly
- *  marked "Soon" and disabled so it never pretends to work. */
-function ListenBar() {
-  return (
-    <div className="mt-8 rounded-2xl border border-[var(--kn-edge)] bg-[var(--kn-paper)] p-3">
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          disabled
-          aria-label="Read aloud (coming soon)"
-          title="Read Aloud is coming soon"
-          className="flex size-11 shrink-0 cursor-not-allowed items-center justify-center rounded-full bg-primary/90 text-primary-foreground opacity-60"
-        >
-          <Play className="size-5 translate-x-px fill-current" />
-        </button>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <Volume2 className="size-3.5 shrink-0 text-[var(--kn-ai)]" />
-            <p className="truncate text-sm font-medium text-foreground">Listen to this article</p>
-            <span className="ml-auto shrink-0 rounded-full bg-[var(--kn-ai)]/12 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--kn-ai)]">
-              Soon
-            </span>
-          </div>
-          {/* inert scrubber — a quiet track, not fake progress */}
-          <div className="mt-2 flex items-center gap-2">
-            <span className="text-[11px] tabular-nums text-muted-foreground/70">0:00</span>
-            <div aria-hidden className="h-1 flex-1 overflow-hidden rounded-full bg-[var(--kn-well)]">
-              <div className="h-full w-0 bg-[var(--kn-ai)]" />
-            </div>
-            <button
-              type="button"
-              disabled
-              aria-label="Previous paragraph"
-              className="cursor-not-allowed text-muted-foreground/50"
-            >
-              <SkipBack className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              disabled
-              aria-label="Pause"
-              className="cursor-not-allowed text-muted-foreground/50"
-            >
-              <Pause className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              disabled
-              aria-label="Next paragraph"
-              className="cursor-not-allowed text-muted-foreground/50"
-            >
-              <SkipForward className="size-3.5" />
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/** AI Summary — inert placeholder. A distinct accent panel that reserves
- *  the spot for a generated overview; the action is disabled and marked
- *  "Soon" until the summarization endpoint is wired up. */
-function AiSummaryCard() {
-  return (
-    <div className="mt-4 rounded-2xl border border-[var(--kn-ai)]/25 bg-[var(--kn-ai)]/[0.06] p-5">
-      <div className="flex items-center gap-2">
-        <Sparkles className="size-4 text-[var(--kn-ai)]" />
-        <span className="text-sm font-semibold text-foreground">AI Summary</span>
-        <span className="ml-auto rounded-full bg-[var(--kn-ai)]/12 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--kn-ai)]">
-          Soon
-        </span>
-      </div>
-      <p className="mt-2 text-pretty text-sm leading-relaxed text-muted-foreground">
-        A concise overview of this piece will appear here — the key points in a few sentences, so you can decide what
-        deserves a full read.
-      </p>
-      <button
-        type="button"
-        disabled
-        title="AI summaries are coming soon"
-        className="mt-4 inline-flex h-9 cursor-not-allowed items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground opacity-60"
-      >
-        <Sparkles className="size-4" /> Generate summary
-      </button>
-    </div>
   )
 }
 
