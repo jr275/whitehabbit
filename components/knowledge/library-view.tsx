@@ -70,9 +70,7 @@ export function LibraryView({
     <div className="mx-auto max-w-[1500px] px-4 py-8 sm:px-6 lg:px-8">
       {/* ── Hero ─────────────────────────────────────────── */}
       <header className="flex flex-col gap-2">
-        {eyebrow && (
-          <div className="font-mono text-[11px] uppercase tracking-[0.24em] text-muted-foreground">{eyebrow}</div>
-        )}
+        {eyebrow && <div className="text-sm font-medium text-primary">{eyebrow}</div>}
         <h1 className="text-balance font-serif text-4xl font-medium leading-[1.05] tracking-tight text-foreground sm:text-5xl">
           {title}
         </h1>
@@ -137,9 +135,9 @@ export function LibraryView({
           <button
             onClick={() => setKind(null)}
             className={cn(
-              "rounded-md px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-colors",
+              "rounded-full px-3 py-1 text-[13px] transition-colors",
               kind === null
-                ? "bg-[var(--kn-ai)]/15 text-[var(--kn-ai)]"
+                ? "bg-primary/10 font-medium text-primary"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
@@ -150,10 +148,10 @@ export function LibraryView({
               key={k.id}
               onClick={() => setKind(kind === k.id ? null : k.id)}
               className={cn(
-                "rounded-md border px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-colors",
+                "rounded-full px-3 py-1 text-[13px] transition-colors",
                 kind === k.id
-                  ? "border-[var(--kn-ai)]/30 bg-[var(--kn-ai)]/10 text-[var(--kn-ai)]"
-                  : "border-[var(--kn-edge)] text-muted-foreground hover:text-foreground",
+                  ? "bg-primary/10 font-medium text-primary"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
               {k.label}

@@ -61,14 +61,14 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
               active={favorite}
               onClick={toggleFavorite}
             >
-              <Heart className={cn("h-4 w-4", favorite && "fill-[var(--warn)] text-[var(--warn)]")} />
+              <Heart className={cn("h-4 w-4", favorite && "fill-[var(--kn-ai)] text-[var(--kn-ai)]")} />
             </IconButton>
             <a
               href={doc.url}
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Open original"
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground"
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             >
               <ExternalLink className="h-4 w-4" />
             </a>
@@ -76,15 +76,15 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
         </div>
 
         <article className="mx-auto max-w-2xl px-4 py-10 sm:px-8 sm:py-14">
-          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+          <div className="flex items-center gap-2 text-[13px] font-medium text-primary">
             <Kind className="h-3.5 w-3.5" />
             {doc.source}
             {doc.durationMin ? (
-              <>
+              <span className="flex items-center gap-1.5 font-normal text-muted-foreground">
                 <span aria-hidden>·</span>
                 <Clock className="h-3 w-3" />
                 {durationLabel(doc.kind, doc.durationMin)}
-              </>
+              </span>
             ) : null}
           </div>
 
@@ -254,7 +254,7 @@ function IconButton({
       aria-label={label}
       className={cn(
         "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-        active ? "text-foreground" : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground",
+        active ? "text-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground",
       )}
     >
       {children}
