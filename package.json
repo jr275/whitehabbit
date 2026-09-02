@@ -9,7 +9,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "migrate": "node scripts/migrate.mjs"
+    "migrate": "node scripts/migrate.mjs",
+    "typecheck": "tsc --noEmit",
+    "boundaries": "node scripts/check-boundaries.mjs",
+    "test": "node --test --test-concurrency=1 --experimental-strip-types --conditions=react-server --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/helpers/register-alias.mjs \"tests/**/*.test.ts\"",
+    "verify": "npm run typecheck && npm run boundaries && npm test"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
