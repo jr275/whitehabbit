@@ -53,7 +53,7 @@ export function OnboardingFlow({
       setError(body?.error ?? "Could not save your setup. Try again.")
       return
     }
-    router.push("/")
+    router.push("/knowledge")
     router.refresh()
   }
 

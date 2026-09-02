@@ -17,7 +17,7 @@ export default async function OnboardingPage() {
 
   // Already onboarded? Don't make them do it twice.
   const { completed, interests } = await getOnboardingState(userId)
-  if (completed) redirect("/")
+  if (completed) redirect("/knowledge")
 
   const orgName = (session as { organizationName?: string }).organizationName ?? ""
   return <OnboardingFlow email={session.user?.email ?? ""} organizationName={orgName} initialInterests={interests} />
