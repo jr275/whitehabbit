@@ -2,15 +2,18 @@ import "server-only"
 
 /* ================================================================== *
  * INGESTION SERVICE — the real save→fetch→extract→ready|failed
- * pipeline. Every outbound fetch is SSRF-guarded (lib/security/
- * ssrf-guard.ts) BEFORE the request leaves the server, bounded by a
- * timeout and a response-size cap, and the resulting content is
- * extracted from real markup — never fabricated. State transitions
+ * pipeline. Every outbound fetch goes through safeFetch (lib/security/
+ * safe-fetch.ts), which revalidates EVERY redirect hop against the
+ * shared SSRF guard and pins each connection to an address that guard
+ * approved, bounded by a timeout and a response-size cap. The content
+ * is extracted from real markup — never fabricated. State transitions
  * are persisted as they happen so a polling client observes genuine
  * progress (saved → fetching → extracting → ready|failed).
  * ================================================================== */
 
+import { safeFetch, SafeFetchError, type SafeFetchOptions } from "@/lib/security/safe-fetch"
 import { assertSafeUrl, UnsafeUrlError } from "@/lib/security/ssrf-guard"
+import { logger } from "@/lib/observability/logger"
 import { extractFavicon, extractFromHtml } from "./extract"
 import * as repo from "./repo"
 import type { KnowledgeRow } from "./repo"
@@ -19,6 +22,46 @@ import { canonicalizeUrlSafe } from "./url"
 const FETCH_TIMEOUT_MS = 15_000
 const MAX_BYTES = 5_000_000 // 5 MB cap — enough for real articles, refuses payload bombs
 const USER_AGENT = "WhitehabbitKnowledgeBot/1.0 (+https://whitehabbit.app)"
+const FETCH_HEADERS = { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml" }
+
+/**
+ * Run one guarded fetch and translate its failure for a caller.
+ *
+ * The detail — which address a host resolved to, which redirect was
+ * refused, which DNS error came back — is logged server-side and
+ * NEVER returned. On the public preview endpoint those differences are
+ * an oracle: repeat them over a wordlist and you have mapped an
+ * internal network without ever getting a page back.
+ */
+export interface FetchDeps {
+  /** Test seam only. The SSRF guard runs OUTSIDE the transport, on
+   * every hop, so substituting it cannot weaken any check — it only
+   * removes the socket. */
+  transport?: SafeFetchOptions["transport"]
+}
+
+async function guardedFetch(
+  url: string,
+  context: string,
+  deps: FetchDeps = {},
+): Promise<{ body: Buffer; contentType: string }> {
+  try {
+    const res = await safeFetch(url, {
+      timeoutMs: FETCH_TIMEOUT_MS,
+      maxBytes: MAX_BYTES,
+      headers: FETCH_HEADERS,
+      transport: deps.transport,
+    })
+    return { body: res.body, contentType: res.contentType }
+  } catch (err) {
+    if (err instanceof SafeFetchError) {
+      logger.warn("knowledge_fetch_refused", { context, code: err.code, detail: err.detail })
+      throw new SaveValidationError(err.userMessage)
+    }
+    logger.error("knowledge_fetch_error", { context, message: err instanceof Error ? err.message : String(err) })
+    throw new SaveValidationError("We couldn't read that page.")
+  }
+}
 
 export class SaveValidationError extends Error {
   constructor(message: string) {
@@ -73,7 +116,13 @@ export async function saveUrl(params: { orgId: string; userId: string | null; ur
   try {
     await assertSafeUrl(normalized)
   } catch (err) {
-    if (err instanceof UnsafeUrlError) throw new SaveValidationError(err.message)
+    if (err instanceof UnsafeUrlError) {
+      // Generic on purpose. The guard's own message names the address a
+      // host resolved to, which confirms that host exists — an oracle
+      // an attacker can walk over a wordlist. The detail is logged.
+      logger.warn("knowledge_save_refused", { detail: err.message })
+      throw new SaveValidationError("We couldn't reach that address.")
+    }
     throw err
   }
 
@@ -126,28 +175,10 @@ export interface PageMetadata {
   kind: string
 }
 
-export async function fetchPageMetadata(rawUrl: string): Promise<PageMetadata> {
+export async function fetchPageMetadata(rawUrl: string, deps: FetchDeps = {}): Promise<PageMetadata> {
   const normalized = normalizeUrl(rawUrl)
-  let safe: URL
-  try {
-    safe = await assertSafeUrl(normalized)
-  } catch (err) {
-    if (err instanceof UnsafeUrlError) throw new SaveValidationError(err.message)
-    throw err
-  }
-
-  let fetched: { html: string; contentType: string }
-  try {
-    fetched = await fetchWithLimits(safe)
-  } catch (err) {
-    const reason =
-      err instanceof Error && err.name === "AbortError"
-        ? "The source took too long to respond."
-        : err instanceof Error
-          ? err.message
-          : "Could not fetch the source."
-    throw new SaveValidationError(reason)
-  }
+  const fetchedRaw = await guardedFetch(normalized, "preview", deps)
+  const fetched = { html: decodeUtf8(fetchedRaw.body), contentType: fetchedRaw.contentType }
 
   const domain = domainOf(normalized)
   const isHtml = /text\/html|application\/xhtml/i.test(fetched.contentType)
@@ -185,45 +216,11 @@ export async function fetchPageMetadata(rawUrl: string): Promise<PageMetadata> {
   }
 }
 
-async function fetchWithLimits(url: URL): Promise<{ html: string; contentType: string }> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      redirect: "follow",
-      headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml" },
-    })
-    if (!res.ok) throw new Error(`The source responded with ${res.status} ${res.statusText}.`)
-    const contentType = res.headers.get("content-type") ?? ""
-
-    // Read with a hard size cap rather than trusting Content-Length.
-    const reader = res.body?.getReader()
-    if (!reader) return { html: await res.text(), contentType }
-    const chunks: Uint8Array[] = []
-    let total = 0
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (value) {
-        total += value.length
-        if (total > MAX_BYTES) {
-          controller.abort()
-          throw new Error("The source is too large to process.")
-        }
-        chunks.push(value)
-      }
-    }
-    const buf = new Uint8Array(total)
-    let offset = 0
-    for (const c of chunks) {
-      buf.set(c, offset)
-      offset += c.length
-    }
-    return { html: new TextDecoder("utf-8").decode(buf), contentType }
-  } finally {
-    clearTimeout(timer)
-  }
+/** Decode a fetched body. Unchanged from the previous implementation:
+ * UTF-8 regardless of the declared charset. Widening that is a content
+ * change, not a security one, so it is left exactly as it was. */
+function decodeUtf8(body: Buffer): string {
+  return new TextDecoder("utf-8").decode(body)
 }
 
 /**
@@ -241,25 +238,14 @@ export async function processItem(id: string, orgId: string): Promise<void> {
 
     await repo.setStatus(id, orgId, "fetching")
 
-    let safe: URL
-    try {
-      safe = await assertSafeUrl(item.url)
-    } catch (err) {
-      const reason = err instanceof UnsafeUrlError ? err.message : "This URL cannot be fetched safely."
-      await repo.setStatus(id, orgId, "failed", reason)
-      return
-    }
-
     let fetched: { html: string; contentType: string }
     try {
-      fetched = await fetchWithLimits(safe)
+      const raw = await guardedFetch(item.url, `ingest:${id}`)
+      fetched = { html: decodeUtf8(raw.body), contentType: raw.contentType }
     } catch (err) {
-      const reason =
-        err instanceof Error && err.name === "AbortError"
-          ? "The source took too long to respond."
-          : err instanceof Error
-            ? err.message
-            : "Could not fetch the source."
+      // guardedFetch has already logged the detail; what lands on the
+      // row is the same message a stranger would see.
+      const reason = err instanceof SaveValidationError ? err.message : "Could not fetch the source."
       await repo.setStatus(id, orgId, "failed", reason)
       return
     }
