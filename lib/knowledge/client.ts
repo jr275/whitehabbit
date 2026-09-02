@@ -46,6 +46,15 @@ export async function fetchLibrary(params: ListParams = {}, signal?: AbortSignal
   return parse<KnowledgeListResult>(res)
 }
 
+/** Real search over the org's saved items. Returns [] for queries
+ * shorter than 2 chars (the server treats those as an idle no-op). */
+export async function searchLibrary(q: string, signal?: AbortSignal): Promise<KnowledgeItem[]> {
+  const trimmed = q.trim()
+  if (trimmed.length < 2) return []
+  const res = await fetch(`/api/knowledge/search?q=${encodeURIComponent(trimmed)}`, { signal, cache: "no-store" })
+  return (await parse<{ items: KnowledgeItem[] }>(res)).items
+}
+
 export async function saveUrl(url: string): Promise<KnowledgeItem> {
   const res = await fetch("/api/knowledge", {
     method: "POST",
