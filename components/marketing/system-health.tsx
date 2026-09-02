@@ -39,10 +39,10 @@ export function SystemHealth() {
 
   useEffect(() => {
     fetch("/api/system/health")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`))))
       .then((data) => {
-        setProviders(data.providers)
-        setIntegrations(data.integrations ?? [])
+        setProviders(Array.isArray(data.providers) ? data.providers : [])
+        setIntegrations(Array.isArray(data.integrations) ? data.integrations : [])
       })
       .catch(() => setProviders([]))
   }, [])
