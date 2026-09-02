@@ -14,6 +14,9 @@ export const RATE_LIMITS = {
   worker_run: { limit: 10, windowMs: 60_000 }, // real LLM calls — tighter
   knowledge_save: { limit: 30, windowMs: 60_000 }, // 30 saves/min per org — each triggers a real outbound fetch
   knowledge_retry: { limit: 20, windowMs: 60_000 },
+  auth_register: { limit: 10, windowMs: 60_000 }, // account creation per client ip
+  auth_forgot_password: { limit: 5, windowMs: 60_000 }, // reset requests per client ip — abuse guard
+  auth_reset_password: { limit: 10, windowMs: 60_000 },
 } as const
 
 export async function enforceRateLimit(scope: keyof typeof RATE_LIMITS, subject: string): Promise<void> {

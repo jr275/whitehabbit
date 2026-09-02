@@ -44,24 +44,51 @@ export async function createOrganization(name: string): Promise<OrgRow> {
 export interface UserRow {
   id: string
   email: string
-  passwordHash: string
+  /** Null for OAuth (Google) accounts — they have no local password. */
+  passwordHash: string | null
+  displayName: string | null
+  imageUrl: string | null
+  authProvider: string
+  /** Epoch-ms the user finished onboarding, or null if they haven't. */
+  onboardingCompletedAt: number | null
   createdAt: number
 }
 
+interface UserDbRow {
+  id: string
+  email: string
+  password_hash: string | null
+  display_name: string | null
+  image_url: string | null
+  auth_provider: string
+  onboarding_completed_at: string | null
+  created_at: string
+}
+
+function rowToUser(row: UserDbRow): UserRow {
+  return {
+    id: row.id,
+    email: row.email,
+    passwordHash: row.password_hash,
+    displayName: row.display_name,
+    imageUrl: row.image_url,
+    authProvider: row.auth_provider,
+    onboardingCompletedAt: row.onboarding_completed_at != null ? Number(row.onboarding_completed_at) : null,
+    createdAt: Number(row.created_at),
+  }
+}
+
+const USER_COLUMNS =
+  "id, email, password_hash, display_name, image_url, auth_provider, onboarding_completed_at, created_at"
+
 export async function getUserByEmail(email: string): Promise<UserRow | null> {
-  const row = await queryOne<{ id: string; email: string; password_hash: string; created_at: string }>(
-    "SELECT id, email, password_hash, created_at FROM users WHERE email = $1",
-    [email.toLowerCase().trim()],
-  )
-  return row ? { id: row.id, email: row.email, passwordHash: row.password_hash, createdAt: Number(row.created_at) } : null
+  const row = await queryOne<UserDbRow>(`SELECT ${USER_COLUMNS} FROM users WHERE email = $1`, [email.toLowerCase().trim()])
+  return row ? rowToUser(row) : null
 }
 
 export async function getUserById(id: string): Promise<UserRow | null> {
-  const row = await queryOne<{ id: string; email: string; password_hash: string; created_at: string }>(
-    "SELECT id, email, password_hash, created_at FROM users WHERE id = $1",
-    [id],
-  )
-  return row ? { id: row.id, email: row.email, passwordHash: row.password_hash, createdAt: Number(row.created_at) } : null
+  const row = await queryOne<UserDbRow>(`SELECT ${USER_COLUMNS} FROM users WHERE id = $1`, [id])
+  return row ? rowToUser(row) : null
 }
 
 /** Real sign-up: creates a user, a personal organization, and the
@@ -74,14 +101,161 @@ export async function createUserWithOrganization(email: string, passwordHash: st
     const orgId = `org_${randomUUID()}`
     const normalizedEmail = email.toLowerCase().trim()
 
-    await client.query("INSERT INTO users (id, email, password_hash, created_at) VALUES ($1, $2, $3, $4)", [userId, normalizedEmail, passwordHash, now])
+    await client.query("INSERT INTO users (id, email, password_hash, auth_provider, created_at) VALUES ($1, $2, $3, 'credentials', $4)", [userId, normalizedEmail, passwordHash, now])
     await client.query("INSERT INTO organizations (id, name, created_at) VALUES ($1, $2, $3)", [orgId, orgName, now])
     await client.query("INSERT INTO memberships (user_id, org_id, role, created_at) VALUES ($1, $2, 'owner', $3)", [userId, orgId, now])
 
     return {
-      user: { id: userId, email: normalizedEmail, passwordHash, createdAt: now },
+      user: {
+        id: userId,
+        email: normalizedEmail,
+        passwordHash,
+        displayName: null,
+        imageUrl: null,
+        authProvider: "credentials",
+        onboardingCompletedAt: null,
+        createdAt: now,
+      },
       org: { id: orgId, name: orgName, createdAt: now },
     }
+  })
+}
+
+/** OAuth (Google) sign-in provisioning: find the account by email, or
+ * create a real user + personal organization for it — the exact same
+ * atomic user+org+membership shape as credentials sign-up, minus the
+ * password (auth_provider = 'google'). Returns the resolved user so
+ * the Auth.js jwt callback can attach the real userId/orgId. */
+export async function findOrCreateOAuthUser(params: {
+  email: string
+  displayName?: string | null
+  imageUrl?: string | null
+}): Promise<{ user: UserRow; org: OrgRow }> {
+  const email = params.email.toLowerCase().trim()
+  const existing = await getUserByEmail(email)
+  if (existing) {
+    // Keep the freshest profile info Google gives us, but never touch
+    // an existing local password or auth_provider of an account that
+    // already signs in with credentials.
+    if (params.displayName || params.imageUrl) {
+      await query("UPDATE users SET display_name = COALESCE($1, display_name), image_url = COALESCE($2, image_url) WHERE id = $3", [
+        params.displayName ?? null,
+        params.imageUrl ?? null,
+        existing.id,
+      ])
+    }
+    const org = await getPrimaryOrgForUser(existing.id)
+    if (!org) throw new Error("OAuth user has no organization — data integrity error.")
+    return { user: existing, org }
+  }
+
+  return withTransaction(async (client) => {
+    const now = Date.now()
+    const userId = `user_${randomUUID()}`
+    const orgId = `org_${randomUUID()}`
+    const orgName = `${email.split("@")[0]}'s organization`
+
+    await client.query(
+      "INSERT INTO users (id, email, password_hash, display_name, image_url, auth_provider, created_at) VALUES ($1, $2, NULL, $3, $4, 'google', $5)",
+      [userId, email, params.displayName ?? null, params.imageUrl ?? null, now],
+    )
+    await client.query("INSERT INTO organizations (id, name, created_at) VALUES ($1, $2, $3)", [orgId, orgName, now])
+    await client.query("INSERT INTO memberships (user_id, org_id, role, created_at) VALUES ($1, $2, 'owner', $3)", [userId, orgId, now])
+
+    return {
+      user: {
+        id: userId,
+        email,
+        passwordHash: null,
+        displayName: params.displayName ?? null,
+        imageUrl: params.imageUrl ?? null,
+        authProvider: "google",
+        onboardingCompletedAt: null,
+        createdAt: now,
+      },
+      org: { id: orgId, name: orgName, createdAt: now },
+    }
+  })
+}
+
+/* ================================================================== *
+ * ONBOARDING — the shared account's one-time first-run flow. Interests
+ * are a personalization signal captured once; nothing reads them for
+ * recommendations yet (that layer isn't built).
+ * ================================================================== */
+
+export async function getOnboardingState(userId: string): Promise<{ completed: boolean; interests: string[] }> {
+  const user = await queryOne<{ onboarding_completed_at: string | null }>(
+    "SELECT onboarding_completed_at FROM users WHERE id = $1",
+    [userId],
+  )
+  const interests = await query<{ topic: string }>("SELECT topic FROM user_interests WHERE user_id = $1 ORDER BY created_at ASC", [userId])
+  return { completed: user?.onboarding_completed_at != null, interests: interests.map((r) => r.topic) }
+}
+
+/** Marks onboarding complete and records the chosen interests, atomically.
+ * Idempotent-safe: re-running replaces the interest set and refreshes the
+ * completion timestamp rather than erroring. */
+export async function completeOnboarding(userId: string, interests: string[]): Promise<void> {
+  const now = Date.now()
+  const clean = Array.from(new Set(interests.map((t) => t.trim().toLowerCase()).filter(Boolean))).slice(0, 24)
+  await withTransaction(async (client) => {
+    await client.query("UPDATE users SET onboarding_completed_at = $1 WHERE id = $2", [now, userId])
+    await client.query("DELETE FROM user_interests WHERE user_id = $1", [userId])
+    for (const topic of clean) {
+      await client.query("INSERT INTO user_interests (user_id, topic, created_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", [userId, topic, now])
+    }
+  })
+}
+
+/* ================================================================== *
+ * PASSWORD RESET — real, single-use, expiring tokens. Only the SHA-256
+ * hash of the token is ever stored (see lib/auth-password for the hash
+ * helper); the raw token exists only in the emailed link.
+ * ================================================================== */
+
+export async function createPasswordResetToken(userId: string, tokenHash: string, ttlMs: number): Promise<void> {
+  const now = Date.now()
+  await query(
+    "INSERT INTO password_reset_tokens (token_hash, user_id, expires_at, used_at, created_at) VALUES ($1, $2, $3, NULL, $4)",
+    [tokenHash, userId, now + ttlMs, now],
+  )
+}
+
+export interface ResetTokenRow {
+  tokenHash: string
+  userId: string
+  expiresAt: number
+  usedAt: number | null
+}
+
+export async function getValidResetToken(tokenHash: string): Promise<ResetTokenRow | null> {
+  const row = await queryOne<{ token_hash: string; user_id: string; expires_at: string; used_at: string | null }>(
+    "SELECT token_hash, user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash = $1",
+    [tokenHash],
+  )
+  if (!row) return null
+  const expiresAt = Number(row.expires_at)
+  if (row.used_at != null || expiresAt < Date.now()) return null
+  return { tokenHash: row.token_hash, userId: row.user_id, expiresAt, usedAt: null }
+}
+
+/** Consumes the token and sets the new password hash in a single
+ * transaction, so a token can never be spent twice even under a race. */
+export async function resetPasswordWithToken(tokenHash: string, newPasswordHash: string): Promise<boolean> {
+  return withTransaction(async (client) => {
+    const res = await client.query<{ user_id: string; expires_at: string; used_at: string | null }>(
+      "SELECT user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash = $1 FOR UPDATE",
+      [tokenHash],
+    )
+    const row = res.rows[0]
+    if (!row || row.used_at != null || Number(row.expires_at) < Date.now()) return false
+    const now = Date.now()
+    await client.query("UPDATE password_reset_tokens SET used_at = $1 WHERE token_hash = $2", [now, tokenHash])
+    // Setting a password also converts an OAuth-only account into one
+    // that can additionally sign in with credentials — harmless and expected.
+    await client.query("UPDATE users SET password_hash = $1 WHERE id = $2", [newPasswordHash, row.user_id])
+    return true
   })
 }
 
