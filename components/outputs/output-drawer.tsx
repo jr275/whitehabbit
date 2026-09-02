@@ -13,6 +13,7 @@ import { ArrowLeft, Check, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { DevModeTag } from "@/components/outputs/output-table"
 import { ProvenanceBadge } from "@/components/outputs/provenance-badge"
+import { deriveBusinessOutcome } from "@/lib/workforce/business-outcome"
 import { formatBusinessValue, metricsForOutput, provenanceForExecution } from "@/lib/workforce/business-results"
 import { SKILL_CATALOG, TOOL_CATALOG } from "@/lib/workforce/catalog"
 import type { MetricRecord, Worker, WorkerEvent, WorkerExecution, WorkerOutput, WorkerTask } from "@/lib/workforce/model"
@@ -233,6 +234,8 @@ function DetailView({ output, execution, task, metrics, events }: { output: Work
         <p className="whitespace-pre-line rounded-lg border border-border bg-card px-3.5 py-3 text-[13px] leading-relaxed text-foreground shadow-sm">{output.content}</p>
       </div>
 
+      <BusinessOutcomePanel output={output} execution={execution} />
+
       <div>
         <SectionLabel>Business metrics recorded</SectionLabel>
         {recordedMetrics.length > 0 ? <dl className="flex flex-col divide-y divide-border rounded-lg border border-border">{recordedMetrics.map((metric) => <MetaRow key={metric.id} k={metric.key.replaceAll("_", " ")} v={formatBusinessValue(metric.value, metric.unit ?? "")} />)}</dl> : <p className="rounded-lg border border-dashed border-border px-3 py-3 text-[11.5px] text-muted-foreground">No business-impact metric was recorded for this output. Operational activity is not being presented as business impact.</p>}
@@ -311,6 +314,60 @@ function DetailView({ output, execution, task, metrics, events }: { output: Work
           <MetaRow k="Tools used" v={toolNames || "—"} />
         </dl>
       </details>
+    </div>
+  )
+}
+
+/** The plain-language business outcome derived from this output's own
+ * real structured data (see lib/workforce/business-outcome.ts) — a
+ * headline, the real evidence behind it, what was actually done, and
+ * impact numbers split strictly into real (computed from this run) vs.
+ * not yet connected. Renders nothing for output types with no deriver —
+ * never a fabricated outcome for a type this function doesn't know. */
+function BusinessOutcomePanel({ output, execution }: { output: WorkerOutput; execution?: WorkerExecution }) {
+  const outcome = deriveBusinessOutcome(output, execution)
+  if (!outcome) return null
+  return (
+    <div>
+      <SectionLabel>Business outcome</SectionLabel>
+      <div className="rounded-lg border border-border bg-card p-3.5 shadow-sm">
+        <p className="text-[13px] font-medium leading-relaxed text-foreground">{outcome.headline}</p>
+
+        {outcome.evidence.length > 0 && (
+          <ul className="mt-2 flex flex-col gap-1">
+            {outcome.evidence.map((e, i) => (
+              <li key={i} className="text-[11.5px] leading-relaxed text-muted-foreground">
+                — {e}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {outcome.impact.map((m) => (
+            <div key={m.label} className={`rounded-md border px-2.5 py-2 ${m.real ? "border-grow/25 bg-grow/5" : "border-dashed border-border bg-secondary/30"}`}>
+              <div className="flex items-center justify-between gap-1.5">
+                <span className="truncate text-[10px] text-muted-foreground">{m.label}</span>
+                {!m.real && <span className="shrink-0 font-mono text-[8px] uppercase tracking-wide text-muted-foreground/70">Not connected</span>}
+              </div>
+              <div className={`mt-0.5 font-mono text-[13px] font-medium tabular-nums ${m.real ? "text-foreground" : "text-muted-foreground/50"}`}>{m.value}</div>
+              {!m.real && m.connectHint && <p className="mt-0.5 text-[9.5px] leading-snug text-muted-foreground/70">{m.connectHint}</p>}
+            </div>
+          ))}
+        </div>
+
+        {outcome.actionsPerformed.length > 0 && (
+          <p className="mt-3 text-[10.5px] leading-relaxed text-muted-foreground">
+            <span className="font-medium text-foreground">Done: </span>
+            {outcome.actionsPerformed.join(" · ")}
+          </p>
+        )}
+
+        <p className="mt-2 border-t border-border pt-2.5 text-[11.5px] text-muted-foreground">
+          <span className="font-medium text-foreground">Next: </span>
+          {outcome.nextRecommendedAction}
+        </p>
+      </div>
     </div>
   )
 }
