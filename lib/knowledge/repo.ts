@@ -384,3 +384,211 @@ export async function countSavedSince(orgId: string, userId: string | null, sinc
   )
   return row ? Number(row.count) : 0
 }
+
+/* ================================================================== *
+ * DURABLE INGESTION JOBS (Commit 12A) — migrations/0006_knowledge_
+ * jobs.sql. See that file's header for the state-machine rationale
+ * (three statuses, no separate "claimed" status, no separate reaper).
+ *
+ * DELIBERATE EXCEPTION to this file's own rule stated at the top:
+ * claimJobs/claimJobById take NO orgId/userId — there is no "get by
+ * id alone" path anywhere else in this file on purpose, but a claim
+ * is not answering "give me MY org's work," it's answering "give me
+ * the next work item to run," and a background worker has no calling
+ * user to scope by. This is safe because a claimed row's OWN
+ * persisted org_id/created_by — written at enqueue time by an
+ * already-authenticated request (requireSession(), never client
+ * input) — is what gets threaded into the actual processing call
+ * (lib/knowledge/service.ts's runIngestJob) afterward. The claim
+ * itself never reads or writes any knowledge_items column, so it
+ * cannot leak or mutate another tenant's data even though it isn't
+ * org-scoped — it only ever touches knowledge_jobs rows.
+ * ================================================================== */
+
+export interface KnowledgeJobRow {
+  id: string
+  item_id: string
+  org_id: string
+  created_by: string | null
+  job_type: string
+  status: string // 'queued' | 'done' | 'failed'
+  attempts: number
+  max_attempts: number
+  available_at: number
+  locked_at: number | null
+  locked_by: string | null
+  last_error: string | null
+  created_at: number
+  updated_at: number
+}
+
+const JOB_COLS = `id, item_id, org_id, created_by, job_type, status, attempts, max_attempts,
+  available_at, locked_at, locked_by, last_error, created_at, updated_at`
+
+/** How long a claim is trusted before it's treated as abandoned and
+ * becomes claimable again — approved policy constant. Must exceed the
+ * real worst-case processing time (service.ts's FETCH_TIMEOUT_MS is
+ * 15s) with real margin, and stay well under any realistic retry
+ * cadence so a genuinely dead worker's job doesn't sit stuck for long. */
+export const LEASE_MS = 90_000
+
+/** Default retry budget for a freshly-enqueued job — approved policy
+ * constant. A job's own max_attempts column can still vary per-row in
+ * principle; every row created by enqueueIngestJob gets this value. */
+export const DEFAULT_MAX_ATTEMPTS = 5
+
+/** Enqueues one durable ingestion job for an item — the durable
+ * commitment point. Called BEFORE the HTTP response is returned by
+ * both saveUrl and the retry route, so the job exists in Postgres
+ * even if the calling function is torn down the instant after.
+ *
+ * IDEMPOTENCY: uq_knowledge_jobs_item_open (a partial unique index on
+ * item_id WHERE status='queued') is the database's own final
+ * protection — not just this function's logic — against two open
+ * jobs ever existing for the same item. `ON CONFLICT ... DO NOTHING`
+ * targets that exact index; when it fires, this returns the ALREADY-
+ * open job (read back explicitly) rather than fabricating a new one,
+ * so a double-clicked Retry (or any other concurrent double-enqueue)
+ * resolves cleanly to one real job, and the caller still gets a real
+ * job id to hand to the after() fast path either way. */
+export async function enqueueIngestJob(itemId: string, orgId: string, userId: string | null): Promise<KnowledgeJobRow> {
+  const now = Date.now()
+  // Bounded at 2 attempts: an ON CONFLICT DO NOTHING that inserted
+  // nothing means an open job already exists; the SELECT immediately
+  // after reads it back. The only way that SELECT could also come up
+  // empty is the vanishingly rare case where that blocking job
+  // finished in the few milliseconds between the two statements — one
+  // more loop iteration then inserts cleanly, since nothing blocks it
+  // anymore.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const inserted = await queryOne<KnowledgeJobRow>(
+      `INSERT INTO knowledge_jobs (id, item_id, org_id, created_by, job_type, status, attempts, max_attempts, available_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'ingest', 'queued', 0, $5, $6, $6, $6)
+       ON CONFLICT (item_id) WHERE status = 'queued' DO NOTHING
+       RETURNING ${JOB_COLS}`,
+      [`knj_${randomUUID()}`, itemId, orgId, userId, DEFAULT_MAX_ATTEMPTS, now],
+    )
+    if (inserted) return inserted
+
+    const existing = await queryOne<KnowledgeJobRow>(
+      `SELECT ${JOB_COLS} FROM knowledge_jobs WHERE item_id = $1 AND status = 'queued' ORDER BY created_at DESC LIMIT 1`,
+      [itemId],
+    )
+    if (existing) return existing
+  }
+  // Practically unreachable (see the comment above) — fails loudly
+  // rather than returning something fabricated.
+  throw new Error(`enqueueIngestJob: could not enqueue or find an open job for item ${itemId}`)
+}
+
+/** The ONE atomic claim primitive — FOR UPDATE SKIP LOCKED inside a
+ * CTE, then an UPDATE keyed off it, as a single statement (Postgres
+ * treats one statement as one implicit transaction, so this needs no
+ * explicit BEGIN/COMMIT via withTransaction). A row already locked by
+ * a concurrent claim is invisible to this query rather than blocked
+ * on — two simultaneous callers partition the claimable set, never
+ * both claim the same row. A stale lease (locked_at older than
+ * LEASE_MS) is treated as unclaimed, which is the entire "reaper":
+ * there is no separate process that un-claims anything.
+ *
+ * Both claimJobs (batched) and claimJobById (targeted) below call
+ * this SAME function — the requirement that both the after() fast
+ * path and a future batched worker "use the same atomic claim
+ * primitive" is enforced at the SQL level, not just by convention. */
+async function claimJobsInternal(opts: { limit: number; workerId: string; now: number; onlyJobId?: string }): Promise<KnowledgeJobRow[]> {
+  const params: unknown[] = [opts.now, opts.now - LEASE_MS, opts.workerId]
+  let idFilter = ""
+  if (opts.onlyJobId) {
+    params.push(opts.onlyJobId)
+    idFilter = `AND id = $${params.length}`
+  }
+  params.push(opts.limit)
+  const limitIdx = params.length
+
+  return query<KnowledgeJobRow>(
+    `WITH claimable AS (
+       SELECT id FROM knowledge_jobs
+       WHERE status = 'queued'
+         AND available_at <= $1
+         AND (locked_at IS NULL OR locked_at < $2)
+         ${idFilter}
+       ORDER BY available_at ASC
+       FOR UPDATE SKIP LOCKED
+       LIMIT $${limitIdx}
+     )
+     UPDATE knowledge_jobs
+     SET locked_at = $1, locked_by = $3, updated_at = $1
+     WHERE id IN (SELECT id FROM claimable)
+     RETURNING ${JOB_COLS}`,
+    params,
+  )
+}
+
+/** Batched claim — for a future scheduled worker (Commit 12B; not
+ * wired to any route yet in this commit). Not used by anything today,
+ * but built and tested now since claimJobById below shares its exact
+ * claim mechanics. */
+export async function claimJobs(limit: number, workerId: string, now: number = Date.now()): Promise<KnowledgeJobRow[]> {
+  return claimJobsInternal({ limit, workerId, now })
+}
+
+/** Targeted claim of one specific job by id — the after() fast path.
+ * Returns null if that job isn't currently claimable (already
+ * claimed by someone else, already terminal, or its available_at
+ * hasn't arrived yet) rather than claiming a different job instead —
+ * the fast path either gets exactly the job it just enqueued, or
+ * nothing, never a substitute. */
+export async function claimJobById(jobId: string, workerId: string, now: number = Date.now()): Promise<KnowledgeJobRow | null> {
+  const rows = await claimJobsInternal({ limit: 1, workerId, now, onlyJobId: jobId })
+  return rows[0] ?? null
+}
+
+/** Marks a claimed job done — success. Clears the lease; there is
+ * nothing left to reclaim once a job is terminal. */
+export async function completeJob(jobId: string): Promise<void> {
+  await query("UPDATE knowledge_jobs SET status = 'done', locked_at = NULL, locked_by = NULL, updated_at = $1 WHERE id = $2", [
+    Date.now(),
+    jobId,
+  ])
+}
+
+/** Records a failed attempt. The CALLER (service.ts's claimAndRunJob)
+ * decides retry-vs-terminal and computes the backoff — that's policy,
+ * and it already holds the claimed row (with its own attempts/
+ * max_attempts) from the claim call, so no extra read is needed here.
+ * This function only persists the decision:
+ *   retryAt !== null → back to 'queued', lease cleared, available_at
+ *                       pushed out by the given backoff
+ *   retryAt === null → terminal 'failed', lease cleared
+ * Either way `attempts` and `last_error` are written from the
+ * caller's own count — never recomputed here, so there is exactly one
+ * place (service.ts) that decides what "one more failure" means. */
+export async function failJob(
+  jobId: string,
+  outcome: { attempts: number; error: string; retryAt: number | null },
+): Promise<void> {
+  const now = Date.now()
+  if (outcome.retryAt !== null) {
+    await query(
+      `UPDATE knowledge_jobs
+       SET status = 'queued', attempts = $1, last_error = $2, available_at = $3, locked_at = NULL, locked_by = NULL, updated_at = $4
+       WHERE id = $5`,
+      [outcome.attempts, outcome.error, outcome.retryAt, now, jobId],
+    )
+  } else {
+    await query(
+      `UPDATE knowledge_jobs
+       SET status = 'failed', attempts = $1, last_error = $2, locked_at = NULL, locked_by = NULL, updated_at = $3
+       WHERE id = $4`,
+      [outcome.attempts, outcome.error, now, jobId],
+    )
+  }
+}
+
+/** Test/debug seam only — reads a job by id with no ownership scoping
+ * (matching the claim functions' own exception above). Not used by
+ * any route; exists so tests can assert on a job's real persisted
+ * state without reaching into SQL directly. */
+export async function getJob(jobId: string): Promise<KnowledgeJobRow | null> {
+  return queryOne<KnowledgeJobRow>(`SELECT ${JOB_COLS} FROM knowledge_jobs WHERE id = $1`, [jobId])
+}

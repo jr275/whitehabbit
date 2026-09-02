@@ -11,13 +11,14 @@ import "server-only"
  * progress (saved → fetching → extracting → ready|failed).
  * ================================================================== */
 
+import { randomUUID } from "node:crypto"
 import { safeFetch, SafeFetchError, type SafeFetchOptions } from "@/lib/security/safe-fetch"
 import { assertSafeUrl, UnsafeUrlError } from "@/lib/security/ssrf-guard"
 import { logger } from "@/lib/observability/logger"
 import { isAiSummaryConfigured, summarizeText, type AiSummaryDeps } from "./ai-summary"
 import { extractFavicon, extractFromHtml } from "./extract"
 import * as repo from "./repo"
-import type { KnowledgeRow } from "./repo"
+import type { KnowledgeJobRow, KnowledgeRow } from "./repo"
 import { canonicalizeUrlSafe, InvalidKnowledgeUrlError, isCanonicalUrlTooLong, parseSaveableUrl } from "./url"
 
 const FETCH_TIMEOUT_MS = 15_000
@@ -113,18 +114,26 @@ function domainOf(url: string): string | null {
 /** The outcome of a save: the row, plus whether it was ALREADY in the
  * org's library (a re-save of the same page). When `duplicate` is true
  * the caller must NOT re-run the ingestion pipeline — it just opens the
- * existing item. */
+ * existing item, and jobId is null (a known, pre-existing gap: a
+ * stuck duplicate isn't re-triggered by re-saving its URL — out of
+ * scope for Commit 12A, unchanged from today's behavior). For a
+ * genuinely new item, jobId is the durable job's id — already
+ * committed to Postgres by the time this function returns, before the
+ * caller's HTTP response is even sent. */
 export interface SaveResult {
   row: KnowledgeRow
   duplicate: boolean
+  jobId: string | null
 }
 
-/** Create the row immediately in `saved` state and return it, so the
- * API can respond instantly and the UI can render the new card — unless
- * the same page (by canonical dedup key) is already saved, in which case
- * the existing item is returned untouched with duplicate=true. The
- * caller schedules processItem() to run after the response only for a
- * genuinely new item. */
+/** Create the row immediately in `saved` state, enqueue its durable
+ * ingestion job, and return both — so the API can respond instantly,
+ * the UI can render the new card, and the job already exists in
+ * Postgres as the real durability commitment (see enqueueIngestJob's
+ * own doc comment) BEFORE the caller even schedules after()'s fast-
+ * path claim. Unless the same page (by canonical dedup key) is
+ * already saved, in which case the existing item is returned untouched
+ * with duplicate=true and no job is enqueued. */
 export async function saveUrl(params: { orgId: string; userId: string | null; url: string }): Promise<SaveResult> {
   const normalized = normalizeUrl(params.url)
   // Fail fast on obviously-unsafe URLs before we even persist, so the
@@ -160,7 +169,7 @@ export async function saveUrl(params: { orgId: string; userId: string | null; ur
   // the same canonical key must never come back here as "yours".
   if (normalizedKey) {
     const existing = await repo.findByNormalizedUrl(params.orgId, params.userId, normalizedKey)
-    if (existing) return { row: existing, duplicate: true }
+    if (existing) return { row: existing, duplicate: true, jobId: null }
   }
 
   try {
@@ -171,20 +180,25 @@ export async function saveUrl(params: { orgId: string; userId: string | null; ur
       normalizedUrl: normalizedKey,
       domain: domainOf(normalized),
     })
-    return { row, duplicate: false }
+    // The durable commitment: this job row exists in Postgres before
+    // saveUrl returns, well before the caller's HTTP response is
+    // sent. If after()'s fast-path claim never runs at all, the item
+    // is never silently stuck — it's a real, reclaimable queued job.
+    const job = await repo.enqueueIngestJob(row.id, params.orgId, params.userId)
+    return { row, duplicate: false, jobId: job.id }
   } catch (err) {
     // Race: a concurrent save inserted the same canonical URL first and
     // tripped the partial unique index. Resolve to that existing item
     // instead of surfacing a raw constraint error.
     if (normalizedKey && err instanceof Error && /duplicate key|unique/i.test(err.message)) {
       const existing = await repo.findByNormalizedUrl(params.orgId, params.userId, normalizedKey)
-      if (existing) return { row: existing, duplicate: true }
+      if (existing) return { row: existing, duplicate: true, jobId: null }
     }
     throw err
   }
 }
 
-/** Read-only page metadata — the DB-free counterpart to processItem().
+/** Read-only page metadata — the DB-free counterpart to runIngestJob().
  * Normalizes + SSRF-guards + size/timeout-caps the fetch, then returns
  * only the presentational metadata a card needs (never body text, never
  * secrets). Powers the public /api/knowledge/preview route so guest mode
@@ -253,99 +267,215 @@ function decodeUtf8(body: Buffer): string {
 }
 
 /**
- * Run the ingestion pipeline for one saved item. Idempotent-ish: safe
- * to call again on a failed item (that's exactly what retry does).
- * Persists each transition; on any failure sets status=failed with a
- * real, human-readable reason. Never throws to its caller — a
- * background invocation must not crash the request that scheduled it.
+ * Run the ingestion pipeline for one saved item — the exact same
+ * algorithm this codebase has always run (URL already validated at
+ * save time, safeFetch/SSRF-guarded fetch, extraction, metadata +
+ * tags persisted in one transaction, status transitions as they
+ * happen). Idempotent: safe to call again on a failed or interrupted
+ * item, which is exactly what a job retry does — a fresh run simply
+ * re-fetches and overwrites the same columns with fresh values.
  *
- * userId is the item's real owner, already known by both callers (the
- * save route just inserted the row for this exact user; the retry
- * route already re-validated ownership via a user-scoped getItem
- * before scheduling this). Threaded through so every repo call this
- * makes carries its own (org, user) predicate — not a background job
- * that trusts an earlier check happened somewhere else.
+ * UNLIKE the old processItem this replaces, this THROWS on failure
+ * instead of swallowing it into a status write. That decision no
+ * longer belongs here: claimAndRunJob below is what now decides
+ * whether a failure is a mid-retry hiccup (leave knowledge_items
+ * alone — the job engine will retry) or a genuinely terminal one
+ * (mark the item failed), based on the durable job's own attempt
+ * count, which this function has no way to know on its own. This is
+ * safe specifically because every caller now goes through
+ * claimAndRunJob, which does catch it — there is no longer a bare
+ * after() callback with nothing downstream of this function.
+ *
+ * userId is the item's real owner. Threaded through so every repo
+ * call this makes carries its own (org, user) predicate — not a
+ * background job that trusts an earlier check happened somewhere
+ * else. It comes from the claimed knowledge_jobs row's own persisted
+ * org_id/created_by (written at enqueue time from a verified
+ * session), never from an unauthenticated caller of the job runner.
+ *
+ * deps: FetchDeps — the same transport test seam guardedFetch/
+ * fetchPageMetadata already expose, threaded through unchanged so a
+ * test can exercise this real function's real success/failure paths
+ * without a live network call. Never passed by any production call
+ * site (claimAndRunJob's own default is {}) — the SSRF guard itself
+ * still runs for real either way; only the socket is fakeable.
  */
-export async function processItem(id: string, orgId: string, userId: string | null): Promise<void> {
+export async function runIngestJob(id: string, orgId: string, userId: string | null, deps: FetchDeps = {}): Promise<void> {
+  await repo.incrementAttempts(id, orgId, userId)
+  const item = await repo.getItem(id, orgId, userId)
+  if (!item) return // deleted before processing ran, or ownership no longer checks out — nothing to do
+
+  await repo.setStatus(id, orgId, userId, "fetching")
+
+  let fetched: { html: string; contentType: string }
   try {
-    await repo.incrementAttempts(id, orgId, userId)
-    const item = await repo.getItem(id, orgId, userId)
-    if (!item) return // deleted before processing ran, or ownership no longer checks out — nothing to do
+    const raw = await guardedFetch(item.url, `ingest:${id}`, deps)
+    fetched = { html: decodeUtf8(raw.body), contentType: raw.contentType }
+  } catch (err) {
+    // guardedFetch has already logged the detail; what propagates is
+    // the same safe message a stranger would see. SaveValidationError
+    // already carries that in .message, so no extra wrapping needed —
+    // claimAndRunJob's catch reads err.message uniformly.
+    throw err instanceof SaveValidationError ? err : new SaveValidationError("Could not fetch the source.")
+  }
 
-    await repo.setStatus(id, orgId, userId, "fetching")
+  await repo.setStatus(id, orgId, userId, "extracting")
 
-    let fetched: { html: string; contentType: string }
-    try {
-      const raw = await guardedFetch(item.url, `ingest:${id}`)
-      fetched = { html: decodeUtf8(raw.body), contentType: raw.contentType }
-    } catch (err) {
-      // guardedFetch has already logged the detail; what lands on the
-      // row is the same message a stranger would see.
-      const reason = err instanceof SaveValidationError ? err.message : "Could not fetch the source."
-      await repo.setStatus(id, orgId, userId, "failed", reason)
-      return
-    }
+  const isHtml = /text\/html|application\/xhtml/i.test(fetched.contentType)
+  const domain = item.domain ?? undefined
 
-    await repo.setStatus(id, orgId, userId, "extracting")
-
-    const isHtml = /text\/html|application\/xhtml/i.test(fetched.contentType)
-    const domain = item.domain ?? undefined
-
-    if (!isHtml) {
-      // Real content, but not an HTML page we can extract prose from
-      // (PDF, video page without OG, etc). Persist it honestly as ready
-      // with what we can derive — no fabricated body text.
-      const kind = item.url.toLowerCase().endsWith(".pdf") ? "pdf" : "document"
-      await repo.saveExtraction(id, orgId, userId, {
-        status: "ready",
-        kind,
-        title: domain ? `${domain} — saved file` : item.url,
-        author: null,
-        siteName: domain ?? null,
-        excerpt: null,
-        imageUrl: null,
-        favicon: null,
-        canonicalUrl: null,
-        publishedAt: null,
-        wordCount: null,
-        readingMin: null,
-        lang: null,
-        contentText: null,
-        rawHtml: null,
-        tags: [],
-      })
-      return
-    }
-
-    const extracted = extractFromHtml(fetched.html, item.url)
-    // Reading time is only honest for text kinds — never label a video
-    // or PDF with an invented "N min read" derived from page chrome.
-    const textKind = extracted.kind === "article" || extracted.kind === "document"
+  if (!isHtml) {
+    // Real content, but not an HTML page we can extract prose from
+    // (PDF, video page without OG, etc). Persist it honestly as ready
+    // with what we can derive — no fabricated body text.
+    const kind = item.url.toLowerCase().endsWith(".pdf") ? "pdf" : "document"
     await repo.saveExtraction(id, orgId, userId, {
       status: "ready",
-      kind: extracted.kind,
-      title: extracted.title ?? (domain ? `Untitled — ${domain}` : "Untitled"),
-      author: extracted.author ?? null,
-      siteName: extracted.siteName ?? domain ?? null,
-      excerpt: extracted.excerpt ?? null,
-      imageUrl: extracted.imageUrl ?? null,
-      favicon: extractFavicon(fetched.html, item.url) ?? null,
-      canonicalUrl: extracted.canonicalUrl ?? null,
-      publishedAt: extracted.publishedAt ?? null,
-      wordCount: extracted.wordCount ?? null,
-      readingMin: textKind ? (extracted.readingMin ?? null) : null,
-      lang: extracted.lang ?? null,
-      contentText: extracted.contentText ?? null,
-      rawHtml: fetched.html.length <= MAX_BYTES ? fetched.html : null,
-      tags: extracted.tags,
+      kind,
+      title: domain ? `${domain} — saved file` : item.url,
+      author: null,
+      siteName: domain ?? null,
+      excerpt: null,
+      imageUrl: null,
+      favicon: null,
+      canonicalUrl: null,
+      publishedAt: null,
+      wordCount: null,
+      readingMin: null,
+      lang: null,
+      contentText: null,
+      rawHtml: null,
+      tags: [],
     })
+    return
+  }
+
+  const extracted = extractFromHtml(fetched.html, item.url)
+  // Reading time is only honest for text kinds — never label a video
+  // or PDF with an invented "N min read" derived from page chrome.
+  const textKind = extracted.kind === "article" || extracted.kind === "document"
+  await repo.saveExtraction(id, orgId, userId, {
+    status: "ready",
+    kind: extracted.kind,
+    title: extracted.title ?? (domain ? `Untitled — ${domain}` : "Untitled"),
+    author: extracted.author ?? null,
+    siteName: extracted.siteName ?? domain ?? null,
+    excerpt: extracted.excerpt ?? null,
+    imageUrl: extracted.imageUrl ?? null,
+    favicon: extractFavicon(fetched.html, item.url) ?? null,
+    canonicalUrl: extracted.canonicalUrl ?? null,
+    publishedAt: extracted.publishedAt ?? null,
+    wordCount: extracted.wordCount ?? null,
+    readingMin: textKind ? (extracted.readingMin ?? null) : null,
+    lang: extracted.lang ?? null,
+    contentText: extracted.contentText ?? null,
+    rawHtml: fetched.html.length <= MAX_BYTES ? fetched.html : null,
+    tags: extracted.tags,
+  })
+}
+
+/* ================================================================== *
+ * DURABLE JOB ORCHESTRATION (Commit 12A) — claimAndRunJob is the ONE
+ * place that turns a claimed knowledge_jobs row into a real
+ * runIngestJob call and records the outcome. Both after()'s fast path
+ * (targeted by job id) and a future batched worker (Commit 12B) call
+ * this exact function — there is no second implementation of "what
+ * happens when a job is claimed."
+ * ================================================================== */
+
+/** Approved retry policy constants (Commit 12). Backoff after attempt
+ * N (1-indexed, i.e. the count AFTER incrementing on that failure):
+ * ~30s → ~60s → ~120s → ~240s, capped at 15 minutes, ±20% jitter so a
+ * burst of simultaneously-failing jobs doesn't retry in lockstep. */
+export const RETRY_BASE_DELAY_MS = 30_000
+export const RETRY_MAX_DELAY_MS = 15 * 60_000
+export const RETRY_JITTER = 0.2
+
+/** Pure — no I/O, deterministic modulo Math.random() — so it's
+ * directly unit-testable without a database. `attempt` is the job's
+ * attempts count AFTER this failure is recorded. */
+export function computeBackoffMs(attempt: number): number {
+  const raw = Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1), RETRY_MAX_DELAY_MS)
+  const jitterRange = raw * RETRY_JITTER
+  const jitter = (Math.random() * 2 - 1) * jitterRange
+  return Math.max(0, Math.round(raw + jitter))
+}
+
+export interface ClaimAndRunOptions {
+  /** Targeted claim of the one job this call is meant to run — the
+   *  after() fast path. When set, `limit` is ignored. */
+  jobId?: string
+  /** Batched claim — for a future scheduled worker (Commit 12B).
+   *  Ignored when jobId is set. Defaults to 1. */
+  limit?: number
+  /** Test seam only — see runIngestJob's own doc comment. Never
+   *  passed by any production call site. */
+  fetchDeps?: FetchDeps
+}
+
+export interface JobRunSummary {
+  claimed: number
+  succeeded: number
+  retried: number
+  failed: number
+}
+
+/**
+ * Atomically claims one or more durable jobs and runs runIngestJob
+ * for each — the single orchestration entry point every trigger goes
+ * through (see the file header above this section). Never throws to
+ * its caller: this is what after()'s bare callback calls directly,
+ * with nothing else downstream to catch a rejection, so the same
+ * "never crash the request that scheduled it" guarantee the old
+ * processItem made is preserved here instead.
+ */
+export async function claimAndRunJob(opts: ClaimAndRunOptions = {}, workerId: string = `worker_${randomUUID()}`): Promise<JobRunSummary> {
+  const summary: JobRunSummary = { claimed: 0, succeeded: 0, retried: 0, failed: 0 }
+  try {
+    const jobs = opts.jobId
+      ? await repo.claimJobById(opts.jobId, workerId).then((j) => (j ? [j] : []))
+      : await repo.claimJobs(opts.limit ?? 1, workerId)
+    summary.claimed = jobs.length
+
+    for (const job of jobs) {
+      await runClaimedJob(job, summary, opts.fetchDeps ?? {})
+    }
   } catch (err) {
-    // Last-resort guard: any unexpected error still leaves a real,
-    // honest failed state rather than an item stuck "extracting".
-    try {
-      await repo.setStatus(id, orgId, userId, "failed", err instanceof Error ? err.message : "Processing failed unexpectedly.")
-    } catch {
-      /* swallow — nothing else we can do in a background task */
+    // A claim itself failing (e.g. a transient DB error) is the same
+    // category of "background invocation must not crash the request
+    // that scheduled it" the old processItem guarded against — log,
+    // don't throw. The job (if it was ever inserted) simply stays
+    // queued for the next attempt, exactly as if this call never ran.
+    logger.error("knowledge_job_claim_error", { message: err instanceof Error ? err.message : String(err) })
+  }
+  return summary
+}
+
+/** Runs one already-claimed job and records its outcome. Split out
+ * from claimAndRunJob only so the per-job try/catch (one job failing
+ * must never stop the rest of a batch) reads clearly. */
+async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetchDeps: FetchDeps): Promise<void> {
+  try {
+    await runIngestJob(job.item_id, job.org_id, job.created_by, fetchDeps)
+    await repo.completeJob(job.id)
+    summary.succeeded++
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Processing failed unexpectedly."
+    const attempts = job.attempts + 1
+    const terminal = attempts >= job.max_attempts
+
+    if (terminal) {
+      await repo.failJob(job.id, { attempts, error: message, retryAt: null })
+      // The one point where a durable job's outcome becomes visible
+      // on the UI-facing row — knowledge_items.status stays exactly
+      // what it always meant, only reached through a durable retry
+      // loop instead of a single best-effort attempt.
+      await repo.setStatus(job.item_id, job.org_id, job.created_by, "failed", message)
+      summary.failed++
+    } else {
+      const retryAt = Date.now() + computeBackoffMs(attempts)
+      await repo.failJob(job.id, { attempts, error: message, retryAt })
+      summary.retried++
     }
   }
 }
@@ -361,7 +491,7 @@ export interface SummarizeResult {
 
 /**
  * Generate (or return the cached) AI summary for one item. On-demand
- * only — this is never called by the ingestion pipeline (processItem
+ * only — this is never called by the ingestion pipeline (runIngestJob
  * above), and a summary once generated is never silently regenerated:
  * a second call for the same item just returns what's already stored.
  * Real cost: exactly one Anthropic Messages API call, and only on a
