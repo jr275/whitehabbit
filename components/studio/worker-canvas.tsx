@@ -40,6 +40,7 @@ import {
   WORKER_STATE_META,
 } from "@/lib/workforce/selectors"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
+import { toolPermissionLabel, toolPermissionTone } from "@/lib/ui/permission-label"
 
 interface FinishedRunResult {
   icon: typeof KeyRound
@@ -429,7 +430,16 @@ function ToolsCapabilityCard({
           return (
             <li key={t.id} className="flex items-center gap-1.5">
               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
-              <span className="truncate text-[11.5px] text-foreground">{t.name}</span>
+              <span className="min-w-0 flex-1 truncate text-[11.5px] text-foreground">{t.name}</span>
+              {/* Read-only is the expected default — only flag Write/
+               * Destructive, to keep this spatial card quiet rather
+               * than badging every row (lib/ui/permission-label.ts,
+               * same mapping the Tools tab/Studio Tools step use). */}
+              {toolPermissionLabel(t.permission) !== "Read-only" && (
+                <span className={`shrink-0 font-mono text-[8.5px] uppercase tracking-wider ${toolPermissionTone(t.permission) === "bad" ? "text-destructive" : "text-warn"}`}>
+                  {toolPermissionLabel(t.permission)}
+                </span>
+              )}
             </li>
           )
         })}

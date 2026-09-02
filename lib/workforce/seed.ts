@@ -109,6 +109,7 @@ export function buildWorkerFromBlueprint(id: string, blueprint: AgentBlueprint):
     knowledge: [],
     skills: skills(chosenSkillIds),
     tools: tools(requiredToolIds),
+    integrations: [],
     behaviors: [],
     channels: channels([]),
     outcome: { primaryKPI: blueprint.primaryKPI, secondaryKPIs: blueprint.secondaryKPIs },
@@ -116,6 +117,7 @@ export function buildWorkerFromBlueprint(id: string, blueprint: AgentBlueprint):
     status: "draft",
     tested: false,
     createdAt: now,
+    updatedAt: now,
     releasedAt: null,
     releasedVersionId: null,
   }
@@ -181,6 +183,7 @@ export function buildWorkerFromProduct(
     knowledge,
     skills: skills(chosenSkillIds),
     tools: tools(requiredToolIds),
+    integrations: [],
     behaviors,
     channels: channels([]),
     outcome: { primaryKPI: "Outputs produced", secondaryKPIs: ["Quality score", "Success rate"] },
@@ -188,6 +191,7 @@ export function buildWorkerFromProduct(
     status: "draft",
     tested: false,
     createdAt: now,
+    updatedAt: now,
     releasedAt: null,
     releasedVersionId: null,
   }
@@ -204,6 +208,7 @@ export function buildEmptyWorker(id: string): Worker {
     knowledge: [],
     skills: skills([]),
     tools: tools([]),
+    integrations: [],
     behaviors: [],
     channels: channels([]),
     outcome: { primaryKPI: "", secondaryKPIs: [] },
@@ -211,6 +216,7 @@ export function buildEmptyWorker(id: string): Worker {
     status: "draft",
     tested: false,
     createdAt: now,
+    updatedAt: now,
     releasedAt: null,
     releasedVersionId: null,
   }
@@ -219,7 +225,13 @@ export function buildEmptyWorker(id: string): Worker {
 export function buildSeedWorker(): Worker {
   const now = Date.now()
   return {
-    id: "worker_atlas",
+    // Globally unique (workers.id has no per-org composite key — see
+    // migrations) even though every org's seed worker is named "Atlas"
+    // and starts from the same definition. A fixed literal id here
+    // would collide the moment a SECOND real organization ever calls
+    // this endpoint. Found via live cross-org testing, fixed here —
+    // unrelated to this phase's Salesforce/OAuth work otherwise.
+    id: `worker_atlas_${crypto.randomUUID()}`,
     identity: {
       name: "Atlas",
       role: "Marketing Intelligence Worker",
@@ -237,6 +249,7 @@ export function buildSeedWorker(): Worker {
     knowledge: knowledge([{ name: "Brand guidelines", type: "brand", documents: 9 }]),
     skills: skills(["skill_trend_research"]),
     tools: tools(["tool_web_search", "tool_llm"]),
+    integrations: [],
     behaviors: [
       { id: uid("beh"), raw: "IF a required tool is not connected → block and explain why", condition: "a required tool is not connected", action: "block and explain why" },
     ],
@@ -251,6 +264,7 @@ export function buildSeedWorker(): Worker {
     status: "ready",
     tested: true,
     createdAt: now,
+    updatedAt: now,
     releasedAt: null,
     releasedVersionId: null,
   }

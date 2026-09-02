@@ -9,11 +9,11 @@
  * this component instead of its own ad-hoc colored initials circle.
  * ------------------------------------------------------------------ */
 
-import { MessagesSquare, PenLine, Search, Target } from "lucide-react"
+import { MessagesSquare, PenLine, Search, Target, TrendingUp } from "lucide-react"
 import { getWorkerVisual } from "@/lib/workforce/visual-identity"
 import type { Worker } from "@/lib/workforce/model"
 
-const ICONS = { Search, PenLine, MessagesSquare, Target }
+const ICONS = { Search, PenLine, MessagesSquare, Target, TrendingUp }
 
 const SIZE_CLASSES = {
   xs: "h-5 w-5",

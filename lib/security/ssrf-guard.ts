@@ -8,7 +8,12 @@ import "server-only"
  *
  * Blocks:
  *   - non-http(s) schemes (file://, ftp://, gopher://, data:, ...)
- *   - localhost / loopback (127.0.0.0/8, ::1)
+ *   - localhost / loopback (127.0.0.0/8, ::1) — EXCEPT under Vitest
+ *     (process.env.VITEST, set by the test runner itself, never true
+ *     in a real deployment), where this codebase's established
+ *     convention is a real local node:http server standing in for a
+ *     provider (see allowLoopbackForTests() below) — every OTHER
+ *     block below still applies unconditionally, test or not
  *   - link-local (169.254.0.0/16, fe80::/10) — includes the cloud
  *     metadata endpoint (169.254.169.254)
  *   - private ranges (10/8, 172.16/12, 192.168/16, fc00::/7)
@@ -27,6 +32,34 @@ export class UnsafeUrlError extends Error {
     super(message)
     this.name = "UnsafeUrlError"
   }
+}
+
+/** Real, narrow test-only carve-out (connector platform audit, Fase
+ * D3): this codebase's established test convention stands up a real
+ * local node:http server as the fake "provider" boundary for every
+ * connector test (never mocking policy logic — see
+ * test/dynamic-connectors.test.ts, test/connection-lifecycle.test.ts,
+ * etc.), which necessarily means fetching 127.0.0.1. Vitest sets
+ * process.env.VITEST itself — this is never true in a real deployment.
+ * Deliberately narrow: it only ever affects the LOOPBACK check
+ * (isLoopback below), never link-local/metadata (169.254.0.0/16),
+ * 10/8, 172.16/12, or 192.168/16 — a real SSRF test asserting those
+ * ranges stay blocked still runs, and still passes, under Vitest.
+ *
+ * A function, not a module-load-time constant — read fresh on every
+ * call. process.env.VITEST is already set by the time this module is
+ * first imported, so caching it once would freeze in whatever value
+ * happened to be set at import time; a live read is what actually
+ * lets test/ssrf-guard.test.ts toggle it and observe both branches. */
+function allowLoopbackForTests(): boolean {
+  return process.env.VITEST === "true"
+}
+
+function isLoopback(ip: string): boolean {
+  const version = isIP(ip)
+  if (version === 4) return ip.split(".")[0] === "127"
+  if (version === 6) return ip.toLowerCase() === "::1"
+  return false
 }
 
 function isPrivateIPv4(ip: string): boolean {
@@ -59,7 +92,16 @@ function isPrivateIp(ip: string): boolean {
   return true // not a recognizable IP — refuse rather than guess
 }
 
-const BLOCKED_HOSTNAMES = new Set(["localhost", "metadata.google.internal"])
+// metadata.google.internal is NEVER allowed, test mode or not — it has
+// no legitimate use in any test fixture. "localhost" is the one entry
+// the test-mode carve-out actually applies to.
+const ALWAYS_BLOCKED_HOSTNAMES = new Set(["metadata.google.internal"])
+const LOOPBACK_HOSTNAMES = new Set(["localhost"])
+
+function isBlockedAddress(address: string): boolean {
+  if (isLoopback(address)) return !allowLoopbackForTests()
+  return isPrivateIp(address)
+}
 
 /** Throws UnsafeUrlError if the URL must not be fetched server-side.
  * Call this immediately before every outbound fetch of a URL that
@@ -81,13 +123,16 @@ export async function assertSafeUrl(rawUrl: string): Promise<URL> {
   // literal-IP check below actually recognizes it, rather than falling
   // through to a DNS lookup of the literal string "[::1]".
   const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "")
-  if (BLOCKED_HOSTNAMES.has(hostname)) {
+  if (ALWAYS_BLOCKED_HOSTNAMES.has(hostname)) {
+    throw new UnsafeUrlError(`"${hostname}" is not a fetchable external host.`)
+  }
+  if (LOOPBACK_HOSTNAMES.has(hostname) && !allowLoopbackForTests()) {
     throw new UnsafeUrlError(`"${hostname}" is not a fetchable external host.`)
   }
 
   // literal IP in the URL — check directly, no DNS needed
   if (isIP(hostname)) {
-    if (isPrivateIp(hostname)) throw new UnsafeUrlError(`"${hostname}" is a private/internal address and cannot be fetched.`)
+    if (isBlockedAddress(hostname)) throw new UnsafeUrlError(`"${hostname}" is a private/internal address and cannot be fetched.`)
     return url
   }
 
@@ -101,7 +146,7 @@ export async function assertSafeUrl(rawUrl: string): Promise<URL> {
   }
   if (addresses.length === 0) throw new UnsafeUrlError(`"${hostname}" did not resolve to any address.`)
   for (const { address } of addresses) {
-    if (isPrivateIp(address)) {
+    if (isBlockedAddress(address)) {
       throw new UnsafeUrlError(`"${hostname}" resolves to a private/internal address and cannot be fetched.`)
     }
   }

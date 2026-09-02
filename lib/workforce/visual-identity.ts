@@ -23,7 +23,7 @@ export interface CategoryVisual {
   /** hex accent — the one color used for this category everywhere */
   accent: string
   /** lucide-react icon name (components/workforce/worker-avatar.tsx maps this to the actual component, kept out of this file so it stays import-light for server/lib code) */
-  icon: "Search" | "PenLine" | "MessagesSquare" | "Target"
+  icon: "Search" | "PenLine" | "MessagesSquare" | "Target" | "TrendingUp"
   label: string
 }
 
@@ -32,6 +32,7 @@ export const CATEGORY_VISUAL: Record<SkillCategory, CategoryVisual> = {
   content: { accent: "#a855f7", icon: "PenLine", label: "Content" },
   communication: { accent: "#14b8a6", icon: "MessagesSquare", label: "Communication" },
   sales: { accent: "#f59e0b", icon: "Target", label: "Sales" },
+  marketing: { accent: "#16a34a", icon: "TrendingUp", label: "Marketing" },
 }
 
 const FALLBACK_CATEGORY: SkillCategory = "research"

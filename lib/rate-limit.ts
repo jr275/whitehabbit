@@ -12,6 +12,12 @@ export const RATE_LIMITS = {
   worker_build: { limit: 30, windowMs: 60_000 },
   worker_release: { limit: 30, windowMs: 60_000 },
   worker_run: { limit: 10, windowMs: 60_000 }, // real LLM calls — tighter
+  connection_create: { limit: 20, windowMs: 60_000 },
+  custom_connector_create: { limit: 20, windowMs: 60_000 },
+  // Real outbound HTTP probes against an org-configured URL — tighter
+  // than creation, matching worker_run's "real external call" caution.
+  custom_connector_test: { limit: 10, windowMs: 60_000 },
+
   knowledge_save: { limit: 30, windowMs: 60_000 }, // 30 saves/min per org — each triggers a real outbound fetch
   knowledge_retry: { limit: 20, windowMs: 60_000 },
   knowledge_preview: { limit: 40, windowMs: 60_000 }, // unauth metadata/thumbnail lookups per client ip — each is a real outbound fetch

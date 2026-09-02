@@ -15,7 +15,7 @@
  * a tool and does not depend on any client code.
  * ================================================================== */
 
-import type { SkillCategory } from "@/lib/workforce/model"
+import type { SkillCategory, WorkerIntegrationConfig } from "@/lib/workforce/model"
 
 /* ---- the real slice of a Worker's definition a skill actually needs
  * to reason with — mission/objectives/behaviors/knowledge, resolved
@@ -28,6 +28,11 @@ export interface WorkerContext {
   objectives: string[]
   behaviors: { condition: string; action: string }[]
   knowledge: { id: string; name: string; type: string; content?: string }[]
+  /** The real, persisted per-action permission decisions from Studio's
+   * Integrations step — runToolAction() (lib/agent/tool-runner.ts)
+   * reads this to decide allow/deny/requires_approval for a connector
+   * action, ahead of the blanket HIGH_RISK_PERMISSIONS rule. */
+  integrations: WorkerIntegrationConfig[]
 }
 
 /* ---- permission / risk vocabulary (section 16) ---- */
@@ -52,9 +57,22 @@ export interface ToolActionResult<T = unknown> {
   errorCode?: Exclude<ExecutionReasonCode, "missing_credential">
   blocked?: boolean
   blockedReason?: string
+  /** The real HTTP status code the provider responded with, when this
+   * result came from an HTTP call (lib/connectors/custom-rest.ts) —
+   * absent for a call that never got a response at all (a blocked/
+   * unsafe URL, a network failure) or for a non-HTTP action. Feeds
+   * lib/connectors/observability.ts's connector.* execution events;
+   * never itself a place to smuggle a raw header or body. */
+  httpStatus?: number
   /** real, measurable facts about this call — never estimated */
   durationMs: number
   costUsd?: number
+  /** Section 8 — a real provider-supplied Retry-After hint (parsed
+   * from the HTTP header, in ms), set only on a genuine 429/503.
+   * lib/agent/retry.ts's withRetry() waits at least this long before
+   * the next attempt instead of guessing a backoff — never invented
+   * when the provider didn't actually send one. */
+  retryAfterMs?: number
 }
 
 export interface ToolContext {
@@ -62,6 +80,11 @@ export interface ToolContext {
   executionId: string
   /** emit a real runtime event as this call happens */
   emit: (type: RuntimeEventType, payload: Record<string, unknown>) => void
+  /** This Worker's real, persisted per-action permission config — see
+   * WorkerContext.integrations. runToolAction() (lib/agent/tool-
+   * runner.ts) is the only real consumer; a tool's own run() never
+   * needs to look at this itself. */
+  integrations?: WorkerIntegrationConfig[]
 }
 
 export interface ToolAction {
@@ -118,6 +141,16 @@ export interface SkillExecutionResult {
    * through to WorkerExecution so a development run can never be
    * mistaken for a real one, even after LLM_DEV_MODE is turned back off. */
   executionMode?: "development"
+  /** Section 9 — partial failure: set true only by a skill that knows
+   * at least one of its real external actions genuinely completed AND
+   * at least one other genuinely failed/was blocked (e.g. Salesforce
+   * succeeded, Slack failed). lib/agent/runtime.ts finalizes such a
+   * run as "partially_completed", never silently "completed" (which
+   * would hide the real failure) and never "failed" (which would
+   * incorrectly imply nothing worked — the Salesforce write must not
+   * be re-attempted because the run "failed"). Undefined/false for
+   * every normal success. */
+  partial?: boolean
 }
 
 export interface SkillEvaluation {
@@ -161,6 +194,27 @@ export interface SkillDefinition {
   execute: (ctx: SkillExecutionContext) => Promise<SkillExecutionResult>
   evaluate: (result: SkillExecutionResult) => SkillEvaluation
   metrics: (result: SkillExecutionResult, evaluation: SkillEvaluation) => MetricEmission[]
+  /** Only implemented by a skill that runs as a named, resumable
+   * pipeline (see lib/agent/pipeline/) and threw ApprovalRequiredError
+   * with a real resumeState attached. Called by POST /api/approvals/
+   * [id]/decide (via lib/agent/runtime.ts's resumeTask()) on Approve:
+   * runs the exact approved action for real, then CONTINUES the same
+   * pipeline from the next stage — never re-runs a stage this
+   * resumeState already recorded as completed. Returns exactly the
+   * same SkillExecutionResult shape execute() does, or throws another
+   * ApprovalRequiredError if a LATER stage also needs approval. A
+   * skill with no resume() falls back to the prior phase's honestly-
+   * scoped behavior: Approve runs the one captured action in
+   * isolation, no continuation. */
+  resume?: (ctx: SkillExecutionContext, resumeState: unknown) => Promise<SkillExecutionResult>
+  /** Section 19 — "retry failed step": re-runs exactly one FAILED
+   * stage of a resumable pipeline using its own already-completed
+   * prior stages, never replaying a real external action that already
+   * succeeded. Only implemented by a skill that also implements
+   * resume(); `stage` is one of that skill's own real
+   * PipelineStageKey values. Called by POST /api/executions/[id]/
+   * retry-step via lib/agent/runtime.ts's retryFailedStage(). */
+  retryStage?: (ctx: SkillExecutionContext, currentState: unknown, stage: string) => Promise<SkillExecutionResult>
 }
 
 /* ---- runtime events — every one must correspond to something real ---- */
@@ -170,14 +224,38 @@ export type RuntimeEventType =
   | "tool_called"
   | "tool_completed"
   | "tool_blocked"
+  | "tool_failed"
   | "reasoning_started"
   | "reasoning_completed"
   | "output_created"
+  | "business_event_recorded"
   | "metric_recorded"
   | "task_completed"
   | "task_failed"
   | "task_blocked"
   | "approval_required"
+  | "approval_approved"
+  | "approval_rejected"
+  | "permission_checked"
+  | "stage_started"
+  | "stage_completed"
+  | "stage_failed"
+  | "stage_blocked"
+  | "stage_skipped"
+  /** Connector platform audit, Fase D9 — real, structured events for
+   * every connector action call (built-in AND custom/dynamic), distinct
+   * from the generic tool_called/tool_completed/tool_failed a skill
+   * emits by hand around ANY tool call (native or connector). Emitted
+   * from exactly two real chokepoints — lib/connectors/registry.ts's
+   * getConnectorTools() wrapping for built-in connectors, and
+   * lib/connectors/dynamic.ts's buildDynamicConnectorTools() wrapping
+   * for custom ones — never scattered per-provider. Payload is always
+   * built by lib/connectors/observability.ts's allowlisted emitters,
+   * which structurally cannot accept a raw headers/credential object —
+   * see that file for the real redaction guarantee. */
+  | "connector_execution_started"
+  | "connector_execution_completed"
+  | "connector_execution_failed"
 
 /** A required credential/tool was never configured. Maps to execution
  * status "blocked" — the NOT_CONFIGURED state. Thrown before any
@@ -225,8 +303,45 @@ export class ApprovalRequiredError extends Error {
     public toolName: string,
     public actionLabel: string,
     public permission: ToolPermission,
+    /** The real action id (e.g. "update_lead") and the real input that
+     * would have been sent — captured so a human's later Approve can
+     * actually run this exact real call, not a re-guessed one. Never
+     * a secret: this is the action's own input shape, the same thing
+     * an operator already sees before deciding. */
+    public actionId: string,
+    public input: unknown,
+    /** Set only by a resumable pipeline skill that catches this error
+     * locally (see SkillDefinition.resume) and re-throws it with its
+     * own real, current PipelineState attached — so Approve can
+     * continue the SAME execution past this action instead of only
+     * running it in isolation. Undefined for every other skill; never
+     * a secret, the same structured state the execution graph UI
+     * already shows. */
+    public resumeState?: unknown,
+    /** Which real pipeline stage this approval blocks, for a
+     * resumable skill — lets the runtime fold this into the right
+     * PipelineStageRecord (status "waiting_for_approval") without
+     * runtime.ts knowing anything skill-specific. */
+    public stage?: string,
   ) {
     super(`"${actionLabel}" on ${toolName} requires human approval (${permission}) before it can run.`)
     this.name = "ApprovalRequiredError"
+  }
+}
+
+/** An action this Worker was explicitly denied — an operator's own
+ * Studio Integrations decision (WorkerIntegrationAction.permission ===
+ * "deny"), enforced server-side in runToolAction(), never just a
+ * hidden button. Maps to execution status "failed", reasonCode
+ * "execution_error" — a real, deliberate refusal, not a malfunction. */
+export class PermissionDeniedError extends Error {
+  readonly code: ExecutionReasonCode = "execution_error"
+  constructor(
+    public toolId: string,
+    public toolName: string,
+    public actionLabel: string,
+  ) {
+    super(`"${actionLabel}" on ${toolName} is denied for this worker — an operator explicitly turned it off in Studio's Integrations step.`)
+    this.name = "PermissionDeniedError"
   }
 }

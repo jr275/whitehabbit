@@ -13,14 +13,15 @@
  * ------------------------------------------------------------------ */
 
 import { Check, Loader2, Plus, Rocket, Trash2, X } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { BEHAVIOR_PRESETS, CHANNEL_CATALOG, KNOWLEDGE_TEMPLATES, SKILL_CATALOG, TONE_PRESETS, TOOL_CATALOG } from "@/lib/workforce/catalog"
 import type { Autonomy, ChannelId, SkillCategory, Worker } from "@/lib/workforce/model"
 import { OUTCOME_PRESETS, SKILL_CATEGORIES, SKILL_CATEGORY_LABEL, TOOL_BOUNDARY_META, toolExecutionBoundary } from "@/lib/workforce/model"
 import { computeReadiness } from "@/lib/workforce/selectors"
 import { useWorkforce, workforceStore } from "@/lib/workforce/store"
+import { toolPermissionLabel, toolPermissionTone } from "@/lib/ui/permission-label"
 
-export type StepKey = "identity" | "mission" | "skills" | "knowledge" | "tools" | "memory" | "behavior" | "channels" | "output" | "evolution"
+export type StepKey = "identity" | "mission" | "skills" | "knowledge" | "tools" | "integrations" | "memory" | "behavior" | "channels" | "output" | "evolution"
 
 const STEPS: { key: StepKey; number: string; label: string }[] = [
   { key: "identity", number: "01", label: "Identity" },
@@ -28,11 +29,12 @@ const STEPS: { key: StepKey; number: string; label: string }[] = [
   { key: "skills", number: "03", label: "Skills" },
   { key: "knowledge", number: "04", label: "Knowledge" },
   { key: "tools", number: "05", label: "Tools" },
-  { key: "memory", number: "06", label: "Memory" },
-  { key: "behavior", number: "07", label: "Autonomy" },
-  { key: "channels", number: "08", label: "Access" },
-  { key: "output", number: "09", label: "Performance" },
-  { key: "evolution", number: "10", label: "Evolution" },
+  { key: "integrations", number: "06", label: "Integrations" },
+  { key: "memory", number: "07", label: "Memory" },
+  { key: "behavior", number: "08", label: "Autonomy" },
+  { key: "channels", number: "09", label: "Access" },
+  { key: "output", number: "10", label: "Performance" },
+  { key: "evolution", number: "11", label: "Evolution" },
 ]
 
 function stepSummary(worker: Worker, key: StepKey): string {
@@ -47,6 +49,8 @@ function stepSummary(worker: Worker, key: StepKey): string {
       return `${worker.skills.filter((s) => s.enabled).length} configured`
     case "tools":
       return `${worker.tools.filter((t) => t.connected).length} available`
+    case "integrations":
+      return `${worker.integrations.length} connector${worker.integrations.length === 1 ? "" : "s"} configured`
     case "memory":
       return "Learns from recorded outcomes"
     case "behavior":
@@ -144,6 +148,8 @@ function StepEditor({ step, worker, onAdvance }: { step: StepKey; worker: Worker
       return <SkillsStep worker={worker} onAdvance={onAdvance} />
     case "tools":
       return <ToolsStep worker={worker} onAdvance={onAdvance} />
+    case "integrations":
+      return <IntegrationsStep worker={worker} onAdvance={onAdvance} />
     case "memory":
       return <MemoryStep worker={worker} onAdvance={onAdvance} />
     case "behavior":
@@ -543,7 +549,147 @@ function RiskTag({ risk }: { risk: "low" | "medium" | "high" | "critical" }) {
   return <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider ${cls}`}>{risk}</span>
 }
 
-/* ---- 06 Behavior ---- */
+/* ---- 06 Integrations — real Connectors (built-in + custom), joined
+ * against this org's real, connected Connections (GET /api/connectors +
+ * GET /api/connections — connector platform: Fase D7's catalog merge
+ * makes a connected custom connector show up here with zero further
+ * changes to this file). worker.integrations is the same real, per-
+ * action ALLOW/DENY/REQUIRES_APPROVAL config lib/agent/tool-runner.ts's
+ * runToolAction() reads server-side (WorkerContext.integrations) — this
+ * step edits exactly that array, never a second, UI-only permission
+ * model. Toggling a connector on only ever creates local config; it
+ * never fabricates a Connection that doesn't already exist for real. ---- */
+interface StudioConnectorAction {
+  id: string
+  label: string
+  permission: string
+  riskLevel: string
+}
+interface StudioConnector {
+  id: string
+  name: string
+  actions: StudioConnectorAction[]
+}
+interface StudioConnection {
+  id: string
+  connectorId: string
+  status: string
+  displayName?: string
+}
+
+function IntegrationsStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => void }) {
+  const [connectors, setConnectors] = useState<StudioConnector[] | null>(null)
+  const [connections, setConnections] = useState<StudioConnection[]>([])
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/connectors", { headers: { "content-type": "application/json" } }).then((r) => r.json()),
+      fetch("/api/connections", { headers: { "content-type": "application/json" } }).then((r) => r.json()),
+    ]).then(([c, conns]) => {
+      setConnectors(c.connectors ?? [])
+      setConnections(conns.connections ?? [])
+    })
+  }, [])
+
+  const connectedConnections = connections.filter((c) => c.status === "connected")
+
+  function toggleConnector(connector: StudioConnector, connectionId: string) {
+    const exists = worker.integrations.find((cfg) => cfg.connectorId === connector.id)
+    if (exists) {
+      workforceStore.setWorkerIntegrations(
+        worker.id,
+        worker.integrations.filter((cfg) => cfg.connectorId !== connector.id),
+      )
+    } else {
+      workforceStore.setWorkerIntegrations(worker.id, [
+        ...worker.integrations,
+        { connectorId: connector.id, connectionId, actions: connector.actions.map((a) => ({ actionId: a.id, enabled: false, permission: "requires_approval" as const })) },
+      ])
+    }
+  }
+
+  function toggleAction(connectorId: string, actionId: string) {
+    workforceStore.setWorkerIntegrations(
+      worker.id,
+      worker.integrations.map((cfg) => (cfg.connectorId !== connectorId ? cfg : { ...cfg, actions: cfg.actions.map((a) => (a.actionId === actionId ? { ...a, enabled: !a.enabled } : a)) })),
+    )
+  }
+
+  function setPermission(connectorId: string, actionId: string, permission: "allow" | "deny" | "requires_approval") {
+    workforceStore.setWorkerIntegrations(
+      worker.id,
+      worker.integrations.map((cfg) => (cfg.connectorId !== connectorId ? cfg : { ...cfg, actions: cfg.actions.map((a) => (a.actionId === actionId ? { ...a, permission } : a)) })),
+    )
+  }
+
+  if (!connectors) return <p className="text-[12.5px] text-muted-foreground">Loading…</p>
+
+  return (
+    <div className="flex flex-col gap-2">
+      {connectedConnections.length === 0 && (
+        <p className="text-[12.5px] text-muted-foreground">
+          No connected integrations yet.{" "}
+          <a href="/integrations" target="_blank" rel="noreferrer" className="text-primary underline">
+            Connect one in the Connector Hub
+          </a>
+          , then come back here.
+        </p>
+      )}
+      {connectedConnections.map((conn) => {
+        const connector = connectors.find((c) => c.id === conn.connectorId)
+        if (!connector || connector.actions.length === 0) return null
+        const cfg = worker.integrations.find((x) => x.connectorId === connector.id)
+        const added = !!cfg
+        return (
+          <div key={connector.id} className="rounded-lg border border-border bg-card px-2.5 py-2">
+            <button onClick={() => toggleConnector(connector, conn.id)} className="flex w-full items-center gap-2">
+              <Switch on={added} />
+              <span className={`flex-1 text-left text-[12.5px] font-medium ${added ? "text-foreground" : "text-muted-foreground"}`}>{connector.name}</span>
+              <span className="font-mono text-[9.5px] uppercase tracking-wider text-muted-foreground">{conn.displayName || conn.status}</span>
+            </button>
+            {added && cfg && (
+              <div className="mt-2 flex flex-col gap-1.5 pl-[1.625rem]">
+                {connector.actions.map((action) => {
+                  const actionCfg = cfg.actions.find((a) => a.actionId === action.id) ?? { actionId: action.id, enabled: false, permission: "requires_approval" as const }
+                  return (
+                    <div key={action.id} className="flex items-center gap-2">
+                      <button onClick={() => toggleAction(connector.id, action.id)} className="flex flex-1 items-center gap-1.5 text-left">
+                        <Switch on={actionCfg.enabled} />
+                        <span className={`truncate text-[11.5px] ${actionCfg.enabled ? "text-foreground" : "text-muted-foreground"}`}>{action.label}</span>
+                        <PermissionTag permission={action.permission as "read" | "write" | "publish" | "delete" | "financial" | "external_communication"} />
+                      </button>
+                      <select
+                        value={actionCfg.permission}
+                        onChange={(e) => setPermission(connector.id, action.id, e.target.value as "allow" | "deny" | "requires_approval")}
+                        disabled={!actionCfg.enabled}
+                        className="modal-input w-auto py-0.5 font-mono text-[10px] uppercase tracking-wider disabled:opacity-40"
+                      >
+                        <option value="allow">Allow</option>
+                        <option value="requires_approval">Requires approval</option>
+                        <option value="deny">Deny</option>
+                      </select>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })}
+      <Continue onClick={onAdvance} />
+    </div>
+  )
+}
+
+/* Read-only / Write / Destructive — the same lib/ui/permission-label.ts
+ * mapping used everywhere a Tool/Action's permission is shown. */
+function PermissionTag({ permission }: { permission: "read" | "write" | "publish" | "delete" | "financial" | "external_communication" }) {
+  const tone = toolPermissionTone(permission)
+  const cls = tone === "bad" ? "text-destructive bg-destructive/10" : tone === "warn" ? "text-warn bg-warn/10" : "text-grow bg-grow/10"
+  return <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider ${cls}`}>{toolPermissionLabel(permission)}</span>
+}
+
+/* ---- 07 Behavior ---- */
 function BehaviorStep({ worker, onAdvance }: { worker: Worker; onAdvance: () => void }) {
   const [text, setText] = useState("")
   const submit = () => {

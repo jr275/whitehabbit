@@ -8,10 +8,9 @@
  * server registries exactly; that correspondence is what lets Studio
  * show real inputs/instructions for a skill that actually executes.
  *
- * This is intentionally small: ONE vertical (Marketing Intelligence),
- * 3 real skills, 4 real tools. Every entry here has a real, working
- * (or honestly not-yet-connected) implementation on the server — there
- * is no metadata for a skill or tool that doesn't actually exist.
+ * Every entry here has a real, working (or honestly not-yet-connected)
+ * implementation on the server — there is no metadata for a skill or
+ * tool that doesn't actually exist.
  * ================================================================== */
 
 import type { ChannelId, SkillCategory, ToolPermission, ToolRisk } from "./model"
@@ -88,6 +87,73 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     requiredTools: ["tool_llm"],
     inputs: [{ key: "query", label: "What is the customer asking or saying?", type: "textarea", required: true, placeholder: "Hi, I need to change my reservation to next weekend instead — is that possible?" }],
   },
+  {
+    id: "skill_cultural_intelligence",
+    name: "Cultural Intelligence",
+    category: "research",
+    description: "Searches real sources, identifies genuine cultural/market signals, and scores each one into a real, brand-relevance-checked opportunity — trend velocity alone is never treated as a reason to create.",
+    outputType: "intelligence_report",
+    taskTitle: "Scan for cultural and market signals",
+    requiredTools: ["tool_web_search", "tool_llm"],
+    inputs: [{ key: "query", label: "What cultural or market space should it monitor?", type: "text", required: true, placeholder: "Consumer trends among Gen Z in short-form video" }],
+  },
+  {
+    id: "skill_creative_territory_generation",
+    name: "Creative Territory Generation",
+    category: "content",
+    description: "Generates exactly 6 genuinely distinct creative territories for a real opportunity, grounded in this worker's real brand context — never minor variations of the same idea.",
+    outputType: "creative_concepts",
+    taskTitle: "Generate creative territories",
+    requiredTools: ["tool_llm"],
+    inputs: [{ key: "query", label: "Which opportunity or cultural moment should it develop creative territories for?", type: "text", required: true, placeholder: "A surge of interest in retro gaming nostalgia among 25-34 year olds" }],
+  },
+  {
+    id: "skill_salesforce_lead_pipeline",
+    name: "Marketing Lead Operations",
+    category: "sales",
+    description: "The Marketing Agent's real operational pipeline: research → deterministic qualification → schema-validated LLM scoring → deterministic decision → Salesforce action → human approval when required → Slack notification.",
+    outputType: "lead_pipeline_sync",
+    taskTitle: "Research, qualify, and act on leads",
+    // connector_salesforce.actions is a dynamic, Connector-provided
+    // tool id — never in TOOL_CATALOG, so Studio's readiness bar won't
+    // pre-flight-warn about it the way it does for a native tool; the
+    // skill itself still honestly blocks at runtime (SkillBlockedError)
+    // if Salesforce isn't connected. See the Studio Integrations step
+    // for where a Worker is actually wired to a real Connection.
+    requiredTools: ["tool_web_search", "tool_llm"],
+    inputs: [
+      { key: "objective", label: "Business objective", type: "textarea", required: true, placeholder: "Find high-quality enterprise leads in Brazil and identify which ones are most likely to book a meeting." },
+      { key: "target", label: "Target (optional)", type: "text", required: false, placeholder: "Brazil, enterprise segment" },
+      { key: "criteria", label: "Criteria — comma-separated (optional)", type: "text", required: false, placeholder: "high likelihood to book a meeting, enterprise scale" },
+      { key: "constraints", label: "Constraints — comma-separated (optional)", type: "text", required: false, placeholder: "exclude existing customers" },
+      { key: "requestedActions", label: "Requested actions — comma-separated (optional)", type: "text", required: false, placeholder: "update_lead, notify_slack" },
+    ],
+  },
+  {
+    id: "skill_search_waste_detection",
+    name: "Search Waste Detection",
+    category: "marketing",
+    description: "Classifies real paid-search term performance to find spend producing no return, and generates negative-keyword/targeting recommendations — deterministic analysis, LLM only for rationale.",
+    outputType: "search_waste_report",
+    taskTitle: "Detect paid-search waste",
+    requiredTools: ["tool_marketing_actions", "tool_llm"],
+    inputs: [{ key: "brandTerms", label: "Brand terms (comma-separated) — never recommended as negative keywords", type: "text", required: false, placeholder: "acme, acme software" }],
+  },
+  {
+    id: "skill_apply_marketing_recommendation",
+    name: "Apply Marketing Recommendation",
+    category: "marketing",
+    description: "Applies exactly one marketing recommendation (negative keyword, budget, pause, targeting) — always requires human approval before it runs.",
+    outputType: "marketing_recommendation_result",
+    taskTitle: "Apply a marketing recommendation",
+    requiredTools: ["tool_marketing_actions"],
+    inputs: [
+      { key: "applyActionId", label: "Action (add_negative_keyword | review_targeting | adjust_budget | pause_campaign | change_targeting)", type: "text", required: true, placeholder: "add_negative_keyword" },
+      { key: "opportunityId", label: "Opportunity id (from the Search Waste Optimization Report)", type: "text", required: false },
+      { key: "matchedTerms", label: "Matched search terms — comma-separated (optional)", type: "text", required: false },
+      { key: "suggestedNegativeKeywords", label: "Suggested negative keywords — comma-separated (optional)", type: "text", required: false },
+    ],
+  },
 ]
 
 export interface ToolTemplate {
@@ -105,8 +171,12 @@ export const TOOL_CATALOG: ToolTemplate[] = [
   { id: "tool_analytics", name: "Analytics", provider: "Not connected", description: "Reads engagement and performance metrics from a connected provider.", risk: "low", permission: "read" },
   // "provider" here is only the seed default — the server overwrites it
   // live on every read (lib/agent/hydrate.ts) with whichever LLM_PROVIDER
-  // is actually configured (Anthropic or Gemini).
+  // is actually configured (Anthropic, Gemini, OpenAI, or Local).
   { id: "tool_llm", name: "LLM", provider: "Anthropic", description: "Reasons over collected information to analyze, rank and explain.", risk: "low", permission: "read" },
+  { id: "tool_news", name: "News", provider: "Not connected", description: "Searches real, current news coverage as a cultural/market intelligence source.", risk: "low", permission: "read" },
+  { id: "tool_google_trends", name: "Google Trends", provider: "Not connected", description: "Reads real search-interest trend data as a cultural/market intelligence source.", risk: "low", permission: "read" },
+  { id: "tool_social_signals", name: "Social Signals", provider: "Not connected", description: "Reads real social conversation volume and sentiment as a cultural/market intelligence source.", risk: "low", permission: "read" },
+  { id: "tool_marketing_actions", name: "Marketing Actions", provider: "WhiteHabbit", description: "Applies a marketing recommendation (negative keyword, budget, pause, targeting) — always requires human approval.", risk: "high", permission: "write" },
 ]
 
 /* ---- channels ---- */

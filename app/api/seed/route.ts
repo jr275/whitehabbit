@@ -36,6 +36,7 @@ export async function POST() {
         knowledge: worker.knowledge,
         skills: worker.skills,
         tools: worker.tools,
+        integrations: worker.integrations,
         behaviors: worker.behaviors,
         channels: worker.channels,
         outcome: worker.outcome,

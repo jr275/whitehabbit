@@ -8,14 +8,14 @@
  * route.ts) — not a cosmetic form that produces a demo.
  * ------------------------------------------------------------------ */
 
-import { ArrowRight, Compass, Layers, Loader2, PenLine } from "lucide-react"
+import { ArrowRight, Compass, Layers, Loader2, PenLine, Rocket, Search, Settings, ShoppingCart, TrendingUp, Users, Wallet } from "lucide-react"
 import { signIn, useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { StudioShell } from "@/components/studio/studio-shell"
 import { PROFILE_BUCKET_LABEL, type ProductProfileBucket, type ProductTemplate } from "@/lib/products/catalog"
 
-const ICONS = { PenLine, Layers, Compass }
+const ICONS = { PenLine, Layers, Compass, TrendingUp, Wallet, Settings, Users, ShoppingCart, Rocket, Search }
 const BUCKET_ORDER: ProductProfileBucket[] = ["business", "audience", "data", "process", "rules"]
 
 export function ProductOnboardingForm({ product, runtimeMode }: { product: ProductTemplate; runtimeMode?: "development" | "preview" | "production" }) {

@@ -1,5 +1,6 @@
 /* ================================================================== *
- * MIDDLEWARE — page-level auth gate for /studio and /outputs.
+ * MIDDLEWARE — page-level auth gate for /studio, /outputs, /marketing,
+ * /approvals, /integrations, /launch and /onboarding.
  *
  * Builds its own lightweight NextAuth instance from the edge-safe
  * lib/auth.config.ts alone (no providers, no database import) — the
@@ -25,8 +26,8 @@ const { auth } = NextAuth(authConfig)
 // NOTE: /knowledge is intentionally NOT gated — it runs in guest mode
 // (browser-local library) for unauthenticated visitors. Its API routes
 // still enforce auth and the client falls back to the guest store on
-// 401. /studio and /outputs remain Workforce-only and gated.
-const PROTECTED_PREFIXES = ["/studio", "/outputs", "/launch", "/onboarding"]
+// 401. Everything else below is Workforce-only and gated.
+const PROTECTED_PREFIXES = ["/studio", "/outputs", "/marketing", "/approvals", "/integrations", "/launch", "/onboarding"]
 
 export default auth((req) => {
   const isAuthed = !!req.auth
@@ -41,5 +42,5 @@ export default auth((req) => {
 })
 
 export const config = {
-  matcher: ["/studio/:path*", "/outputs/:path*", "/launch", "/onboarding"],
+  matcher: ["/studio/:path*", "/outputs/:path*", "/marketing/:path*", "/approvals/:path*", "/integrations/:path*", "/launch", "/onboarding"],
 }
