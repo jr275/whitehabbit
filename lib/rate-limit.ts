@@ -17,6 +17,14 @@ export const RATE_LIMITS = {
   // Real outbound HTTP probes against an org-configured URL — tighter
   // than creation, matching worker_run's "real external call" caution.
   custom_connector_test: { limit: 10, windowMs: 60_000 },
+
+  knowledge_save: { limit: 30, windowMs: 60_000 }, // 30 saves/min per org — each triggers a real outbound fetch
+  knowledge_retry: { limit: 20, windowMs: 60_000 },
+  knowledge_preview: { limit: 40, windowMs: 60_000 }, // unauth metadata/thumbnail lookups per client ip — each is a real outbound fetch
+
+  auth_register: { limit: 10, windowMs: 60_000 }, // account creation per client ip
+  auth_forgot_password: { limit: 5, windowMs: 60_000 }, // reset requests per client ip — abuse guard
+  auth_reset_password: { limit: 10, windowMs: 60_000 },
 } as const
 
 export async function enforceRateLimit(scope: keyof typeof RATE_LIMITS, subject: string): Promise<void> {

@@ -1,6 +1,6 @@
 /* ================================================================== *
  * MIDDLEWARE — page-level auth gate for /studio, /outputs, /marketing,
- * /approvals and /integrations.
+ * /approvals, /integrations, /launch and /onboarding.
  *
  * Builds its own lightweight NextAuth instance from the edge-safe
  * lib/auth.config.ts alone (no providers, no database import) — the
@@ -23,17 +23,24 @@ import { authConfig } from "@/lib/auth.config"
 
 const { auth } = NextAuth(authConfig)
 
+// NOTE: /knowledge is intentionally NOT gated — it runs in guest mode
+// (browser-local library) for unauthenticated visitors. Its API routes
+// still enforce auth and the client falls back to the guest store on
+// 401. Everything else below is Workforce-only and gated.
+const PROTECTED_PREFIXES = ["/studio", "/outputs", "/marketing", "/approvals", "/integrations", "/launch", "/onboarding"]
+
 export default auth((req) => {
   const isAuthed = !!req.auth
-  const protectedPath = ["/studio", "/outputs", "/marketing", "/approvals", "/integrations"].some((p) => req.nextUrl.pathname.startsWith(p))
+  const { pathname } = req.nextUrl
+  const protectedPath = PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
   if (protectedPath && !isAuthed) {
     const loginUrl = new URL("/login", req.nextUrl.origin)
-    loginUrl.searchParams.set("callbackUrl", req.nextUrl.pathname)
+    loginUrl.searchParams.set("callbackUrl", pathname)
     return NextResponse.redirect(loginUrl)
   }
   return NextResponse.next()
 })
 
 export const config = {
-  matcher: ["/studio/:path*", "/outputs/:path*", "/marketing/:path*", "/approvals/:path*", "/integrations/:path*"],
+  matcher: ["/studio/:path*", "/outputs/:path*", "/marketing/:path*", "/approvals/:path*", "/integrations/:path*", "/launch", "/onboarding"],
 }

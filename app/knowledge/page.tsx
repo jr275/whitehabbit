@@ -1,17 +1,10 @@
-/* ------------------------------------------------------------------ *
- * /knowledge — an honest Coming-soon page (no cross-Agent knowledge
- * backend exists yet — see components/knowledge/knowledge-page.tsx).
- * ------------------------------------------------------------------ */
+import { KnowledgeHome } from "@/components/knowledge/knowledge-home"
 
-import { KnowledgePage } from "@/components/knowledge/knowledge-page"
-import { StudioShell } from "@/components/studio/studio-shell"
-import { getRuntimeMode } from "@/lib/runtime-mode"
+export const metadata = {
+  title: "Home · Knowledge",
+  description: "Your personal knowledge library — pick up where you left off, or save something new.",
+}
 
-export default function Knowledge() {
-  const runtimeMode = getRuntimeMode()
-  return (
-    <StudioShell runtimeMode={runtimeMode}>
-      <KnowledgePage />
-    </StudioShell>
-  )
+export default function KnowledgeHomePage() {
+  return <KnowledgeHome />
 }

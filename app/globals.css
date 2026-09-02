@@ -7,6 +7,7 @@
 @theme inline {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-serif: var(--font-fraunces), ui-serif, Georgia, serif;
   --color-alive: var(--alive);
   --color-alive-foreground: var(--alive-foreground);
   --color-grow: var(--grow);
@@ -257,6 +258,138 @@
     width: 1rem;
     height: 1rem;
   }
+}
+
+/* ── Knowledge (editorial surface) ─────────────────────────────
+ * A completely independent product identity from Workforce: a warm,
+ * light, paper-and-ink reading environment — think a fine personal
+ * library, not an operations console. Every semantic token is
+ * re-declared here so the scope owns its own look; Workforce (outside
+ * this class) keeps its dark blue-cast system untouched.
+ *
+ * One load-bearing accent only: a deep editorial wine. No SaaS blue,
+ * no AI purple, no neon. Restraint is the point. */
+.knowledge-surface {
+  color-scheme: light;
+
+  /* neutrals — warm ivory paper up to near-white cards */
+  --background: oklch(0.975 0.006 84);
+  --foreground: oklch(0.235 0.01 55);
+  --card: oklch(0.995 0.003 84);
+  --card-foreground: oklch(0.235 0.01 55);
+  --popover: oklch(0.995 0.003 84);
+  --popover-foreground: oklch(0.235 0.01 55);
+
+  /* the single accent — deep wine/bordeaux */
+  --primary: oklch(0.44 0.135 18);
+  --primary-foreground: oklch(0.985 0.006 84);
+
+  --secondary: oklch(0.945 0.008 84);
+  --secondary-foreground: oklch(0.3 0.012 55);
+  --muted: oklch(0.95 0.007 84);
+  --muted-foreground: oklch(0.5 0.014 52);
+  --accent: oklch(0.94 0.01 60);
+  --accent-foreground: oklch(0.3 0.012 55);
+
+  --destructive: oklch(0.52 0.19 27);
+  --border: oklch(0.32 0.03 50 / 12%);
+  --input: oklch(0.32 0.03 50 / 15%);
+  --ring: oklch(0.44 0.135 18);
+
+  /* success/"saved" — a calm readable green on light paper */
+  --grow: oklch(0.52 0.1 150);
+  --warn: oklch(0.6 0.13 65);
+
+  /* sidebar — a touch deeper than the reading canvas so the library breathes */
+  --sidebar: oklch(0.955 0.007 82);
+  --sidebar-foreground: oklch(0.235 0.01 55);
+  --sidebar-primary: oklch(0.44 0.135 18);
+  --sidebar-primary-foreground: oklch(0.985 0.006 84);
+  --sidebar-accent: oklch(0.925 0.01 78);
+  --sidebar-accent-foreground: oklch(0.3 0.012 55);
+  --sidebar-border: oklch(0.3 0.03 50 / 10%);
+  --sidebar-ring: oklch(0.44 0.135 18);
+
+  /* editorial helpers used throughout the Knowledge components */
+  --kn-paper: oklch(0.995 0.003 84); /* card surface, a hair above paper */
+  --kn-well: oklch(0.955 0.008 84); /* inset wells / skeletons */
+  --kn-edge: oklch(0.3 0.03 50 / 10%);
+  --kn-ai: oklch(0.44 0.135 18); /* the accent — same wine, cohesive */
+}
+
+/* light-paper skeleton shimmer — the default white shimmer is invisible here */
+.knowledge-surface .kn-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    oklch(0.3 0.02 50 / 7%) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+}
+
+/* warm thin scrollbars inside the reading surface */
+.knowledge-surface .thin-scroll::-webkit-scrollbar-thumb {
+  background: oklch(0.3 0.03 50 / 18%);
+}
+
+/* editorial masonry via CSS columns — no layout library needed */
+.kn-masonry {
+  column-gap: 1.25rem;
+}
+.kn-masonry > * {
+  break-inside: avoid;
+  margin-bottom: 1.25rem;
+}
+@media (min-width: 640px) {
+  .kn-masonry {
+    columns: 2;
+  }
+}
+@media (min-width: 1024px) {
+  .kn-masonry {
+    columns: 3;
+  }
+}
+@media (min-width: 1536px) {
+  .kn-masonry {
+    columns: 4;
+  }
+}
+
+/* one-shot staggered reveal for arriving cards */
+@keyframes kn-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.kn-rise {
+  animation: kn-rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* soft shimmer for processing states */
+@keyframes kn-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.kn-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    oklch(1 0 0 / 6%) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: kn-shimmer 1.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
