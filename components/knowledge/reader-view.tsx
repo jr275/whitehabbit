@@ -314,13 +314,13 @@ function ArticleBody({ body, cover, title }: { body: string[]; cover?: string; t
         />
       ) : null}
 
-      <div className="mt-8 space-y-6 text-[1.15rem] leading-[1.75] text-foreground/85 [word-break:break-word]">
+      <div className="mt-8 space-y-6 text-[1.15rem] leading-[1.75] text-foreground/85 [word-break:break-word] selection:bg-[var(--kn-ai)]/25">
         {body.map((p, i) => (
           <p
             key={i}
             className={cn(
               i === 0 &&
-                "first-letter:float-left first-letter:mr-3 first-letter:mt-1 first-letter:font-serif first-letter:text-6xl first-letter:leading-[0.8] first-letter:text-foreground",
+                "first-letter:float-left first-letter:mr-3 first-letter:mt-1 first-letter:text-6xl first-letter:font-semibold first-letter:leading-[0.8] first-letter:text-[var(--kn-ai)]",
             )}
           >
             {p}
