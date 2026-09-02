@@ -1,20 +1,23 @@
 "use client"
 
-import { AlertCircle, Check, Link2, Loader2, Sparkles, X } from "lucide-react"
+import { AlertCircle, ArrowRight, Check, Link2, Loader2, Sparkles, X } from "lucide-react"
+import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 import { saveUrl } from "@/lib/knowledge/client"
+import type { KnowledgeItem } from "@/lib/knowledge/types"
 
 interface SaveDialogProps {
   open: boolean
   onClose: () => void
 }
 
-type Stage = "input" | "saving" | "done" | "error"
+type Stage = "input" | "saving" | "done" | "duplicate" | "error"
 
 export function SaveDialog({ open, onClose }: SaveDialogProps) {
   const [url, setUrl] = useState("")
   const [stage, setStage] = useState<Stage>("input")
   const [message, setMessage] = useState<string | null>(null)
+  const [existing, setExisting] = useState<KnowledgeItem | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -22,6 +25,7 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
       setUrl("")
       setStage("input")
       setMessage(null)
+      setExisting(null)
       requestAnimationFrame(() => inputRef.current?.focus())
     }
   }, [open])
@@ -34,7 +38,13 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
     try {
       // Real POST /api/knowledge — persists the item and schedules
       // background fetch + extraction on the server.
-      const item = await saveUrl(trimmed)
+      const { item, duplicate } = await saveUrl(trimmed)
+      if (duplicate) {
+        // Already saved — offer to open it instead of adding a copy.
+        setExisting(item)
+        setStage("duplicate")
+        return
+      }
       // Broadcast so the Library (a separate React tree) inserts the
       // new card and starts polling its live processing state.
       window.dispatchEvent(new CustomEvent("knowledge:saved", { detail: item }))
@@ -134,6 +144,35 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   Fetching the page and extracting its content now — your card will update as it progresses.
                 </p>
+              </div>
+            </div>
+          )}
+
+          {stage === "duplicate" && existing && (
+            <div className="flex flex-col gap-4 py-2">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+                  <Check className="size-4.5" strokeWidth={2.5} />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">Already in your library</p>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">{existing.title || existing.url}</p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  onClick={onClose}
+                  className="h-9 rounded-lg px-3 text-sm text-muted-foreground hover:text-foreground"
+                >
+                  Close
+                </button>
+                <Link
+                  href={`/knowledge/read/${existing.id}`}
+                  onClick={onClose}
+                  className="flex h-9 items-center gap-1.5 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                >
+                  Open <ArrowRight className="size-3.5" />
+                </Link>
               </div>
             </div>
           )}

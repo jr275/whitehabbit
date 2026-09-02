@@ -52,6 +52,7 @@ export function KnowledgeCard({
 }: KnowledgeCardProps) {
   const [coverFailed, setCoverFailed] = useState(false)
   const [coverLoaded, setCoverLoaded] = useState(false)
+  const [faviconFailed, setFaviconFailed] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const KindIcon = KIND_META[item.kind].icon
   const listenable = item.kind === "podcast" || item.kind === "video"
@@ -169,9 +170,24 @@ export function KnowledgeCard({
           interactive controls inside it carry `relative z-10`, so clicking
           anywhere else on the card opens the reader. */}
       <div className={cn("flex min-w-0 flex-1 flex-col gap-2.5 p-4", isList && "justify-center")}>
-        {/* source line */}
+        {/* source line — favicon + domain/source, falling back to the
+            kind glyph when there's no favicon or it fails to load. */}
         <div className="pointer-events-none flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
-          <KindIcon className="size-3.5 shrink-0 text-primary/80" />
+          {item.favicon && !faviconFailed ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={item.favicon || "/placeholder.svg"}
+              alt=""
+              width={14}
+              height={14}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={() => setFaviconFailed(true)}
+              className="size-3.5 shrink-0 rounded-[3px] object-contain"
+            />
+          ) : (
+            <KindIcon className="size-3.5 shrink-0 text-primary/80" />
+          )}
           <span className="truncate">{item.source}</span>
           {item.author && <span className="truncate font-normal text-muted-foreground/70">· {item.author}</span>}
         </div>

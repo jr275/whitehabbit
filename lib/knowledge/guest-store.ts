@@ -21,6 +21,7 @@
  * ================================================================== */
 
 import type { KnowledgeDocument, KnowledgeItem, KnowledgeKind, KnowledgeListResult } from "./types"
+import { canonicalizeUrlSafe } from "./url"
 
 const STORAGE_KEY = "knowledge.guest.items.v1"
 
@@ -179,9 +180,20 @@ export function guestSearch(q: string): KnowledgeItem[] {
     .map(toItem)
 }
 
-export function guestSaveUrl(rawUrl: string): KnowledgeItem {
+export function guestSaveUrl(rawUrl: string): { item: KnowledgeItem; duplicate: boolean } {
   const url = normalizeUrl(rawUrl)
   const domain = url.hostname.replace(/^www\./, "")
+
+  // Already saved? Match on the same canonical dedup key the backend
+  // uses (trailing slash + tracking params ignored), scoped to active
+  // (non-archived) items, and return the existing one instead of a
+  // duplicate.
+  const key = canonicalizeUrlSafe(url.href)
+  if (key) {
+    const existing = readAll().find((r) => !r.archived && canonicalizeUrlSafe(r.url) === key)
+    if (existing) return { item: toItem(existing), duplicate: true }
+  }
+
   const id = newId()
   const record: GuestRecord = {
     id,
@@ -211,7 +223,7 @@ export function guestSaveUrl(rawUrl: string): KnowledgeItem {
   // throws — on any failure the item settles to "ready" with the
   // editorial fallback cover.
   void enrichGuestItem(id)
-  return toItem(record)
+  return { item: toItem(record), duplicate: false }
 }
 
 /* ── Server-assisted metadata/thumbnail enrichment ───────────────── *
@@ -230,6 +242,7 @@ interface PreviewMetadata {
   author: string | null
   imageUrl: string | null
   favicon: string | null
+  readingMin: number | null
   kind: string
 }
 
@@ -267,6 +280,10 @@ export async function enrichGuestItem(id: string): Promise<void> {
       source: meta?.siteName?.trim() || r.source,
       author: meta?.author?.trim() || r.author,
       cover: meta?.imageUrl || r.cover,
+      favicon: meta?.favicon || r.favicon,
+      // Reading time only arrives for text kinds (article/document) —
+      // the server withholds it for video/pdf, so we never fabricate one.
+      durationMin: meta?.readingMin ?? r.durationMin,
     }
     return updated
   })
