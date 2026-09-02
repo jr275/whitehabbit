@@ -136,19 +136,37 @@ export interface SecurityHeader {
 export const YOUTUBE_EMBED_ORIGIN = "https://www.youtube.com"
 export const VIMEO_EMBED_ORIGIN = "https://player.vimeo.com"
 
-/** Powerful features Knowledge never requests (grepped: no
- * navigator.mediaDevices/geolocation/USB/MIDI/PaymentRequest anywhere
- * under app/knowledge, components/knowledge, lib/knowledge) and so are
- * denied outright, even to same-origin. Features the YouTube/Vimeo
- * <iframe>'s own `allow` attribute (reader-view.tsx's VideoBlock)
- * requests — autoplay, fullscreen, picture-in-picture, encrypted-media,
- * clipboard-write, accelerometer, gyroscope — are deliberately left
- * OUT of this list, so this header never overrides what that attribute
- * already, correctly, allows. */
-const DENIED_PERMISSIONS = ["camera", "microphone", "geolocation", "payment", "usb", "midi", "magnetometer"]
+/** Powerful features Knowledge never requests, denied outright, even
+ * to same-origin. Features the YouTube/Vimeo <iframe>'s own `allow`
+ * attribute (reader-view.tsx's VideoBlock) requests — autoplay,
+ * fullscreen, picture-in-picture, encrypted-media, clipboard-write,
+ * accelerometer, gyroscope — are deliberately left OUT of this list,
+ * so this header never overrides what that attribute already,
+ * correctly, allows. */
+const DENIED_PERMISSIONS = ["camera", "geolocation", "payment", "usb", "midi", "magnetometer"]
+
+/** Features Knowledge DOES use, allowed to this origin and no other.
+ *
+ * microphone: the Library's voice search (lib/knowledge/voice-search.ts,
+ * used by components/knowledge/library-view.tsx) drives the Web Speech
+ * API's SpeechRecognition, and SpeechRecognition is gated on microphone
+ * permission. It was on the denied list because the audit behind this
+ * header grepped for `navigator.mediaDevices` — which SpeechRecognition
+ * does not use — and voice search landed after that header did, so the
+ * grep was accurate when it was written and stale by the time the
+ * feature shipped. Denied, the feature fails with `not-allowed`, which
+ * reads as the user having refused the microphone rather than as a
+ * response header.
+ *
+ * `(self)` rather than `*`: the page's own origin may ask, and a framed
+ * third party (the YouTube/Vimeo players) still may not. */
+const SELF_PERMISSIONS = ["microphone"]
 
 function permissionsPolicyValue(): string {
-  return DENIED_PERMISSIONS.map((feature) => `${feature}=()`).join(", ")
+  return [
+    ...DENIED_PERMISSIONS.map((feature) => `${feature}=()`),
+    ...SELF_PERMISSIONS.map((feature) => `${feature}=(self)`),
+  ].join(", ")
 }
 
 /**
@@ -210,13 +228,19 @@ export function knowledgeSecurityHeaders(isProduction: boolean): SecurityHeader[
     { key: "X-Frame-Options", value: "SAMEORIGIN" },
   ]
   if (isProduction) {
-    // 2 years, subdomains included — the conventional durable HSTS
-    // setting. Gated to production only: sent over a plain-HTTP
-    // `next dev` origin it would be ignored by every browser anyway
-    // (the header has no effect on a non-secure context), but scoping
-    // it here keeps that reasoning explicit rather than relying on
-    // browsers to discard it silently.
-    headers.push({ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" })
+    // 2 years, this host only. Gated to production: sent over a
+    // plain-HTTP `next dev` origin it would be ignored by every
+    // browser anyway (the header has no effect on a non-secure
+    // context), but scoping it here keeps that reasoning explicit
+    // rather than relying on browsers to discard it silently.
+    //
+    // WITHOUT includeSubDomains. That directive binds every subdomain
+    // of the serving host to HTTPS for the full max-age, including
+    // subdomains this repository cannot see and does not serve, and it
+    // cannot be taken back faster than the max-age it already
+    // published. The protection it adds applies to hosts this app does
+    // not control; the risk it adds lands on them too.
+    headers.push({ key: "Strict-Transport-Security", value: "max-age=63072000" })
   }
   return headers
 }
