@@ -73,10 +73,12 @@ export function KnowledgeCard({
     >
       {/* Whole-card click target → the content itself is the interaction.
           Only for ready items (incl. guest items); processing/failed cards
-          keep their inline controls instead. Sits beneath the interactive
-          controls (which are relative z-10). */}
+          keep their inline controls instead. Lifted above the cover image and
+          body panels (which are normal-flow siblings painting on top of a z-0
+          overlay) but kept below the genuinely interactive controls, which sit
+          at z-20. Text blocks are pointer-events-none so they never block it. */}
       {ready && (
-        <Link href={readerHref} className="absolute inset-0 z-0" aria-label={`Open “${item.title}”`}>
+        <Link href={readerHref} className="absolute inset-0 z-[5]" aria-label={`Open “${item.title}”`}>
           <span className="sr-only">Open “{item.title}”</span>
         </Link>
       )}
