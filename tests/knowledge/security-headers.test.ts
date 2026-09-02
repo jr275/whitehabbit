@@ -138,7 +138,7 @@ describe("Knowledge — the other required security headers", () => {
   it("Permissions-Policy is set and denies power features Knowledge never uses, without denying what the YouTube/Vimeo <iframe> needs", () => {
     const value = byKey("Permissions-Policy")?.value ?? ""
     assert.ok(value.length > 0, "no Permissions-Policy header")
-    for (const denied of ["camera=()", "microphone=()", "geolocation=()"]) {
+    for (const denied of ["camera=()", "geolocation=()"]) {
       assert.ok(value.includes(denied), `Permissions-Policy should deny ${denied}`)
     }
     // The <iframe>'s own `allow` attribute (reader-view.tsx) grants these
@@ -146,6 +146,27 @@ describe("Knowledge — the other required security headers", () => {
     for (const mustStayOpen of ["fullscreen", "autoplay", "picture-in-picture", "encrypted-media"]) {
       assert.ok(!value.includes(`${mustStayOpen}=()`), `Permissions-Policy must not deny ${mustStayOpen} — the video embed needs it`)
     }
+  })
+
+  it("Permissions-Policy allows the microphone to this origin, because voice search needs it", () => {
+    // This assertion used to require microphone=(), and the change is a
+    // fix rather than a test edited to pass. lib/knowledge/voice-search.ts
+    // drives the Web Speech API's SpeechRecognition, which is gated on
+    // microphone permission; components/knowledge/library-view.tsx wires
+    // it into the Library. Denied, it fails with `not-allowed`, which
+    // looks like the user refusing the prompt rather than a header.
+    //
+    // The original header was not careless: it was written before voice
+    // search existed, and its audit grepped for navigator.mediaDevices,
+    // which SpeechRecognition does not use. Verified in a real Chromium:
+    // under microphone=() allowsFeature("microphone") is false, and under
+    // microphone=(self) it is true.
+    const value = byKey("Permissions-Policy")?.value ?? ""
+    assert.match(value, /microphone=\(self\)/, "voice search cannot ask for the microphone")
+    assert.ok(!value.includes("microphone=()"), "microphone must not also be denied")
+    // (self), never *: this origin may ask; a framed YouTube or Vimeo
+    // player may not.
+    assert.ok(!value.includes("microphone=*"), "only this origin should be able to ask")
   })
 
   it("X-Frame-Options: SAMEORIGIN, matching frame-ancestors 'self'", () => {
@@ -162,5 +183,17 @@ describe("Strict-Transport-Security — production only, never against a local o
   it("absent in development — a local `next dev` origin is plain HTTP, and HSTS has no correct meaning there", () => {
     const headers = knowledgeSecurityHeaders(false)
     assert.ok(!headers.some((h) => h.key === "Strict-Transport-Security"))
+  })
+
+  it("binds this host only — never includeSubDomains", () => {
+    // includeSubDomains binds every subdomain of the serving host to
+    // HTTPS for the whole max-age, including subdomains this repository
+    // neither sees nor serves, and it cannot be withdrawn faster than
+    // the max-age already published. The protection lands on hosts this
+    // app does not control, and so does the risk.
+    const hsts = knowledgeSecurityHeaders(true).find((h) => h.key === "Strict-Transport-Security")!.value
+    assert.ok(!/includeSubDomains/i.test(hsts), "HSTS must not bind subdomains this app does not serve")
+    assert.ok(!/preload/i.test(hsts), "preload is effectively irreversible")
+    assert.match(hsts, /^max-age=\d+$/, "the max-age itself is kept")
   })
 })
