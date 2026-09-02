@@ -1,7 +1,8 @@
 "use client"
 
-import { Database, LogOut, type LucideIcon, Palette, ShieldCheck, User } from "lucide-react"
+import { Database, LogIn, LogOut, type LucideIcon, Palette, ShieldCheck, User } from "lucide-react"
 import { signOut, useSession } from "next-auth/react"
+import Link from "next/link"
 import { PageContainer, PageHeader } from "./page-header"
 
 /** Settings for the standalone Knowledge product. The account section is
@@ -10,9 +11,10 @@ import { PageContainer, PageHeader } from "./page-header"
  *  will live here without fabricating controls that do nothing. No
  *  underlying platform/organization architecture is exposed. */
 export function SettingsView() {
-  const { data: session } = useSession()
+  const { data: session, status } = useSession()
+  const isGuest = status === "unauthenticated"
   const email = session?.user?.email ?? ""
-  const name = session?.user?.name || email.split("@")[0] || "Your account"
+  const name = isGuest ? "Guest" : session?.user?.name || email.split("@")[0] || "Your account"
   const initial = (name || "Y").charAt(0).toUpperCase()
 
   return (
@@ -20,7 +22,7 @@ export function SettingsView() {
       <PageHeader eyebrow="Settings" title="Your account" subtitle="Manage how Knowledge works for you." />
 
       <div className="mt-10 max-w-2xl space-y-6">
-        {/* Account — real */}
+        {/* Account — real (reflects guest vs. signed-in honestly) */}
         <section className="overflow-hidden rounded-2xl border border-[var(--kn-edge)] bg-card">
           <div className="flex items-center gap-4 px-6 py-5">
             <span className="flex size-12 items-center justify-center rounded-full bg-primary/12 font-serif text-lg font-medium text-primary">
@@ -28,17 +30,29 @@ export function SettingsView() {
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-base font-medium text-foreground">{name}</p>
-              <p className="truncate text-sm text-muted-foreground">{email || "Signed in"}</p>
+              <p className="truncate text-sm text-muted-foreground">
+                {isGuest ? "Not signed in — your library is saved on this device" : email || "Signed in"}
+              </p>
             </div>
           </div>
           <div className="border-t border-[var(--kn-edge)] px-6 py-4">
-            <button
-              onClick={() => signOut({ callbackUrl: "/login" })}
-              className="flex h-10 items-center gap-2 rounded-xl border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
-            >
-              <LogOut className="size-4" />
-              Sign out
-            </button>
+            {isGuest ? (
+              <Link
+                href="/login?callbackUrl=/knowledge"
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+              >
+                <LogIn className="size-4" />
+                Sign in to save permanently
+              </Link>
+            ) : (
+              <button
+                onClick={() => signOut({ callbackUrl: "/login" })}
+                className="flex h-10 items-center gap-2 rounded-xl border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+              >
+                <LogOut className="size-4" />
+                Sign out
+              </button>
+            )}
           </div>
         </section>
 

@@ -20,13 +20,7 @@
  *    authenticated account later. No migration is performed now.
  * ================================================================== */
 
-import type {
-  KnowledgeDocument,
-  KnowledgeItem,
-  KnowledgeKind,
-  KnowledgeListResult,
-  ListLikeParams,
-} from "./types"
+import type { KnowledgeDocument, KnowledgeItem, KnowledgeKind, KnowledgeListResult } from "./types"
 
 const STORAGE_KEY = "knowledge.guest.items.v1"
 

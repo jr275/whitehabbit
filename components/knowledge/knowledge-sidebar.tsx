@@ -1,6 +1,6 @@
 "use client"
 
-import { LibraryBig, LogOut, Settings } from "lucide-react"
+import { LibraryBig, LogIn, LogOut, Settings } from "lucide-react"
 import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -15,10 +15,11 @@ const TOOLS = KNOWLEDGE_NAV.slice(5)
 
 export function KnowledgeSidebar() {
   const pathname = usePathname()
-  const { data: session } = useSession()
+  const { data: session, status } = useSession()
   const [accountOpen, setAccountOpen] = useState(false)
+  const isGuest = status === "unauthenticated"
   const email = session?.user?.email ?? ""
-  const name = session?.user?.name || email.split("@")[0] || "Your account"
+  const name = isGuest ? "Guest" : session?.user?.name || email.split("@")[0] || "Your account"
   const initial = (name || "Y").charAt(0).toUpperCase()
   const settingsActive = isNavActive(pathname, "/knowledge/settings")
 
@@ -75,7 +76,9 @@ export function KnowledgeSidebar() {
           <div className="absolute inset-x-3 bottom-full z-30 mb-2 overflow-hidden rounded-xl border border-border bg-popover p-1.5 shadow-xl">
             <div className="px-2.5 py-2">
               <p className="truncate text-sm font-medium text-popover-foreground">{name}</p>
-              {email && <p className="mt-0.5 truncate text-[12px] text-muted-foreground">{email}</p>}
+              <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+                {isGuest ? "Saved on this device" : email}
+              </p>
             </div>
             <Link
               href="/knowledge/settings"
@@ -85,13 +88,24 @@ export function KnowledgeSidebar() {
               <Settings className="size-4" />
               Settings
             </Link>
-            <button
-              onClick={() => signOut({ callbackUrl: "/login" })}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            >
-              <LogOut className="size-4" />
-              Sign out
-            </button>
+            {isGuest ? (
+              <Link
+                href="/login?callbackUrl=/knowledge"
+                onClick={() => setAccountOpen(false)}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
+              >
+                <LogIn className="size-4" />
+                Sign in to save permanently
+              </Link>
+            ) : (
+              <button
+                onClick={() => signOut({ callbackUrl: "/login" })}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              >
+                <LogOut className="size-4" />
+                Sign out
+              </button>
+            )}
           </div>
         )}
         <button
@@ -104,7 +118,9 @@ export function KnowledgeSidebar() {
           </span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-medium text-foreground">{name}</span>
-            <span className="block truncate text-[12px] text-muted-foreground">{email || "Signed in"}</span>
+            <span className="block truncate text-[12px] text-muted-foreground">
+              {isGuest ? "Guest mode" : email || "Signed in"}
+            </span>
           </span>
         </button>
       </div>

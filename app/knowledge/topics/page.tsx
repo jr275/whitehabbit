@@ -1,14 +1,23 @@
 import { PageContainer, PageHeader } from "@/components/knowledge/page-header"
-import { requireSession } from "@/lib/session"
+import { requireSession, UnauthenticatedError } from "@/lib/session"
 import { listTagCounts } from "@/lib/knowledge/repo"
 import { tagsToTopics } from "@/lib/knowledge/adapter"
+import { GuestTopics } from "@/components/knowledge/guest-topics"
 
 export const metadata = {
   title: "Topics · Knowledge",
 }
 
 export default async function TopicsPage() {
-  const { organizationId } = await requireSession()
+  let organizationId: string
+  try {
+    ;({ organizationId } = await requireSession())
+  } catch (err) {
+    // No session → derive topics client-side from the guest library.
+    if (err instanceof UnauthenticatedError) return <GuestTopics />
+    throw err
+  }
+
   const counts = await listTagCounts(organizationId)
   const topics = tagsToTopics(counts).sort((a, b) => b.count - a.count)
   const max = topics.reduce((m, t) => Math.max(m, t.count), 1)

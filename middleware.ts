@@ -22,7 +22,11 @@ import { authConfig } from "@/lib/auth.config"
 
 const { auth } = NextAuth(authConfig)
 
-const PROTECTED_PREFIXES = ["/knowledge", "/studio", "/outputs", "/launch", "/onboarding"]
+// NOTE: /knowledge is intentionally NOT gated — it runs in guest mode
+// (browser-local library) for unauthenticated visitors. Its API routes
+// still enforce auth and the client falls back to the guest store on
+// 401. /studio and /outputs remain Workforce-only and gated.
+const PROTECTED_PREFIXES = ["/studio", "/outputs", "/launch", "/onboarding"]
 
 export default auth((req) => {
   const isAuthed = !!req.auth
@@ -37,5 +41,5 @@ export default auth((req) => {
 })
 
 export const config = {
-  matcher: ["/knowledge/:path*", "/studio/:path*", "/outputs/:path*", "/launch", "/onboarding"],
+  matcher: ["/studio/:path*", "/outputs/:path*", "/launch", "/onboarding"],
 }
