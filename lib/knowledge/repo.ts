@@ -330,6 +330,22 @@ export async function setFavorite(id: string, orgId: string, userId: string | nu
   return getItem(id, orgId, userId)
 }
 
+/** Persist an AI-generated summary. Owner-scoped like every other
+ *  mutation here. Called at most once per item under the current
+ *  on-demand policy (service.summarizeItem never calls this for an
+ *  item that already has a summary), but this function itself makes
+ *  no such assumption — it is a plain, unconditional write. */
+export async function setSummary(id: string, orgId: string, userId: string | null, summary: string): Promise<KnowledgeRow | null> {
+  await query("UPDATE knowledge_items SET summary = $1, updated_at = $2 WHERE id = $3 AND org_id = $4 AND created_by IS NOT DISTINCT FROM $5", [
+    summary,
+    Date.now(),
+    id,
+    orgId,
+    userId,
+  ])
+  return getItem(id, orgId, userId)
+}
+
 export async function setArchived(id: string, orgId: string, userId: string | null, archived: boolean): Promise<KnowledgeRow | null> {
   await query("UPDATE knowledge_items SET archived = $1, updated_at = $2 WHERE id = $3 AND org_id = $4 AND created_by IS NOT DISTINCT FROM $5", [
     archived,

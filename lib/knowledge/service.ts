@@ -14,6 +14,7 @@ import "server-only"
 import { safeFetch, SafeFetchError, type SafeFetchOptions } from "@/lib/security/safe-fetch"
 import { assertSafeUrl, UnsafeUrlError } from "@/lib/security/ssrf-guard"
 import { logger } from "@/lib/observability/logger"
+import { isAiSummaryConfigured, summarizeText, type AiSummaryDeps } from "./ai-summary"
 import { extractFavicon, extractFromHtml } from "./extract"
 import * as repo from "./repo"
 import type { KnowledgeRow } from "./repo"
@@ -67,6 +68,20 @@ export class SaveValidationError extends Error {
   constructor(message: string) {
     super(message)
     this.name = "SaveValidationError"
+  }
+}
+
+/** AI Summary depends on an external credential (ANTHROPIC_API_KEY)
+ *  this deployment may not have configured. Deliberately local (not
+ *  @/lib/api-error's AiNotConfiguredError): that module imports
+ *  next/server, which this file must stay free of to stay importable
+ *  from this repo's plain-Node test runner — same reasoning as
+ *  lib/knowledge/ai-summary.ts's AiSummaryUpstreamError. The summarize
+ *  route translates this into the real HTTP error (503). */
+export class ServiceAiNotConfiguredError extends Error {
+  constructor(message = "AI Summary is not configured for this deployment.") {
+    super(message)
+    this.name = "ServiceAiNotConfiguredError"
   }
 }
 
@@ -333,4 +348,39 @@ export async function processItem(id: string, orgId: string, userId: string | nu
       /* swallow — nothing else we can do in a background task */
     }
   }
+}
+
+/** The outcome of an on-demand summarize call: the possibly-updated
+ *  row, and whether a NEW summary was just generated. `generated:
+ *  false` means an existing cached summary was returned untouched —
+ *  no repeat API spend for re-opening an already-summarized item. */
+export interface SummarizeResult {
+  row: KnowledgeRow
+  generated: boolean
+}
+
+/**
+ * Generate (or return the cached) AI summary for one item. On-demand
+ * only — this is never called by the ingestion pipeline (processItem
+ * above), and a summary once generated is never silently regenerated:
+ * a second call for the same item just returns what's already stored.
+ * Real cost: exactly one Anthropic Messages API call, and only on a
+ * genuine cache miss against an item with real extracted text.
+ *
+ * Takes the row the caller already fetched (routes already do their
+ * own owner-scoped getItem() + NotFoundError, same as retry/patch) —
+ * no redundant read here.
+ */
+export async function summarizeItem(row: KnowledgeRow, orgId: string, userId: string | null, deps: AiSummaryDeps = {}): Promise<SummarizeResult> {
+  if (row.summary) return { row, generated: false }
+
+  if (row.status !== "ready" || !row.content_text || row.content_text.trim().length === 0) {
+    throw new SaveValidationError("There's no extracted text to summarize yet.")
+  }
+
+  if (!isAiSummaryConfigured()) throw new ServiceAiNotConfiguredError()
+
+  const summary = await summarizeText({ title: row.title ?? "", text: row.content_text }, deps)
+  const updated = (await repo.setSummary(row.id, orgId, userId, summary)) ?? { ...row, summary }
+  return { row: updated, generated: true }
 }

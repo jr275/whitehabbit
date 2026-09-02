@@ -181,6 +181,15 @@ export async function deleteItem(id: string): Promise<void> {
   }
 }
 
+/** Generates (or returns the cached) AI summary for one item. No guest
+ *  fallback, deliberately: guest items have no server-side row and no
+ *  session to spend against, so the Reader hides the affordance for
+ *  them entirely rather than calling this. */
+export async function summarizeItem(id: string): Promise<KnowledgeItem> {
+  const res = await fetch(`/api/knowledge/${id}/summarize`, { method: "POST" })
+  return (await parse<{ item: KnowledgeItem }>(res)).item
+}
+
 export async function retryItem(id: string): Promise<KnowledgeItem> {
   if (id.startsWith("kn_guest_")) return guestRetry(id)
   try {
