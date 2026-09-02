@@ -45,7 +45,15 @@ export async function POST(req: Request) {
       const { token, tokenHash } = generateResetToken()
       await createPasswordResetToken(user.id, tokenHash, RESET_TTL_MS)
 
-      const origin = new URL(req.url).origin
+      // Build the link against the origin the BROWSER actually used, not
+      // the internal req.url (which a proxy can rewrite to a different
+      // scheme/host). Prefer the Origin header, then forwarded headers.
+      const h = req.headers
+      const forwardedProto = h.get("x-forwarded-proto")?.split(",")[0]?.trim()
+      const forwardedHost = h.get("x-forwarded-host") ?? h.get("host")
+      const origin =
+        h.get("origin") ??
+        (forwardedHost ? `${forwardedProto ?? "https"}://${forwardedHost}` : new URL(req.url).origin)
       const resetUrl = `${origin}/reset-password?token=${token}`
 
       // Server-side breadcrumb so the owner can always retrieve it from logs.
