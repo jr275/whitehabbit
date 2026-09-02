@@ -178,7 +178,7 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
               ) : null}
               {doc.topics.length > 0 ? (
                 <div>
-                  <dt className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Topics</dt>
+                  <dt className="text-[12px] font-medium text-muted-foreground">Topics</dt>
                   <dd className="mt-2 flex flex-wrap gap-1.5">
                     {doc.topics.map((t) => (
                       <span key={t} className="rounded-md bg-secondary/60 px-2 py-1 text-xs text-foreground/80">
@@ -191,7 +191,7 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
             </dl>
           ) : (
             <div className="flex flex-col items-center gap-2 py-10 text-center">
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Highlights</p>
+              <p className="text-[12px] font-medium text-muted-foreground">Highlights</p>
               <p className="max-w-[220px] text-sm leading-relaxed text-muted-foreground">
                 Highlighting isn&apos;t available yet. When it ships, the passages you mark will collect here.
               </p>
@@ -230,7 +230,7 @@ function TabButton({
 function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{label}</dt>
+      <dt className="text-[12px] font-medium text-muted-foreground">{label}</dt>
       <dd className="mt-1 text-foreground/85">{value}</dd>
     </div>
   )
