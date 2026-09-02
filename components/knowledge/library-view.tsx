@@ -64,13 +64,16 @@ export function LibraryView({
   eyebrow,
   subtitle = "Everything you've saved.",
 }: LibraryViewProps) {
-  // Restore prior context (view mode always; filter/search only on the
-  // main Library, so locked pages like Favorites never inherit a stray one).
-  const [layout, setLayout] = useState<LibraryLayout>(() => (ssGet(SS.layout) === "list" ? "list" : "grid"))
-  const [kind, setKind] = useState<KnowledgeKind | null>(() =>
-    lockedFilter ? null : ((ssGet(SS.kind) as KnowledgeKind | null) || null),
-  )
-  const [query, setQuery] = useState(() => (lockedFilter ? "" : ssGet(SS.query) || ""))
+  // Initialise to SSR-safe defaults so the server-rendered HTML and the
+  // first client render match exactly. The persisted view mode / filter /
+  // search are restored from sessionStorage AFTER mount (effect below),
+  // which keeps the Reader → Library return seamless without triggering a
+  // hydration mismatch for returning users (e.g. one whose last visit was
+  // in list view).
+  const [layout, setLayout] = useState<LibraryLayout>("grid")
+  const [kind, setKind] = useState<KnowledgeKind | null>(null)
+  const [query, setQuery] = useState("")
+  const [hydrated, setHydrated] = useState(false)
 
   // ── Voice search — a browser capability, not a new search engine ──
   // A final transcript REPLACES whatever is in the box (the modern
@@ -82,16 +85,33 @@ export function LibraryView({
   const voice = useVoiceSearch((transcript) => setQuery(transcript))
   const voiceBusy = voice.state === "listening" || voice.state === "processing"
 
-  // Persist context as it changes so the Reader → Library return is seamless.
+  // Restore prior context once, on the client, after the first paint.
+  // View mode is restored always; filter/search only on the main Library,
+  // so locked pages (e.g. Favorites) never inherit a stray one.
   useEffect(() => {
-    ssSet(SS.layout, layout)
-  }, [layout])
+    if (ssGet(SS.layout) === "list") setLayout("list")
+    if (!lockedFilter) {
+      const savedKind = ssGet(SS.kind) as KnowledgeKind | null
+      if (savedKind) setKind(savedKind)
+      const savedQuery = ssGet(SS.query)
+      if (savedQuery) setQuery(savedQuery)
+    }
+    setHydrated(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Persist context as it changes so the Reader → Library return is
+  // seamless. Gated on `hydrated` so the pre-restore defaults never
+  // clobber the stored values during the initial mount.
   useEffect(() => {
-    if (!lockedFilter) ssSet(SS.kind, kind ?? "")
-  }, [kind, lockedFilter])
+    if (hydrated) ssSet(SS.layout, layout)
+  }, [layout, hydrated])
   useEffect(() => {
-    if (!lockedFilter) ssSet(SS.query, query)
-  }, [query, lockedFilter])
+    if (hydrated && !lockedFilter) ssSet(SS.kind, kind ?? "")
+  }, [kind, lockedFilter, hydrated])
+  useEffect(() => {
+    if (hydrated && !lockedFilter) ssSet(SS.query, query)
+  }, [query, lockedFilter, hydrated])
 
   const {
     items,
