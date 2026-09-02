@@ -5,17 +5,23 @@ import Link from "next/link"
 import {
   AlertCircle,
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   ExternalLink,
   FileText,
   FileType2,
+  Headphones,
   Heart,
   Loader2,
+  Pause,
   Play,
+  Square,
 } from "lucide-react"
 import type { KnowledgeDocument } from "@/lib/knowledge/types"
 import { KIND_META, durationLabel, savedAgo } from "@/lib/knowledge/config"
 import { patchItem } from "@/lib/knowledge/client"
+import { useReadAloud, type UseReadAloudResult } from "@/lib/knowledge/use-read-aloud"
 import { cn } from "@/lib/utils"
 
 /** Split the extracted plain text into readable paragraphs. The stored
@@ -78,6 +84,15 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
           : "unextracted"
 
   const showProgress = !processing && !failed && surface === "article" && hasBody
+
+  // Read Aloud is offered only where there is real extracted body text
+  // to read — the exact same condition as the progress line above.
+  // video/pdf/unextracted/failed/processing never reach it, matching
+  // "hide Listen" for video/PDF and "don't offer it" for unextracted/
+  // failed. Keyed on doc.id so navigating to a different item tears
+  // down any in-progress speech and starts fresh (see the hook).
+  const read = useReadAloud(doc.id, body)
+  const showReadAloud = showProgress
 
   async function toggleFavorite() {
     const next = !favorite
@@ -182,7 +197,10 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
             <PdfBlock doc={doc} />
           ) : surface === "article" ? (
             hasBody ? (
-              <ArticleBody body={body} cover={doc.cover} title={doc.title} />
+              <>
+                {showReadAloud ? <ReadAloudControls read={read} /> : null}
+                <ArticleBody body={body} cover={doc.cover} title={doc.title} />
+              </>
             ) : (
               <ExcerptLede excerpt={doc.excerpt!} cover={doc.cover} title={doc.title} url={doc.url} />
             )
@@ -293,6 +311,67 @@ function MetaRow({ doc }: { doc: KnowledgeDocument }) {
       ) : null}
       <span aria-hidden className="text-muted-foreground/40">·</span>
       <span>{savedAgo(doc.savedAt)}</span>
+    </div>
+  )
+}
+
+/** The Reader's Listen toolbar — a single toggling button (Listen →
+ *  Pause/Resume) plus Previous/Next/Stop once reading has started.
+ *  Deliberately reads as an editorial tool (a pill button in the
+ *  Reader's own idiom), not a music player: no waveform, no scrubber,
+ *  no album-art chrome. */
+function ReadAloudControls({ read }: { read: UseReadAloudResult }) {
+  if (read.state === "unsupported") {
+    return (
+      <div className="mt-6 flex items-center gap-2 text-[12.5px] text-muted-foreground">
+        <Headphones className="size-3.5 text-muted-foreground/50" aria-hidden />
+        <span>{read.message}</span>
+      </div>
+    )
+  }
+
+  // Defensive only — the Reader never renders this component unless
+  // there is real extracted body text, so the controller's own
+  // "unavailable" (empty queue) is not reachable in practice.
+  if (read.state === "unavailable") return null
+
+  const isPlaying = read.state === "playing"
+  const isPaused = read.state === "paused"
+  const isActive = isPlaying || isPaused
+
+  return (
+    <div className="mt-6 flex flex-wrap items-center gap-1.5 border-b border-[var(--kn-edge)] pb-6">
+      <button
+        type="button"
+        onClick={() => (isPlaying ? read.pause() : isPaused ? read.resume() : read.play())}
+        aria-label={isPlaying ? "Pause reading" : isPaused ? "Resume reading" : "Listen to this article"}
+        aria-pressed={isPlaying}
+        title={isPlaying ? "Pause reading" : isPaused ? "Resume reading" : "Listen to this article"}
+        className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25"
+      >
+        {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+        {isPlaying ? "Pause" : isPaused ? "Resume" : "Listen"}
+      </button>
+
+      {isActive ? (
+        <>
+          <IconButton label="Previous paragraph" onClick={read.previous} disabled={!read.hasPrevious}>
+            <ChevronLeft className="size-4" />
+          </IconButton>
+          <IconButton label="Next paragraph" onClick={read.next} disabled={!read.hasNext}>
+            <ChevronRight className="size-4" />
+          </IconButton>
+          <IconButton label="Stop reading" onClick={read.stop}>
+            <Square className="size-3.5" />
+          </IconButton>
+        </>
+      ) : null}
+
+      {read.state === "error" ? (
+        <span role="status" className="ml-1 text-[12.5px] text-destructive">
+          {read.message}
+        </span>
+      ) : null}
     </div>
   )
 }
@@ -548,21 +627,29 @@ function IconButton({
   children,
   label,
   active,
+  disabled,
   onClick,
 }: {
   children: React.ReactNode
   label: string
   active?: boolean
+  disabled?: boolean
   onClick?: () => void
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-label={label}
+      title={label}
       className={cn(
         "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-        active ? "text-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+        disabled
+          ? "cursor-not-allowed text-muted-foreground/40"
+          : active
+            ? "text-foreground"
+            : "text-muted-foreground hover:bg-secondary hover:text-foreground",
       )}
     >
       {children}
