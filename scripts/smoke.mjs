@@ -163,6 +163,12 @@ async function startServer() {
       KNOWLEDGE_TICK_SECRET: `smoke-tick-${randomUUID()}`,
     },
     stdio: ["ignore", "pipe", "pipe"],
+    // Its own process group. `npx next start` is a chain — npx spawns
+    // the next CLI, which spawns the server that actually holds the
+    // port — and signalling the child only ever reached the head of it.
+    // detached puts the whole chain in one group so stopServer can
+    // signal all of it at once.
+    detached: true,
   })
   child.stdout.on("data", () => {})
   child.stderr.on("data", (d) => process.stderr.write(`  [server] ${d}`))
@@ -171,10 +177,25 @@ async function startServer() {
 }
 
 async function stopServer() {
-  if (child) {
-    child.kill("SIGTERM")
-    await sleep(500)
-    if (!child.killed) child.kill("SIGKILL")
+  if (child?.pid) {
+    // The negative pid signals the GROUP, not just the child. Killing
+    // the child alone left the real server orphaned and still holding
+    // 3123, so the next run died on "something is already listening" —
+    // a green suite that poisons the one after it.
+    const signalGroup = (signal) => {
+      try {
+        process.kill(-child.pid, signal)
+        return true
+      } catch {
+        return false // already gone, or never became a group leader
+      }
+    }
+    signalGroup("SIGTERM")
+    // Wait for it to actually go rather than assuming: child.killed
+    // only records that a signal was SENT, so it was never evidence
+    // the port had been released.
+    for (let i = 0; i < 40 && signalGroup(0); i += 1) await sleep(100)
+    if (signalGroup(0)) signalGroup("SIGKILL")
   }
   if (blobDir) await rm(blobDir, { recursive: true, force: true })
 }
