@@ -17,7 +17,9 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { KIND_META } from "@/lib/knowledge/config"
 import { searchLibrary } from "@/lib/knowledge/client"
+import { useVoiceSearch } from "@/lib/knowledge/use-voice-search"
 import type { KnowledgeItem } from "@/lib/knowledge/types"
+import { VoiceSearchButton } from "./voice-search-button"
 
 interface Command {
   id: string
@@ -54,6 +56,13 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
   const [searching, setSearching] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Voice search — a browser capability wired to the same query state, so a
+  // final transcript flows through the existing debounced search exactly as
+  // typed input would. See lib/knowledge/voice-search.ts for the real state
+  // machine; this component only reads its state and calls start()/stop().
+  const voice = useVoiceSearch((transcript) => setQuery(transcript))
+  const voiceBusy = voice.state === "listening" || voice.state === "processing"
+
   const commandMatches = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return COMMANDS
@@ -77,7 +86,11 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
       setResults([])
       setSearching(false)
       requestAnimationFrame(() => inputRef.current?.focus())
+    } else if (voiceBusy) {
+      // Never leave the mic listening once the palette is dismissed.
+      voice.stop()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   useEffect(() => setActive(0), [query])
@@ -160,20 +173,30 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
       />
       <div className="kn-rise relative w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl">
         <div className="flex items-center gap-3 border-b border-border px-4">
-          <Search className="size-4 text-muted-foreground" />
+          <Search className="size-4 shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
-            value={query}
+            value={voiceBusy ? voice.interimTranscript || (voice.state === "listening" ? "Listening…" : "Processing…") : query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
+            readOnly={voiceBusy}
             placeholder="Search your library or type a command…"
-            className="h-14 flex-1 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground"
+            className={cn(
+              "h-14 flex-1 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground",
+              voiceBusy && "text-muted-foreground",
+            )}
           />
-          {searching && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
-          <kbd className="rounded-md border border-border bg-secondary/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          {searching && <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />}
+          <VoiceSearchButton voice={voice} className="shrink-0" />
+          <kbd className="shrink-0 rounded-md border border-border bg-secondary/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
             ESC
           </kbd>
         </div>
+        {voice.message && (
+          <p role="status" className="border-b border-border px-4 py-2 text-[12.5px] leading-relaxed text-muted-foreground">
+            {voice.message}
+          </p>
+        )}
 
         <div className="max-h-[52vh] overflow-y-auto p-2 thin-scroll">
           {/* Commands */}
