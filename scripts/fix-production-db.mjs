@@ -110,6 +110,21 @@ async function ledgerNames() {
 }
 
 try {
+  // ── 0. Reach the server before anything else. Without this the first
+  //       real query fails deep inside the driver and prints a pg stack
+  //       trace — at precisely the moment someone has just pointed this
+  //       at production and needs to know, plainly, whether it touched
+  //       anything. It has not: nothing is read or written until here.
+  try {
+    await pool.query("SELECT 1")
+  } catch (err) {
+    console.error(`\nCould not connect to the database: ${err.message}`)
+    console.error("Nothing was read and nothing was written.")
+    console.error("\nCheck that DATABASE_URL names the server you meant and that this")
+    console.error("host may reach it. The value itself is never printed by this script.")
+    process.exit(1)
+  }
+
   // ── 1. Which database is this, really? Printed so a mistake is
   //       visible before anything is written. No credentials shown.
   const [{ db, host }] = await q(
@@ -258,6 +273,13 @@ try {
   console.log(`  indexes               : ${jobIdx.join(", ")}`)
   console.log(`  dedup index           : ${(await hasIndex("uq_knowledge_org_user_normalized")) ? "uq_knowledge_org_user_normalized" : "MISSING"}`)
   console.log("\nNow try Save to library. Expect 201.")
+} catch (err) {
+  // No stack traces. Whatever went wrong, the operator needs the reason
+  // and an honest account of how far the run got — every apply above is
+  // its own transaction, so the output already names what landed.
+  console.error(`\nStopped on an unexpected error: ${err instanceof Error ? err.message : String(err)}`)
+  console.error("Anything reported as applied above did land; nothing after this point ran.")
+  process.exitCode = 1
 } finally {
   await pool.end()
 }
