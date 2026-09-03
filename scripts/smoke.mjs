@@ -150,6 +150,15 @@ async function startServer() {
       LLM_DEV_MODE: "true",
       AUTH_SECRET: process.env.AUTH_SECRET ?? `smoke-${randomUUID()}${randomUUID()}`,
       AUTH_TRUST_HOST: "true",
+      // Pinned, not inherited. Auth.js reads AUTH_URL on EVERY request
+      // (proxy.ts wraps the whole matcher), and its only guard is
+      // falsiness — `if (!url) return req` — so a value like
+      // "whitehabbit.vercel.app" from a deploy env reaches `new URL()`
+      // bare and throws ERR_INVALID_URL. Every document then 500s, and
+      // waitForServer, which only accepts status < 500, reports the
+      // server as unreachable: a config leak that reads as a dead
+      // build. It must be THIS server's origin regardless.
+      AUTH_URL: BASE,
       KNOWLEDGE_BLOB_DIR: blobDir,
       KNOWLEDGE_TICK_SECRET: `smoke-tick-${randomUUID()}`,
     },
