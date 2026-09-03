@@ -425,7 +425,11 @@ function ErrorState({ message, onRetry }: { message?: string; onRetry: () => voi
       <div>
         <p className="font-serif text-xl font-medium text-foreground">We couldn&apos;t load your library.</p>
         <p className="mx-auto mt-1.5 max-w-xs text-pretty text-sm text-muted-foreground">
-          Something went wrong on our end. Give it another try in a moment.
+          {/* The prop was declared and then ignored, so every failure —
+              an expired session included — was reported as the server's
+              fault. The real message is the accurate one whenever we
+              have it; the generic line stays as the fallback. */}
+          {message ?? "Something went wrong on our end. Give it another try in a moment."}
         </p>
       </div>
       <button

@@ -18,26 +18,49 @@ import {
   guestSaveUrl,
   guestSearch,
 } from "./guest-store"
+import { AuthRequiredError, guestFallbackAllowed } from "./auth-state"
 
 export class KnowledgeApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
+  // An explicit field rather than a constructor parameter property:
+  // identical public shape, but parameter properties are the one piece
+  // of TypeScript that node's --experimental-strip-types cannot strip,
+  // and this module has to be importable from the test harness for the
+  // 401 fork below to be tested against the real code path.
+  readonly status: number
+
+  constructor(message: string, status: number) {
     super(message)
     this.name = "KnowledgeApiError"
+    this.status = status
   }
 }
 
 /* GUEST FALLBACK ---------------------------------------------------- *
- * When the real API answers 401 (no auth wired / signed out), the app
- * stays fully usable against a browser-local library instead of dead-
- * ending. `isAuthMiss` recognizes that one signal; every public call
- * below runs the real request first and only falls back on it. Any
- * other error (network, 500, validation) propagates untouched so real
- * failures still surface honestly. */
-function isAuthMiss(err: unknown): boolean {
-  return err instanceof KnowledgeApiError && err.status === 401
+ * When the real API answers 401, the app stays fully usable against a
+ * browser-local library instead of dead-ending. Every public call below
+ * runs the real request first and only falls back on that one signal;
+ * any other error (network, 500, validation) propagates untouched so
+ * real failures still surface honestly.
+ *
+ * The fallback is NOT unconditional, and that condition is the point.
+ * A 401 means one of two very different things:
+ *
+ *   - a real guest, who has never signed in here. The local library is
+ *     their product. Fall back, exactly as before.
+ *   - someone whose session expired. Falling back would silently move
+ *     their writes into localStorage while every save still reports
+ *     success — they would only discover it on another device, with an
+ *     empty library. Throw AuthRequiredError instead, so the UI can ask
+ *     them to sign in again.
+ *
+ * lib/knowledge/auth-state.ts owns that distinction. This function is
+ * the single place it is enforced, which is why it throws rather than
+ * merely answering: there is no correct way for a caller to see "401,
+ * fallback not allowed" and carry on. */
+function shouldFallBackToGuest(err: unknown): boolean {
+  if (!(err instanceof KnowledgeApiError) || err.status !== 401) return false
+  if (!guestFallbackAllowed()) throw new AuthRequiredError()
+  return true
 }
 
 /** True once the API has told us this browser has no session — flipped
@@ -77,7 +100,7 @@ export async function fetchLibrary(params: ListParams = {}, signal?: AbortSignal
     const res = await fetch(`/api/knowledge?${qs.toString()}`, { signal, cache: "no-store" })
     return await parse<KnowledgeListResult>(res)
   } catch (err) {
-    if (isAuthMiss(err)) {
+    if (shouldFallBackToGuest(err)) {
       markGuest()
       return guestList(params)
     }
@@ -94,7 +117,7 @@ export async function searchLibrary(q: string, signal?: AbortSignal): Promise<Kn
     const res = await fetch(`/api/knowledge/search?q=${encodeURIComponent(trimmed)}`, { signal, cache: "no-store" })
     return (await parse<{ items: KnowledgeItem[] }>(res)).items
   } catch (err) {
-    if (isAuthMiss(err)) {
+    if (shouldFallBackToGuest(err)) {
       markGuest()
       return guestSearch(trimmed)
     }
@@ -120,7 +143,7 @@ export async function saveUrl(url: string): Promise<SaveResult> {
     const data = await parse<{ item: KnowledgeItem; duplicate?: boolean }>(res)
     return { item: data.item, duplicate: data.duplicate === true }
   } catch (err) {
-    if (isAuthMiss(err)) {
+    if (shouldFallBackToGuest(err)) {
       markGuest()
       return guestSaveUrl(url)
     }
@@ -139,7 +162,7 @@ export async function fetchDocument(id: string, signal?: AbortSignal): Promise<K
     const res = await fetch(`/api/knowledge/${id}`, { signal, cache: "no-store" })
     return (await parse<{ document: KnowledgeDocument }>(res)).document
   } catch (err) {
-    if (isAuthMiss(err)) {
+    if (shouldFallBackToGuest(err)) {
       markGuest()
       const doc = guestGetDocument(id)
       if (!doc) throw new KnowledgeApiError("That item is no longer in your library.", 404)
@@ -159,7 +182,7 @@ export async function patchItem(id: string, patch: { favorite?: boolean; archive
     })
     return (await parse<{ item: KnowledgeItem }>(res)).item
   } catch (err) {
-    if (isAuthMiss(err)) {
+    if (shouldFallBackToGuest(err)) {
       markGuest()
       return guestPatch(id, patch)
     }
@@ -173,7 +196,7 @@ export async function deleteItem(id: string): Promise<void> {
     const res = await fetch(`/api/knowledge/${id}`, { method: "DELETE" })
     await parse<{ ok: true }>(res)
   } catch (err) {
-    if (isAuthMiss(err)) {
+    if (shouldFallBackToGuest(err)) {
       markGuest()
       return guestDelete(id)
     }
@@ -196,7 +219,7 @@ export async function retryItem(id: string): Promise<KnowledgeItem> {
     const res = await fetch(`/api/knowledge/${id}/retry`, { method: "POST" })
     return (await parse<{ item: KnowledgeItem }>(res)).item
   } catch (err) {
-    if (isAuthMiss(err)) {
+    if (shouldFallBackToGuest(err)) {
       markGuest()
       return guestRetry(id)
     }

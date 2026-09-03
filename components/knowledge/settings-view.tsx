@@ -1,9 +1,9 @@
 "use client"
 
 import { Database, LogIn, LogOut, type LucideIcon, Palette, ShieldCheck, User } from "lucide-react"
-import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { PageContainer, PageHeader } from "./page-header"
+import { useKnowledgeAuth } from "./knowledge-auth"
 
 /** Settings for the standalone Knowledge product. The account section is
  *  real — it reflects the signed-in user and can sign them out. The
@@ -11,10 +11,14 @@ import { PageContainer, PageHeader } from "./page-header"
  *  will live here without fabricating controls that do nothing. No
  *  underlying platform/organization architecture is exposed. */
 export function SettingsView() {
-  const { data: session, status } = useSession()
-  const isGuest = status === "unauthenticated"
-  const email = session?.user?.email ?? ""
-  const name = isGuest ? "Guest" : session?.user?.name || email.split("@")[0] || "Your account"
+  // Same shared state as the topbar and sidebar — Settings must not
+  // call a lapsed session "not signed in", which is what deriving it
+  // from useSession() alone did.
+  const auth = useKnowledgeAuth()
+  const isGuest = auth.state === "guest"
+  const expired = auth.state === "auth_required"
+  const email = auth.email
+  const name = auth.name
   const initial = (name || "Y").charAt(0).toUpperCase()
 
   return (
@@ -31,22 +35,26 @@ export function SettingsView() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-base font-medium text-foreground">{name}</p>
               <p className="truncate text-sm text-muted-foreground">
-                {isGuest ? "Not signed in — your library is saved on this device" : email || "Signed in"}
+                {expired
+                  ? "Your session ended — saves are going to this device"
+                  : isGuest
+                    ? "Not signed in — your library is saved on this device"
+                    : email || "Signed in"}
               </p>
             </div>
           </div>
           <div className="border-t border-[var(--kn-edge)] px-6 py-4">
-            {isGuest ? (
-              <Link
-                href="/login?callbackUrl=/knowledge"
+            {auth.state !== "authenticated" ? (
+              <button
+                onClick={auth.promptSignIn}
                 className="inline-flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
               >
                 <LogIn className="size-4" />
-                Sign in to save permanently
-              </Link>
+                {expired ? "Sign in again" : "Sign in to save permanently"}
+              </button>
             ) : (
               <button
-                onClick={() => signOut({ callbackUrl: "/login" })}
+                onClick={auth.signOutOfKnowledge}
                 className="flex h-10 items-center gap-2 rounded-xl border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
               >
                 <LogOut className="size-4" />

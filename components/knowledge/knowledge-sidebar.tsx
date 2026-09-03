@@ -1,12 +1,12 @@
 "use client"
 
 import { LibraryBig, LogIn, LogOut, Settings } from "lucide-react"
-import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { KNOWLEDGE_NAV, isNavActive } from "@/lib/knowledge/config"
+import { useKnowledgeAuth } from "./knowledge-auth"
 
 /** The flat config, split into an editorial "browse" set and a quieter
  *  "tools" set below a divider — closer to a reading app than a console. */
@@ -15,11 +15,16 @@ const TOOLS = KNOWLEDGE_NAV.slice(5)
 
 export function KnowledgeSidebar() {
   const pathname = usePathname()
-  const { data: session, status } = useSession()
+  // One source of truth for the three states, shared with the topbar
+  // and with lib/knowledge/client.ts — the sidebar used to derive its
+  // own "isGuest" from useSession(), which collapsed a lapsed session
+  // into a guest and was half of why an expired login was invisible.
+  const auth = useKnowledgeAuth()
   const [accountOpen, setAccountOpen] = useState(false)
-  const isGuest = status === "unauthenticated"
-  const email = session?.user?.email ?? ""
-  const name = isGuest ? "Guest" : session?.user?.name || email.split("@")[0] || "Your account"
+  const isGuest = auth.state === "guest"
+  const expired = auth.state === "auth_required"
+  const email = auth.email
+  const name = auth.name
   const initial = (name || "Y").charAt(0).toUpperCase()
   const settingsActive = isNavActive(pathname, "/knowledge/settings")
 
@@ -77,7 +82,7 @@ export function KnowledgeSidebar() {
             <div className="px-2.5 py-2">
               <p className="truncate text-sm font-medium text-popover-foreground">{name}</p>
               <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
-                {isGuest ? "Saved on this device" : email}
+                {expired ? "Session ended — saving to this device" : isGuest ? "Saved on this device" : email}
               </p>
             </div>
             <Link
@@ -88,18 +93,25 @@ export function KnowledgeSidebar() {
               <Settings className="size-4" />
               Settings
             </Link>
-            {isGuest ? (
-              <Link
-                href="/login?callbackUrl=/knowledge"
-                onClick={() => setAccountOpen(false)}
+            {auth.state !== "authenticated" ? (
+              // Opens the dialog in place instead of navigating to
+              // /login, so signing in never costs the page you were on.
+              <button
+                onClick={() => {
+                  setAccountOpen(false)
+                  auth.promptSignIn()
+                }}
                 className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
               >
                 <LogIn className="size-4" />
-                Sign in to save permanently
-              </Link>
+                {expired ? "Sign in again" : "Sign in to save permanently"}
+              </button>
             ) : (
               <button
-                onClick={() => signOut({ callbackUrl: "/login" })}
+                onClick={() => {
+                  setAccountOpen(false)
+                  auth.signOutOfKnowledge()
+                }}
                 className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
               >
                 <LogOut className="size-4" />
@@ -119,7 +131,7 @@ export function KnowledgeSidebar() {
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-medium text-foreground">{name}</span>
             <span className="block truncate text-[12px] text-muted-foreground">
-              {isGuest ? "Guest mode" : email || "Signed in"}
+              {expired ? "Session ended" : isGuest ? "Guest mode" : email || "Signed in"}
             </span>
           </span>
         </button>

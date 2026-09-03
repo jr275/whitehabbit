@@ -2,21 +2,29 @@
 
 /* Real Google OAuth trigger. Only rendered when the server confirms
  * GOOGLE_CLIENT_ID/SECRET are configured (see lib/auth.isGoogleConfigured),
- * so it is never a dead/fake button. Routes through /launch, which
- * decides onboarding-vs-product after the session exists. */
+ * so it is never a dead/fake button. Defaults to routing through
+ * /launch, which decides onboarding-vs-product after the session
+ * exists; callers that live inside one product (Knowledge) pass their
+ * own callbackUrl so signing in never navigates the user out of it. */
 
 import { Loader2 } from "lucide-react"
 import { signIn } from "next-auth/react"
 import { useState } from "react"
 
-export function GoogleButton({ label = "Continue with Google" }: { label?: string }) {
+export function GoogleButton({
+  label = "Continue with Google",
+  callbackUrl = "/launch",
+}: {
+  label?: string
+  callbackUrl?: string
+}) {
   const [loading, setLoading] = useState(false)
   return (
     <button
       type="button"
       onClick={() => {
         setLoading(true)
-        void signIn("google", { callbackUrl: "/launch" })
+        void signIn("google", { callbackUrl })
       }}
       disabled={loading}
       className="flex h-11 w-full items-center justify-center gap-2.5 rounded-lg border border-border bg-card text-[13px] font-medium text-foreground transition-colors hover:border-foreground/25 hover:bg-secondary/50 disabled:cursor-not-allowed disabled:opacity-60"
