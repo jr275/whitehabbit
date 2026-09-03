@@ -108,6 +108,35 @@ export async function fetchLibrary(params: ListParams = {}, signal?: AbortSignal
   }
 }
 
+/** Ask a question of the authenticated library. No guest fallback by
+ *  design — see app/api/knowledge/ask/route.ts. A 401 here surfaces as
+ *  AuthRequiredError through shouldFallBackToGuest(), which is correct:
+ *  there is no local answer to fall back to. */
+export async function askLibrary(question: string, signal?: AbortSignal): Promise<AskResponse> {
+  const res = await fetch("/api/knowledge/ask", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ question }),
+    signal,
+  })
+  return parse<AskResponse>(res)
+}
+
+export interface AskCitation {
+  marker: number
+  itemId: string
+  title: string
+  domain: string | null
+  url: string
+}
+
+export interface AskResponse {
+  answer: string
+  citations: AskCitation[]
+  consulted: { itemId: string; title: string }[]
+  retrieval: "search" | "recent" | "none"
+}
+
 /** Real search over the org's saved items. Returns [] for queries
  * shorter than 2 chars (the server treats those as an idle no-op). */
 export async function searchLibrary(q: string, signal?: AbortSignal): Promise<KnowledgeItem[]> {

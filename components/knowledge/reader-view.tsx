@@ -23,17 +23,8 @@ import type { KnowledgeDocument } from "@/lib/knowledge/types"
 import { KIND_META, durationLabel, savedAgo } from "@/lib/knowledge/config"
 import { patchItem, summarizeItem } from "@/lib/knowledge/client"
 import { useReadAloud, type UseReadAloudResult } from "@/lib/knowledge/use-read-aloud"
+import { toParagraphs as paragraphs } from "@/lib/knowledge/paragraphs"
 import { cn } from "@/lib/utils"
-
-/** Split the extracted plain text into readable paragraphs. The stored
- *  body is flattened plain text (the extractor intentionally drops
- *  markup), so this is the honest maximum structure we can render. */
-function paragraphs(text: string): string[] {
-  return text
-    .split(/\n{1,}/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0)
-}
 
 /** Build an embeddable player URL for the common providers, or null.
  *  Only returns a URL we can genuinely embed — otherwise the caller
