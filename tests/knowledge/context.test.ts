@@ -37,6 +37,7 @@ function chunk(over: Partial<RetrievedChunk> & { chunkId: string }): RetrievedCh
     ordinal: 0,
     charStart,
     charEnd,
+    signals: { lexical: 1 },
     metadata: { domain: "example.com", url: "https://example.com/a", lang: "en", publishedAt: null },
     ...over,
   }

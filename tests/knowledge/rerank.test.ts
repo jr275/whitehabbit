@@ -26,6 +26,7 @@ function chunk(chunkId: string, itemId: string, score: number, snippet: string):
     ordinal: 0,
     charStart: null,
     charEnd: null,
+    signals: { lexical: score },
     metadata: { domain: "example.com", url: `https://example.com/${itemId}`, lang: "en", publishedAt: null },
   }
 }

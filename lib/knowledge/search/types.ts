@@ -57,6 +57,19 @@ export interface RetrievedChunk {
   ordinal: number
   charStart: number | null
   charEnd: number | null
+  /** What each retriever contributed, kept alongside the fused score
+   *  rather than replaced by it. Fusion answers "how highly should
+   *  this rank"; these answer "on what basis", and a caller deciding
+   *  whether a passage is admissible as EVIDENCE needs the second
+   *  question. Absent for a retriever that did not return this chunk. */
+  signals: {
+    /** ts_rank. Present means every query term matched — plainto_tsquery
+     *  ANDs them — which is strong evidence on its own. */
+    lexical?: number
+    /** Cosine similarity in [0,1]. Present means only "nearest
+     *  neighbour", which in a small library is satisfied by anything. */
+    semantic?: number
+  }
   metadata: {
     domain: string | null
     url: string

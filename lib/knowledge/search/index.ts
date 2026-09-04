@@ -123,8 +123,17 @@ export async function searchKnowledge(input: SearchInput, deps: SearchDeps = {})
     }
   }
 
+  // Merge the two retrievers' signals rather than keeping whichever
+  // row arrived first. A chunk found by both is the strongest case
+  // there is, and dropping half its provenance would make it look
+  // like a semantic-only guess to anything downstream that has to
+  // decide whether it counts as evidence.
   const byId = new Map<string, RetrievedChunk>()
-  for (const c of [...lexical, ...semantic]) if (!byId.has(c.chunkId)) byId.set(c.chunkId, c)
+  for (const c of [...lexical, ...semantic]) {
+    const existing = byId.get(c.chunkId)
+    if (existing) existing.signals = { ...existing.signals, ...c.signals }
+    else byId.set(c.chunkId, { ...c, signals: { ...c.signals } })
+  }
 
   const fused = reciprocalRankFusion(
     lexical.map((c) => ({ id: c.chunkId })),

@@ -15,6 +15,7 @@ export const RATE_LIMITS = {
   knowledge_save: { limit: 30, windowMs: 60_000 }, // 30 saves/min per org — each triggers a real outbound fetch
   knowledge_retry: { limit: 20, windowMs: 60_000 },
   knowledge_summarize: { limit: 10, windowMs: 60_000 }, // real LLM calls — tighter, matching worker_run
+  knowledge_ai: { limit: 10, windowMs: 60_000 }, // real LLM calls — tighter, matching knowledge_summarize
   knowledge_preview: { limit: 40, windowMs: 60_000 }, // unauth metadata/thumbnail lookups per client ip — each is a real outbound fetch
 
   auth_register: { limit: 10, windowMs: 60_000 }, // account creation per client ip

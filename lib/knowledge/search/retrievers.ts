@@ -46,11 +46,13 @@ const HIT_SELECT = `
   i.lang          AS lang,
   i.published_at  AS published_at`
 
-function toRetrieved(row: ChunkHitRow): RetrievedChunk {
+function toRetrieved(row: ChunkHitRow, retriever: "lexical" | "semantic"): RetrievedChunk {
+  const score = Number(row.score)
   return {
     knowledgeItemId: row.item_id,
     chunkId: row.chunk_id,
-    score: Number(row.score),
+    score,
+    signals: { [retriever]: score },
     title: row.title,
     source: row.site_name ?? row.domain,
     snippet: row.text,
@@ -120,7 +122,7 @@ export async function lexicalSearch(
       LIMIT $${params.length}`,
     params,
   )
-  return rows.map(toRetrieved)
+  return rows.map((row) => toRetrieved(row, "lexical"))
 }
 
 /**
@@ -161,5 +163,5 @@ export async function semanticSearch(
       LIMIT $${params.length}`,
     params,
   )
-  return rows.map(toRetrieved)
+  return rows.map((row) => toRetrieved(row, "semantic"))
 }
