@@ -18,23 +18,16 @@ export function AiLoading() {
   }, [])
 
   return (
-    <div className="animate-in fade-in duration-300" aria-live="polite" role="status">
-      <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
-        <span className="relative flex size-2">
-          <span className="absolute inline-flex size-full animate-ping rounded-full bg-[var(--kn-ai)] opacity-60" />
-          <span className="relative inline-flex size-2 rounded-full bg-[var(--kn-ai)]" />
-        </span>
-        {phases[phase]}
-      </div>
-      <div className="mt-6 space-y-3" aria-hidden>
-        {[92, 100, 78].map((w, i) => (
-          <div
-            key={i}
-            className="kn-shimmer h-3.5 rounded-full bg-[var(--kn-well)]"
-            style={{ width: `${w}%` }}
-          />
-        ))}
-      </div>
+    <div
+      className="flex items-center gap-2.5 py-2 text-sm text-muted-foreground animate-in fade-in duration-300"
+      aria-live="polite"
+      role="status"
+    >
+      <span className="relative flex size-2">
+        <span className="absolute inline-flex size-full animate-ping rounded-full bg-[var(--kn-ai)] opacity-60 motion-reduce:hidden" />
+        <span className="relative inline-flex size-2 rounded-full bg-[var(--kn-ai)]" />
+      </span>
+      {phases[phase]}
     </div>
   )
 }
@@ -100,24 +93,57 @@ export function AiUnavailable({ message }: { message?: string }) {
   )
 }
 
-/* ── Empty library ──────────────────────────────────────────────────*/
+/* ── Empty library ──────────────────────────────────────────────────
+ * The true beginning of the product. It doesn't apologise for being
+ * empty — it frames saving as step one of understanding. The action
+ * reuses the real save flow (openSaveDialog); nothing here is faked. */
 export function AiEmptyLibrary({ onSave }: { onSave: () => void }) {
   return (
-    <StatePanel
-      icon={Sparkles}
-      title="Save something first."
-      body="Ask your knowledge answers from what you’ve saved. Add a few articles, videos or notes and then come back to ask about them."
-      action={
-        <button
-          type="button"
-          onClick={onSave}
-          className="flex h-10 items-center gap-2 rounded-xl bg-[var(--kn-ai)] px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-        >
-          Save your first source <ArrowRight className="size-4" />
-        </button>
-      }
-    />
+    <div className="flex flex-col items-center gap-6 rounded-2xl border border-[var(--kn-edge)] bg-[var(--kn-paper)] px-6 py-12 text-center animate-in fade-in duration-300">
+      <span className="flex size-12 items-center justify-center rounded-2xl bg-[var(--kn-ai)]/12 text-[var(--kn-ai)]">
+        <Sparkles className="size-6" />
+      </span>
+
+      <div className="max-w-md space-y-2">
+        <h2 className="text-pretty text-xl font-medium tracking-tight text-foreground">Your knowledge starts here.</h2>
+        <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
+          WhiteHabbit answers from what you’ve saved. Save an article, video or note first — then it becomes something
+          you can ask about.
+        </p>
+      </div>
+
+      <ol className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+        <OnboardingStep n="1" label="Save something" />
+        <StepArrow />
+        <OnboardingStep n="2" label="WhiteHabbit understands it" />
+        <StepArrow />
+        <OnboardingStep n="3" label="Ask about it" />
+      </ol>
+
+      <button
+        type="button"
+        onClick={onSave}
+        className="flex h-10 items-center gap-2 rounded-xl bg-[var(--kn-ai)] px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+      >
+        Save your first source <ArrowRight className="size-4" />
+      </button>
+    </div>
   )
+}
+
+function OnboardingStep({ n, label }: { n: string; label: string }) {
+  return (
+    <li className="flex items-center gap-2 rounded-xl border border-[var(--kn-edge)] bg-card/60 px-3 py-2">
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--kn-ai)]/15 text-[11px] font-medium tabular-nums text-[var(--kn-ai)]">
+        {n}
+      </span>
+      <span className="text-[13px] text-foreground/85">{label}</span>
+    </li>
+  )
+}
+
+function StepArrow() {
+  return <ArrowRight className="mx-auto size-3.5 rotate-90 text-muted-foreground/40 sm:rotate-0" aria-hidden />
 }
 
 /* ── Suggestions + recent (empty idle state) ───────────────────────
@@ -135,42 +161,57 @@ export function AiSuggestions({
   onPick: (q: string) => void
 }) {
   return (
-    <div className="mt-8">
-      <p className="mb-3 text-[12px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">Try asking</p>
-      <div className="flex flex-col gap-2">
+    <div className="mt-8 flex flex-col gap-7">
+      {/* Examples — clearly suggestions. A leading spark marks them as
+          prompts to try; clicking only fills the composer. */}
+      <SuggestionGroup label="Try asking">
         {examples.map((q) => (
-          <button
-            key={q}
-            type="button"
-            onClick={() => onPick(q)}
-            className="group flex items-center justify-between gap-3 rounded-xl border border-[var(--kn-edge)] bg-card/60 px-4 py-2.5 text-left text-sm text-foreground/85 transition-colors hover:border-[var(--kn-ai)]/40 hover:bg-card hover:text-foreground"
-          >
-            <span className="text-pretty">{q}</span>
-            <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-[var(--kn-ai)]" />
-          </button>
+          <SuggestionRow key={q} q={q} icon="example" onPick={onPick} />
         ))}
-      </div>
+      </SuggestionGroup>
 
+      {/* Recent — clearly the user's own history, same row language, a
+          leading clock instead of a spark. Never invented. */}
       {recent.length > 0 ? (
-        <div className="mt-7">
-          <p className="mb-3 flex items-center gap-1.5 text-[12px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">
-            <Clock className="size-3.5" /> Recent
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {recent.map((q) => (
-              <button
-                key={q}
-                type="button"
-                onClick={() => onPick(q)}
-                className="max-w-full truncate rounded-full border border-[var(--kn-edge)] bg-secondary/40 px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:border-[var(--kn-ai)]/40 hover:text-foreground"
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        </div>
+        <SuggestionGroup label="Recent">
+          {recent.map((q) => (
+            <SuggestionRow key={q} q={q} icon="recent" onPick={onPick} />
+          ))}
+        </SuggestionGroup>
       ) : null}
     </div>
+  )
+}
+
+function SuggestionGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="mb-3 text-[12px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">{label}</p>
+      <div className="flex flex-col gap-1.5">{children}</div>
+    </div>
+  )
+}
+
+function SuggestionRow({
+  q,
+  icon,
+  onPick,
+}: {
+  q: string
+  icon: "example" | "recent"
+  onPick: (q: string) => void
+}) {
+  const Leading = icon === "recent" ? Clock : Sparkles
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(q)}
+      className="group flex items-center gap-3 rounded-xl border border-[var(--kn-edge)] bg-card/50 px-4 py-2.5 text-left text-sm text-foreground/85 transition-colors hover:border-[var(--kn-ai)]/40 hover:bg-card hover:text-foreground"
+    >
+      <Leading className="size-3.5 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-[var(--kn-ai)]" />
+      <span className="min-w-0 flex-1 truncate text-pretty">{q}</span>
+      <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/40 transition-all group-hover:translate-x-0.5 group-hover:text-[var(--kn-ai)]" />
+    </button>
   )
 }
 

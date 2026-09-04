@@ -4,13 +4,17 @@ import { useEffect } from "react"
 import Link from "next/link"
 import { BookOpen, ExternalLink } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { KnowledgeCitation } from "@/lib/knowledge/ai"
+import type { KnowledgeCitation, KnowledgeConfidence } from "@/lib/knowledge/ai"
 
 interface AiSourcesProps {
   citations: KnowledgeCitation[]
   activeCitation: string | null
   /** Heading — "Sources" normally, "Evidence" when shown without an answer. */
   title?: string
+  /** Optional, API-provided. Rendered as a quiet evidence-quality signal
+      tied to the sources — never as an authoritative AI score, and never
+      fabricated when the API omits it. */
+  confidence?: KnowledgeConfidence
 }
 
 /**
@@ -19,7 +23,7 @@ interface AiSourcesProps {
  * Original source is explicit and navigable. Nothing is invented: optional
  * fields (excerpt, relevance, chunk) render only when the API provides them.
  */
-export function AiSources({ citations, activeCitation, title = "Sources" }: AiSourcesProps) {
+export function AiSources({ citations, activeCitation, title = "Sources", confidence }: AiSourcesProps) {
   const reduceMotion =
     typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
 
@@ -37,6 +41,7 @@ export function AiSources({ citations, activeCitation, title = "Sources" }: AiSo
       <h2 className="mb-4 flex items-center gap-2 text-[13px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
         {title}
         <span className="tabular-nums text-muted-foreground/60">{citations.length}</span>
+        {confidence ? <ConfidenceSignal confidence={confidence} /> : null}
       </h2>
       <ol className="flex flex-col gap-3">
         {citations.map((c) => (
@@ -44,6 +49,29 @@ export function AiSources({ citations, activeCitation, title = "Sources" }: AiSo
         ))}
       </ol>
     </section>
+  )
+}
+
+/** A calm evidence-quality signal: how well the user's own sources
+ *  support the answer. Normal-case and muted so it reads as a property
+ *  of the evidence, not an authoritative confidence score. */
+function ConfidenceSignal({ confidence }: { confidence: KnowledgeConfidence }) {
+  const label =
+    confidence === "high" ? "Well supported" : confidence === "medium" ? "Partly supported" : "Limited support"
+  return (
+    <span className="ml-auto flex items-center gap-1.5 text-[11px] font-normal normal-case tracking-normal text-muted-foreground/70">
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          confidence === "high"
+            ? "bg-[var(--kn-ai)]"
+            : confidence === "medium"
+              ? "bg-[var(--kn-ai)]/50"
+              : "bg-muted-foreground/40",
+        )}
+      />
+      {label} by your sources
+    </span>
   )
 }
 

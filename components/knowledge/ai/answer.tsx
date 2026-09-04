@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
-import type { KnowledgeAIResponse, KnowledgeCitation, KnowledgeConfidence } from "@/lib/knowledge/ai"
+import type { KnowledgeAIResponse, KnowledgeCitation } from "@/lib/knowledge/ai"
 
 interface AiAnswerProps {
   response: KnowledgeAIResponse
@@ -18,14 +18,11 @@ interface AiAnswerProps {
  * presents `response.answer` and links markers back to the evidence.
  */
 export function AiAnswer({ response, activeCitation, onCite, onFollowUp }: AiAnswerProps) {
-  const { answer, citations, confidence, followUps } = response
+  const { answer, citations, followUps } = response
 
   return (
     <section aria-label="Answer" className="animate-in fade-in duration-500">
-      <div className="mb-4 flex items-center gap-3">
-        <h2 className="text-[13px] font-medium uppercase tracking-[0.14em] text-muted-foreground">Answer</h2>
-        {confidence ? <ConfidenceBadge confidence={confidence} /> : null}
-      </div>
+      <h2 className="mb-4 text-[13px] font-medium uppercase tracking-[0.14em] text-muted-foreground">Answer</h2>
 
       <div className="space-y-4 text-[1.02rem] leading-[1.75] text-foreground/90">
         {renderBlocks(answer, citations, activeCitation, onCite)}
@@ -50,22 +47,6 @@ export function AiAnswer({ response, activeCitation, onCite, onFollowUp }: AiAns
         </div>
       ) : null}
     </section>
-  )
-}
-
-function ConfidenceBadge({ confidence }: { confidence: KnowledgeConfidence }) {
-  const label = confidence === "high" ? "High confidence" : confidence === "medium" ? "Medium confidence" : "Low confidence"
-  return (
-    <span
-      className={cn(
-        "rounded-full border px-2.5 py-0.5 text-[11px] font-medium",
-        confidence === "high"
-          ? "border-[var(--kn-ai)]/40 bg-[var(--kn-ai)]/10 text-[var(--kn-ai)]"
-          : "border-[var(--kn-edge)] bg-secondary/50 text-muted-foreground",
-      )}
-    >
-      {label}
-    </span>
   )
 }
 

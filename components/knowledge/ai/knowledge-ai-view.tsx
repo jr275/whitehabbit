@@ -153,9 +153,11 @@ export function KnowledgeAiView() {
 
   return (
     <Shell>
-      <header className="flex flex-col gap-1">
-        <p className="text-sm font-medium text-primary">Ask your knowledge</p>
-      </header>
+      {/* Quiet section label — the app identity, deliberately understated
+          so it never competes with the user's question below. */}
+      <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+        Ask your knowledge
+      </p>
 
       <div className="mt-4">
         <AiComposer
@@ -167,8 +169,11 @@ export function KnowledgeAiView() {
         />
       </div>
 
+      {/* The submitted question is the focal point — the start of a
+          research thread, marked by a slim accent rule rather than a
+          chat bubble. */}
       {submitted ? (
-        <h1 className="mt-8 text-balance font-serif text-2xl font-medium leading-tight tracking-tight text-foreground sm:text-[1.75rem]">
+        <h1 className="mt-8 text-balance border-l-2 border-[var(--kn-ai)]/60 pl-4 font-serif text-2xl font-medium leading-tight tracking-tight text-foreground sm:text-[1.75rem]">
           {submitted}
         </h1>
       ) : null}
@@ -196,6 +201,7 @@ export function KnowledgeAiView() {
             citations={response.citations}
             activeCitation={activeCitation}
             title={status === "insufficient" ? "Related sources" : "Sources"}
+            confidence={response.confidence}
           />
         ) : null}
       </div>
