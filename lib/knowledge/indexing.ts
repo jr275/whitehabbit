@@ -18,6 +18,7 @@ import "server-only"
  * ================================================================== */
 
 import { createHash } from "node:crypto"
+import { EmbeddingNotConfiguredError, resolveEmbeddingProvider, type EmbeddingProvider } from "@/lib/ai/embeddings"
 import { logger } from "@/lib/observability/logger"
 import { chunkContent, type Chunk } from "./chunking"
 import * as repo from "./repo"
@@ -64,6 +65,9 @@ export type IndexOutcome =
 export interface IndexDeps {
   /** Test seam. Never overridden in production. */
   chunk?: (content: string) => Chunk[]
+  /** Test seam, and the injection point for a future second
+   *  provider. Production resolves the configured one. */
+  embeddings?: EmbeddingProvider
 }
 
 /**
@@ -129,15 +133,78 @@ export async function indexItem(
   return { status: "indexed", chunks: outcome.chunks, contentHash: hash }
 }
 
+/**
+ * Embeds an item's chunks that do not yet have a current vector.
+ *
+ * Separate from chunking on purpose. Chunking is free, deterministic
+ * and always safe to re-run; embedding costs money and depends on a
+ * third party. Keeping them apart means a provider outage cannot stop
+ * a document from being chunked and lexically searchable, and a
+ * re-chunk does not re-bill every passage that did not change.
+ *
+ * Returns 0 when no provider is configured — deliberately not an
+ * error. Semantic search is an enhancement; a deployment without a
+ * Gemini key still gets a fully working lexical index.
+ */
+export async function embedItemChunks(
+  params: { itemId: string; orgId: string; userId: string | null },
+  deps: IndexDeps = {},
+): Promise<{ embedded: number; skipped: boolean }> {
+  const provider = deps.embeddings ?? resolveEmbeddingProvider()
+  if (!provider.isConfigured()) return { embedded: 0, skipped: true }
+
+  const pending = await repo.chunksNeedingEmbedding(params.itemId, params.orgId, params.userId, provider.model)
+  if (pending.length === 0) return { embedded: 0, skipped: false }
+
+  const vectors: repo.ChunkEmbeddingInput[] = []
+  for (const chunk of pending) {
+    try {
+      const v = await provider.embedDocument(chunk.text)
+      vectors.push({ chunkId: chunk.id, values: v.values, provider: v.provider, model: v.model })
+    } catch (err) {
+      if (err instanceof EmbeddingNotConfiguredError) return { embedded: 0, skipped: true }
+      // One passage failing must not discard the ones already
+      // embedded — they are paid for, and the next pass picks up
+      // whatever is still missing because the query is "chunks
+      // without a current vector", not "chunks of an unfinished item".
+      logger.warn("knowledge_embed_chunk_failed", {
+        itemId: params.itemId,
+        chunkId: chunk.id,
+        message: err instanceof Error ? err.message : String(err),
+      })
+      break
+    }
+  }
+
+  const written = await repo.upsertChunkEmbeddings(params.orgId, params.userId, vectors)
+  return { embedded: written, skipped: false }
+}
+
 /** The job entry point. Separated from indexItem so the job layer
  *  owns retry/attempt semantics and this owns the work. */
 export async function runIndexJob(itemId: string, orgId: string, userId: string | null, deps: IndexDeps = {}): Promise<IndexOutcome> {
   const started = Date.now()
   const outcome = await indexItem({ itemId, orgId, userId }, deps)
+
+  // Only worth embedding when there are chunks to embed. A failure
+  // here is logged and swallowed: the document is chunked and
+  // lexically retrievable either way, and burning the job's attempts
+  // on a provider outage would eventually mark it failed for a
+  // reason that has nothing to do with the document.
+  let embedded = 0
+  if (outcome.status === "indexed" || outcome.status === "unchanged") {
+    try {
+      embedded = (await embedItemChunks({ itemId, orgId, userId }, deps)).embedded
+    } catch (err) {
+      logger.warn("knowledge_embed_failed", { itemId, message: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
   logger.info("knowledge_index", {
     itemId,
     status: outcome.status,
     chunks: "chunks" in outcome ? outcome.chunks : 0,
+    embedded,
     ms: Date.now() - started,
   })
   return outcome

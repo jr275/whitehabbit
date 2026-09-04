@@ -839,3 +839,76 @@ export async function enqueueIndexJob(itemId: string, orgId: string, userId: str
     [itemId],
   )
 }
+
+/* ---- chunk embeddings (Phase D) ---------------------------------- */
+
+export interface ChunkEmbeddingInput {
+  chunkId: string
+  values: number[]
+  provider: string
+  model: string
+}
+
+/**
+ * Stores vectors for chunks that already exist.
+ *
+ * Ownership is not re-derived from the caller: org_id and created_by
+ * are copied from the CHUNK row inside the same statement, so an
+ * embedding can only ever land under the owner its chunk already has.
+ * A caller that passes a chunk id it does not own inserts nothing —
+ * the SELECT that feeds the INSERT finds no row.
+ *
+ * ON CONFLICT updates in place: re-embedding is expected (a model
+ * change, a re-index) and must not accumulate rows for one chunk,
+ * which the primary key on chunk_id would refuse anyway.
+ */
+export async function upsertChunkEmbeddings(
+  orgId: string,
+  userId: string | null,
+  embeddings: ChunkEmbeddingInput[],
+): Promise<number> {
+  if (embeddings.length === 0) return 0
+  const now = Date.now()
+  let written = 0
+  await withTransaction(async (client) => {
+    for (const e of embeddings) {
+      const res = await client.query(
+        `INSERT INTO knowledge_chunk_embeddings
+           (chunk_id, org_id, created_by, embedding, provider, model, dimensions, created_at, updated_at)
+         SELECT c.id, c.org_id, c.created_by, $2::vector, $3, $4, $5, $6, $6
+           FROM knowledge_chunks c
+          WHERE c.id = $1 AND c.org_id = $7 AND c.created_by IS NOT DISTINCT FROM $8
+         ON CONFLICT (chunk_id) DO UPDATE SET
+           embedding = EXCLUDED.embedding,
+           provider  = EXCLUDED.provider,
+           model     = EXCLUDED.model,
+           dimensions = EXCLUDED.dimensions,
+           updated_at = EXCLUDED.updated_at`,
+        [e.chunkId, `[${e.values.join(",")}]`, e.provider, e.model, e.values.length, now, orgId, userId],
+      )
+      written += res.rowCount ?? 0
+    }
+  })
+  return written
+}
+
+/** Chunks of an item that have no vector yet, or whose vector was
+ *  produced by a different model — the query that drives re-embedding
+ *  without rebuilding the whole library. */
+export async function chunksNeedingEmbedding(
+  itemId: string,
+  orgId: string,
+  userId: string | null,
+  model: string,
+): Promise<KnowledgeChunkRow[]> {
+  return query<KnowledgeChunkRow>(
+    `SELECT ${CHUNK_COLS} FROM knowledge_chunks c
+      WHERE c.item_id = $1 AND c.org_id = $2 AND c.created_by IS NOT DISTINCT FROM $3
+        AND NOT EXISTS (
+          SELECT 1 FROM knowledge_chunk_embeddings e
+           WHERE e.chunk_id = c.id AND e.model = $4
+        )
+      ORDER BY c.ordinal ASC`,
+    [itemId, orgId, userId, model],
+  )
+}

@@ -1,0 +1,137 @@
+import "server-only"
+
+/* ================================================================== *
+ * searchKnowledge — the one entry point.
+ *
+ * Retrieval logic lives here rather than inside an API route so that
+ * the route, the agent-facing service, and any future caller all get
+ * the same authorization, the same fusion and the same degradation
+ * behaviour. A route that assembled its own retrieval would be a
+ * second implementation of the security model.
+ * ================================================================== */
+
+import { EmbeddingNotConfiguredError, resolveEmbeddingProvider, type EmbeddingProvider } from "@/lib/ai/embeddings"
+import { logger } from "@/lib/observability/logger"
+import { reciprocalRankFusion } from "./fusion"
+import { lexicalSearch, semanticSearch } from "./retrievers"
+import type { RetrievedChunk, SearchInput, SearchResult } from "./types"
+
+export * from "./types"
+export { reciprocalRankFusion, RRF_K } from "./fusion"
+
+export const DEFAULT_LIMIT = 10
+const MAX_LIMIT = 50
+
+/** Each retriever fetches more than the caller asked for, because
+ *  fusion only has something to work with if the lists overlap — and
+ *  because pgvector filters ownership after the index picks
+ *  neighbours, so over-fetching is what buys back the recall that
+ *  post-filtering costs. */
+const OVERFETCH = 3
+
+export interface SearchDeps {
+  /** Test seam. Production resolves the configured provider. */
+  embeddings?: EmbeddingProvider
+}
+
+export async function searchKnowledge(input: SearchInput, deps: SearchDeps = {}): Promise<SearchResult> {
+  const startedAt = Date.now()
+  const mode = input.mode ?? "hybrid"
+  const limit = Math.min(Math.max(1, input.limit ?? DEFAULT_LIMIT), MAX_LIMIT)
+  const q = input.query.trim()
+
+  const empty = (): SearchResult => ({
+    chunks: [],
+    mode,
+    executed: { lexical: false, semantic: false },
+    timings: { totalMs: Date.now() - startedAt },
+    candidates: { lexical: 0, semantic: 0 },
+  })
+
+  // An empty query is a cheap, valid no-op — not an error and not the
+  // whole library. Matching the existing /api/knowledge/search
+  // behaviour, which returns nothing below two characters.
+  if (q.length < 2) return empty()
+
+  const fetchCount = limit * OVERFETCH
+  let lexical: RetrievedChunk[] = []
+  let semantic: RetrievedChunk[] = []
+  let lexicalMs: number | undefined
+  let semanticMs: number | undefined
+  let embedMs: number | undefined
+  let ranSemantic = false
+
+  const wantsLexical = mode === "lexical" || mode === "hybrid"
+  const wantsSemantic = mode === "semantic" || mode === "hybrid"
+
+  if (wantsLexical) {
+    const t = Date.now()
+    lexical = await lexicalSearch(q, input.scope, fetchCount, input.filters)
+    lexicalMs = Date.now() - t
+  }
+
+  if (wantsSemantic) {
+    const provider = deps.embeddings ?? resolveEmbeddingProvider()
+    if (provider.isConfigured()) {
+      try {
+        const t0 = Date.now()
+        const vector = await provider.embedQuery(q)
+        embedMs = Date.now() - t0
+        const t1 = Date.now()
+        semantic = await semanticSearch(vector.values, input.scope, fetchCount, input.filters)
+        semanticMs = Date.now() - t1
+        ranSemantic = true
+      } catch (err) {
+        // Semantic retrieval is an enhancement, not a precondition. A
+        // provider outage must degrade search to lexical rather than
+        // fail it — but `executed` reports what really ran, so a
+        // caller can tell the difference and a silently degraded
+        // system does not look healthy.
+        if (!(err instanceof EmbeddingNotConfiguredError)) {
+          logger.warn("knowledge_semantic_unavailable", {
+            message: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+    }
+  }
+
+  // One retriever: its own order is already the ranking, and running
+  // it through fusion would only relabel the scores.
+  if (!wantsSemantic || !ranSemantic || !wantsLexical) {
+    const single = wantsLexical ? lexical : semantic
+    return {
+      chunks: single.slice(0, limit),
+      mode,
+      executed: { lexical: wantsLexical, semantic: ranSemantic },
+      timings: { lexicalMs, semanticMs, embedMs, totalMs: Date.now() - startedAt },
+      candidates: { lexical: lexical.length, semantic: semantic.length },
+    }
+  }
+
+  const byId = new Map<string, RetrievedChunk>()
+  for (const c of [...lexical, ...semantic]) if (!byId.has(c.chunkId)) byId.set(c.chunkId, c)
+
+  const fused = reciprocalRankFusion(
+    lexical.map((c) => ({ id: c.chunkId })),
+    semantic.map((c) => ({ id: c.chunkId })),
+  )
+
+  const chunks = fused
+    .slice(0, limit)
+    .map((f) => {
+      const chunk = byId.get(f.id)!
+      // The fused score replaces the retriever-local one: a caller
+      // comparing a ts_rank against a cosine similarity would be
+      // comparing two different things that happen to be numbers.
+      return { ...chunk, score: f.score }
+    })
+
+  return {
+    chunks,
+    mode,
+    executed: { lexical: true, semantic: true },
+    timings: { lexicalMs, semanticMs, embedMs, totalMs: Date.now() - startedAt },
+    candidates: { lexical: lexical.length, semantic: semantic.length },
+  }
+}

@@ -64,6 +64,11 @@ const WORKFORCE_ONLY = [
  * this list is expected to shrink, not grow.
  */
 const SHARED_PLATFORM = [
+  // Embeddings are infrastructure, not a Knowledge feature: Workers
+  // will need the same abstraction. Knowledge may import it; lib/agent
+  // (Workforce's generation providers) stays off-limits, which is why
+  // this exists instead of a cross-boundary import.
+  "lib/ai",
   "lib/db",
   "lib/session",
   "lib/api-error",
