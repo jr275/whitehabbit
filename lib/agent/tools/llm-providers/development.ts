@@ -3,8 +3,8 @@ import "server-only"
 /* ================================================================== *
  * DEVELOPMENT PROVIDER — local testing without a real LLM credential.
  *
- * Only ever reachable when LLM_DEV_MODE=true (gated in llm.ts's
- * resolveProvider(), before any provider lookup happens) — never
+ * Only ever reachable when LLM_DEV_MODE=true (gated in llm.ts,
+ * before the shared resolver is even consulted) — never
  * selectable via LLM_PROVIDER, never a fallback when a real provider
  * fails or is unconfigured. It implements the exact same LlmProvider
  * contract as anthropic.ts/gemini.ts, so nothing downstream (the
@@ -17,8 +17,7 @@ import "server-only"
  * read, checked, or required.
  * ================================================================== */
 
-import type { ToolActionResult } from "@/lib/agent/types"
-import type { LlmCallInput, LlmCallOutput, LlmProvider } from "./types"
+import type { LlmCallInput, LlmProvider, LlmResult } from "./types"
 
 const PROVIDER_ID = "development"
 const MODEL_LABEL = "development-fixture"
@@ -138,11 +137,11 @@ function developmentFixtureFor(input: LlmCallInput): string {
   return developmentTrendsFixture()
 }
 
-async function call(input: LlmCallInput): Promise<ToolActionResult<LlmCallOutput>> {
+async function call(input: LlmCallInput): Promise<LlmResult> {
   const started = Date.now()
   return {
     ok: true,
-    data: {
+    output: {
       text: developmentFixtureFor(input),
       model: MODEL_LABEL,
       inputTokens: 0,
@@ -151,7 +150,6 @@ async function call(input: LlmCallInput): Promise<ToolActionResult<LlmCallOutput
       executionMode: "development",
     },
     durationMs: Date.now() - started,
-    costUsd: 0,
   }
 }
 

@@ -1,77 +1,85 @@
 import "server-only"
 
 /* ================================================================== *
- * LLM TOOL — provider dispatcher.
+ * LLM TOOL — Workforce's adapter over the shared provider layer.
  *
  * The external contract (isLlmConnected, callLlm, llmTool) is exactly
- * what it was when this only talked to Anthropic — nothing downstream
- * (trend-research.ts, runtime.ts) changed. What used to be a single
- * hardcoded implementation is now a lookup: LLM_PROVIDER selects one
- * LlmProvider from lib/agent/tools/llm-providers/, and this file only
- * ever delegates to that one provider. No provider is ever silently
- * substituted for another.
+ * what it has always been; nothing downstream changed. What changed is
+ * where the providers live: lib/ai/llm now owns the HTTP calls, because
+ * Knowledge needs them too and could not import lib/agent.
+ *
+ * TWO THINGS DELIBERATELY STAYED HERE, and neither is an oversight:
+ *
+ *  1. The dev-mode gate. isDevModeAllowed() is still checked BEFORE the
+ *     shared resolver sees LLM_PROVIDER, so "development" remains
+ *     unreachable by setting LLM_PROVIDER to it, is never a fallback
+ *     for a failed real provider, and stays hard-blocked in a real
+ *     production deployment whatever LLM_DEV_MODE says.
+ *  2. Cost. llmCostUsd lives in lib/agent and prices Workforce's
+ *     executions; putting it in the platform module would have pulled
+ *     Workforce into Knowledge's bundle through the shared import. The
+ *     shared layer returns real token counts and this file prices them.
  * ================================================================== */
 
-import { anthropicProvider } from "./llm-providers/anthropic"
-import { developmentProvider } from "./llm-providers/development"
-import { geminiProvider } from "./llm-providers/gemini"
-import type { LlmCallInput, LlmCallOutput, LlmProvider } from "./llm-providers/types"
+import { llmCostUsd } from "@/lib/agent/cost"
 import type { ToolActionResult, ToolDefinition } from "@/lib/agent/types"
+import {
+  activeLlmNotConfiguredReason,
+  activeLlmProviderName as sharedProviderName,
+  callLlm as sharedCallLlm,
+  isLlmConnected as sharedIsConnected,
+} from "@/lib/ai/llm"
 import { isDevModeAllowed } from "@/lib/runtime-mode"
+import { developmentProvider } from "./llm-providers/development"
+import type { LlmCallInput, LlmCallOutput } from "./llm-providers/types"
 
 export type { LlmCallInput, LlmCallOutput } from "./llm-providers/types"
 
-const PROVIDERS: Record<string, LlmProvider> = {
-  anthropic: anthropicProvider,
-  gemini: geminiProvider,
-}
-
-const DEFAULT_PROVIDER_ID = "anthropic"
-
-/** Resolves LLM_PROVIDER to a known provider, or reports exactly why it
- * can't — an unrecognized value is a misconfiguration, never a silent
- * fallback to a different provider's credentials.
- *
- * isDevModeAllowed() (lib/runtime-mode.ts) is checked BEFORE
- * LLM_PROVIDER is even looked up, so "development" is never reachable
- * by setting LLM_PROVIDER to it, is never a fallback for a
- * misconfigured or failed real provider, and — critically — is
- * hard-blocked whenever this is actually a production deployment,
- * regardless of what LLM_DEV_MODE is set to. */
-function resolveProvider(): { provider: LlmProvider } | { error: string } {
-  if (isDevModeAllowed()) return { provider: developmentProvider }
-  const raw = (process.env.LLM_PROVIDER || DEFAULT_PROVIDER_ID).trim().toLowerCase()
-  const provider = PROVIDERS[raw]
-  if (!provider) {
-    return { error: `LLM_PROVIDER="${raw}" is not supported. Supported providers: ${Object.keys(PROVIDERS).join(", ")}.` }
-  }
-  return { provider }
+/** The one provider the platform layer does not know about, injected
+ *  only when dev mode is genuinely allowed. Passing `provider` rather
+ *  than an override name is what keeps it unselectable via env. */
+function devOverride() {
+  return isDevModeAllowed() ? developmentProvider : undefined
 }
 
 export function isLlmConnected(): boolean {
-  const resolved = resolveProvider()
-  return "provider" in resolved && resolved.provider.isConfigured()
+  const dev = devOverride()
+  if (dev) return dev.isConfigured()
+  return sharedIsConnected()
 }
 
 export function activeLlmProviderName(): string {
-  const resolved = resolveProvider()
-  return "provider" in resolved ? resolved.provider.displayName : "LLM"
+  return devOverride()?.displayName ?? sharedProviderName()
 }
 
 function activeNotConfiguredReason(): string {
-  const resolved = resolveProvider()
-  return "error" in resolved ? resolved.error : resolved.provider.notConfiguredReason()
+  const dev = devOverride()
+  return dev ? dev.notConfiguredReason() : activeLlmNotConfiguredReason()
 }
 
 export async function callLlm(input: LlmCallInput): Promise<ToolActionResult<LlmCallOutput>> {
-  const resolved = resolveProvider()
-  if ("error" in resolved) {
-    return { ok: false, blocked: true, blockedReason: resolved.error, durationMs: 0 }
+  const result = await sharedCallLlm(input, { provider: devOverride() })
+
+  if (!result.ok) {
+    // not_configured is a deployment problem the operator must fix, so
+    // it stays `blocked` — the state the UI already renders with the
+    // reason attached. The other two are genuine call failures.
+    if (result.reason === "not_configured") {
+      return { ok: false, blocked: true, blockedReason: result.message, durationMs: result.durationMs }
+    }
+    return { ok: false, errorCode: result.reason, error: result.message, durationMs: result.durationMs }
   }
-  if (!resolved.provider.isConfigured()) {
-    return { ok: false, blocked: true, blockedReason: resolved.provider.notConfiguredReason(), durationMs: 0 }
-  }
-  return resolved.provider.call(input)
+
+  const { output } = result
+  // A development fixture cost nothing, and saying so is a fact rather
+  // than a missing rate. Every other provider is priced from real token
+  // counts, or reported as unavailable — never silently as $0.
+  const costUsd =
+    output.executionMode === "development"
+      ? 0
+      : (llmCostUsd(output.provider, output.inputTokens, output.outputTokens).costUsd ?? undefined)
+
+  return { ok: true, data: output, durationMs: result.durationMs, costUsd }
 }
 
 export const llmTool: ToolDefinition = {
