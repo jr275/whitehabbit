@@ -56,7 +56,10 @@ export interface KnowledgeItem {
 
   source: string // publication / site name, falling back to domain
   author?: string
-  /** Remote lead image URL (og:image), rendered with crossOrigin. */
+  /** Remote lead image URL (og:image), rendered as a plain no-referrer
+   *  <img>. Never with crossOrigin: nothing reads its pixels, and CORS
+   *  mode makes every host that omits Access-Control-Allow-Origin — the
+   *  majority — fail to load. */
   cover?: string
   /** Source site icon URL (favicon), shown as the small source glyph;
    *  falls back to the kind icon when absent or it fails to load. */

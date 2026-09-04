@@ -5,17 +5,24 @@ import Link from "next/link"
 import {
   AlertCircle,
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   ExternalLink,
   FileText,
   FileType2,
+  Headphones,
   Heart,
   Loader2,
+  Pause,
   Play,
+  Sparkles,
+  Square,
 } from "lucide-react"
 import type { KnowledgeDocument } from "@/lib/knowledge/types"
 import { KIND_META, durationLabel, savedAgo } from "@/lib/knowledge/config"
-import { patchItem } from "@/lib/knowledge/client"
+import { patchItem, summarizeItem } from "@/lib/knowledge/client"
+import { useReadAloud, type UseReadAloudResult } from "@/lib/knowledge/use-read-aloud"
 import { cn } from "@/lib/utils"
 
 /** Split the extracted plain text into readable paragraphs. The stored
@@ -59,6 +66,10 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
   const [favorite, setFavorite] = useState(doc.favorite)
   const [tab, setTab] = useState<"notebook" | "info">("info")
   const [progress, setProgress] = useState(0)
+  // Local override so a freshly-generated summary shows immediately —
+  // same pattern as `favorite` above, since `doc` itself is an
+  // immutable prop from the caller.
+  const [aiSummary, setAiSummary] = useState(doc.aiSummary)
 
   const processing = doc.state === "saved" || doc.state === "fetching" || doc.state === "extracting"
   const failed = doc.state === "failed"
@@ -78,6 +89,18 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
           : "unextracted"
 
   const showProgress = !processing && !failed && surface === "article" && hasBody
+
+  // AI Summary and Read Aloud are both offered only where there is
+  // real extracted body text to work from — the exact same condition
+  // as the progress line above. video/pdf/unextracted/failed/
+  // processing never reach either, matching "hide Listen" for
+  // video/PDF and "don't offer it" for unextracted/failed; AI Summary
+  // has nothing honest to summarize without real contentText either.
+  const showTextTools = showProgress
+
+  // Keyed on doc.id so navigating to a different item tears down any
+  // in-progress speech and starts fresh (see the hook).
+  const read = useReadAloud(doc.id, body)
 
   async function toggleFavorite() {
     const next = !favorite
@@ -182,13 +205,51 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
             <PdfBlock doc={doc} />
           ) : surface === "article" ? (
             hasBody ? (
-              <ArticleBody body={body} cover={doc.cover} title={doc.title} />
+              <>
+                {showTextTools ? <AiSummaryBlock docId={doc.id} summary={aiSummary} onSummary={setAiSummary} /> : null}
+                {showTextTools ? <ReadAloudControls read={read} /> : null}
+                <ArticleBody body={body} cover={doc.cover} title={doc.title} />
+              </>
             ) : (
               <ExcerptLede excerpt={doc.excerpt!} cover={doc.cover} title={doc.title} url={doc.url} />
             )
           ) : (
             <UnextractedBlock url={doc.url} />
           )}
+
+          {/* Mobile-only details — the Info aside is desktop-only, so on
+              small screens surface the same source metadata + topics here
+              rather than leaving them unreachable. */}
+          <div className="mt-12 border-t border-[var(--kn-edge)] pt-8 lg:hidden">
+            <a
+              href={doc.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mb-6 flex items-center justify-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25"
+            >
+              <ExternalLink className="size-4" /> Open original
+            </a>
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
+              <Meta label="Source" value={doc.source} />
+              {doc.author ? <Meta label="Author" value={doc.author} /> : null}
+              {doc.domain ? <Meta label="Origin" value={doc.domain} /> : null}
+              <Meta label="Type" value={KIND_META[doc.kind].label} />
+              {doc.wordCount ? <Meta label="Words" value={doc.wordCount.toLocaleString()} /> : null}
+              <Meta label="Saved" value={savedAgo(doc.savedAt)} />
+            </dl>
+            {doc.topics.length > 0 ? (
+              <div className="mt-4">
+                <dt className="text-[12px] font-medium text-muted-foreground">Topics</dt>
+                <dd className="mt-2 flex flex-wrap gap-1.5">
+                  {doc.topics.map((t) => (
+                    <span key={t} className="rounded-md bg-secondary/60 px-2 py-1 text-xs text-foreground/80">
+                      {t}
+                    </span>
+                  ))}
+                </dd>
+              </div>
+            ) : null}
+          </div>
         </article>
       </div>
 
@@ -297,6 +358,134 @@ function MetaRow({ doc }: { doc: KnowledgeDocument }) {
   )
 }
 
+/** The Reader's AI Summary block — an on-demand "AI Summary" pill that
+ *  calls POST /api/knowledge/:id/summarize, and the generated summary
+ *  once it exists. On-demand only: this never fires on its own, and
+ *  once a summary exists it is shown as plain settled content, never
+ *  regenerated by re-opening the item. Guest items (no server-side
+ *  row, no session) simply don't get the affordance. */
+function AiSummaryBlock({
+  docId,
+  summary,
+  onSummary,
+}: {
+  docId: string
+  summary: string | undefined
+  onSummary: (summary: string) => void
+}) {
+  const [state, setState] = useState<"idle" | "loading" | "error">("idle")
+
+  if (docId.startsWith("kn_guest_")) return null
+
+  async function summarize() {
+    setState("loading")
+    try {
+      const updated = await summarizeItem(docId)
+      if (updated.aiSummary) onSummary(updated.aiSummary)
+      setState("idle")
+    } catch {
+      setState("error")
+    }
+  }
+
+  if (summary) {
+    return (
+      <div className="mt-6 rounded-2xl border border-[var(--kn-edge)] bg-[var(--kn-paper)] px-5 py-4">
+        <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--kn-ai)]">
+          <Sparkles className="size-3.5" aria-hidden /> AI Summary
+        </p>
+        <p className="mt-2 text-[0.95rem] leading-relaxed text-foreground/85">{summary}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-6 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={summarize}
+        disabled={state === "loading"}
+        aria-label="Summarize this article with AI"
+        title="Summarize this article with AI"
+        className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {state === "loading" ? (
+          <Loader2 className="size-3.5 animate-spin" aria-hidden />
+        ) : (
+          <Sparkles className="size-3.5 text-[var(--kn-ai)]" aria-hidden />
+        )}
+        {state === "loading" ? "Summarizing…" : "AI Summary"}
+      </button>
+      {state === "error" ? (
+        <span role="status" className="text-[12.5px] text-destructive">
+          Couldn&apos;t generate a summary. Try again.
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
+/** The Reader's Listen toolbar — a single toggling button (Listen →
+ *  Pause/Resume) plus Previous/Next/Stop once reading has started.
+ *  Deliberately reads as an editorial tool (a pill button in the
+ *  Reader's own idiom), not a music player: no waveform, no scrubber,
+ *  no album-art chrome. */
+function ReadAloudControls({ read }: { read: UseReadAloudResult }) {
+  if (read.state === "unsupported") {
+    return (
+      <div className="mt-6 flex items-center gap-2 text-[12.5px] text-muted-foreground">
+        <Headphones className="size-3.5 text-muted-foreground/50" aria-hidden />
+        <span>{read.message}</span>
+      </div>
+    )
+  }
+
+  // Defensive only — the Reader never renders this component unless
+  // there is real extracted body text, so the controller's own
+  // "unavailable" (empty queue) is not reachable in practice.
+  if (read.state === "unavailable") return null
+
+  const isPlaying = read.state === "playing"
+  const isPaused = read.state === "paused"
+  const isActive = isPlaying || isPaused
+
+  return (
+    <div className="mt-6 flex flex-wrap items-center gap-1.5 border-b border-[var(--kn-edge)] pb-6">
+      <button
+        type="button"
+        onClick={() => (isPlaying ? read.pause() : isPaused ? read.resume() : read.play())}
+        aria-label={isPlaying ? "Pause reading" : isPaused ? "Resume reading" : "Listen to this article"}
+        aria-pressed={isPlaying}
+        title={isPlaying ? "Pause reading" : isPaused ? "Resume reading" : "Listen to this article"}
+        className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25"
+      >
+        {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+        {isPlaying ? "Pause" : isPaused ? "Resume" : "Listen"}
+      </button>
+
+      {isActive ? (
+        <>
+          <IconButton label="Previous paragraph" onClick={read.previous} disabled={!read.hasPrevious}>
+            <ChevronLeft className="size-4" />
+          </IconButton>
+          <IconButton label="Next paragraph" onClick={read.next} disabled={!read.hasNext}>
+            <ChevronRight className="size-4" />
+          </IconButton>
+          <IconButton label="Stop reading" onClick={read.stop}>
+            <Square className="size-3.5" />
+          </IconButton>
+        </>
+      ) : null}
+
+      {read.state === "error" ? (
+        <span role="status" className="ml-1 text-[12.5px] text-destructive">
+          {read.message}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
 /* ── Body surfaces ──────────────────────────────────────────────── */
 
 function ArticleBody({ body, cover, title }: { body: string[]; cover?: string; title: string }) {
@@ -308,19 +497,19 @@ function ArticleBody({ body, cover, title }: { body: string[]; cover?: string; t
         <img
           src={cover || "/placeholder.svg"}
           alt={`Lead image for ${title}`}
-          crossOrigin="anonymous"
+          referrerPolicy="no-referrer"
           onError={() => setCoverFailed(true)}
           className="mt-8 aspect-[16/9] w-full rounded-2xl object-cover"
         />
       ) : null}
 
-      <div className="mt-8 space-y-6 text-[1.15rem] leading-[1.75] text-foreground/85 [word-break:break-word]">
+      <div className="mt-8 space-y-6 text-[1.15rem] leading-[1.75] text-foreground/85 [word-break:break-word] selection:bg-[var(--kn-ai)]/25">
         {body.map((p, i) => (
           <p
             key={i}
             className={cn(
               i === 0 &&
-                "first-letter:float-left first-letter:mr-3 first-letter:mt-1 first-letter:font-serif first-letter:text-6xl first-letter:leading-[0.8] first-letter:text-foreground",
+                "first-letter:float-left first-letter:mr-3 first-letter:mt-1 first-letter:text-6xl first-letter:font-semibold first-letter:leading-[0.8] first-letter:text-[var(--kn-ai)]",
             )}
           >
             {p}
@@ -353,7 +542,7 @@ function ExcerptLede({
         <img
           src={cover || "/placeholder.svg"}
           alt={`Lead image for ${title}`}
-          crossOrigin="anonymous"
+          referrerPolicy="no-referrer"
           onError={() => setCoverFailed(true)}
           className="mt-8 aspect-[16/9] w-full rounded-2xl object-cover"
         />
@@ -407,7 +596,7 @@ function VideoBlock({ doc }: { doc: KnowledgeDocument }) {
             <img
               src={doc.cover || "/placeholder.svg"}
               alt=""
-              crossOrigin="anonymous"
+              referrerPolicy="no-referrer"
               onError={() => setCoverFailed(true)}
               className="absolute inset-0 h-full w-full object-cover"
             />
@@ -548,21 +737,29 @@ function IconButton({
   children,
   label,
   active,
+  disabled,
   onClick,
 }: {
   children: React.ReactNode
   label: string
   active?: boolean
+  disabled?: boolean
   onClick?: () => void
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-label={label}
+      title={label}
       className={cn(
         "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-        active ? "text-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+        disabled
+          ? "cursor-not-allowed text-muted-foreground/40"
+          : active
+            ? "text-foreground"
+            : "text-muted-foreground hover:bg-secondary hover:text-foreground",
       )}
     >
       {children}
