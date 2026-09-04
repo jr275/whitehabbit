@@ -260,6 +260,39 @@ export function KnowledgeCard({
           </>
         )}
 
+        {/* List rows: surface the same summary/excerpt + topics the grid
+            shows, so the list reads as an intentional, information-dense
+            experience rather than a compressed grid. Topics stay hidden on
+            the narrowest screens where the row has little room. */}
+        {ready && isList && (
+          <>
+            {item.aiSummary ? (
+              <p className="pointer-events-none line-clamp-2 text-pretty text-[0.82rem] leading-relaxed text-foreground/75">
+                {item.aiSummary}
+              </p>
+            ) : (
+              item.excerpt && (
+                <p className="pointer-events-none line-clamp-2 text-pretty text-[0.82rem] leading-relaxed text-muted-foreground">
+                  {item.excerpt}
+                </p>
+              )
+            )}
+
+            {item.topics.length > 0 && (
+              <div className="pointer-events-none hidden flex-wrap gap-1.5 sm:flex">
+                {item.topics.slice(0, 3).map((t) => (
+                  <span
+                    key={t}
+                    className="rounded-full bg-secondary px-2.5 py-0.5 text-[11px] text-secondary-foreground/80"
+                  >
+                    {t}
+                  </span>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
         {/* footer — meta + actions */}
         <div className="mt-auto flex items-center justify-between gap-2 pt-1.5">
           <span className="pointer-events-none min-w-0 truncate text-[11px] text-muted-foreground">
