@@ -22,15 +22,15 @@ export function AiAnswer({ response, activeCitation, onCite, onFollowUp }: AiAns
 
   return (
     <section aria-label="Answer" className="animate-in fade-in duration-500">
-      <h2 className="mb-4 text-[13px] font-medium uppercase tracking-[0.14em] text-muted-foreground">Answer</h2>
-
-      <div className="space-y-4 text-[1.02rem] leading-[1.75] text-foreground/90">
+      <div className="space-y-5 text-[1.075rem] leading-[1.8] text-foreground/90">
         {renderBlocks(answer, citations, activeCitation, onCite)}
       </div>
 
       {followUps && followUps.length > 0 ? (
-        <div className="mt-8">
-          <h3 className="mb-3 text-[13px] font-medium text-muted-foreground">Follow up</h3>
+        <div className="mt-8 border-t border-[var(--kn-edge)] pt-6">
+          <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Follow up
+          </h3>
           <div className="flex flex-col gap-2">
             {followUps.map((q) => (
               <button

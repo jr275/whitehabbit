@@ -1,34 +1,63 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { AlertCircle, ArrowRight, Clock, Plug, RotateCw, SearchX, Sparkles } from "lucide-react"
+import { AlertCircle, ArrowRight, ArrowUpRight, Clock, Plug, RotateCw, SearchX, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 /* ── Loading ────────────────────────────────────────────────────────
- * A restrained, two-phase status — no theatrical "AI is thinking". The
- * phases are honest UI copy describing what the request is waiting on,
- * not claims about backend internals. */
+ * The research process, made legible. Three honest phases describe what
+ * the request is doing — searching, reading, synthesizing — as a small
+ * progression, never fake answer text and never a paragraph skeleton that
+ * implies a length the answer may not have. It occupies the Answer stage,
+ * so the result structure holds steady as the answer arrives. */
+const LOADING_PHASES = ["Searching your knowledge", "Reading relevant sources", "Synthesizing the answer"]
+
 export function AiLoading() {
-  const phases = ["Searching your knowledge…", "Reading the most relevant sources…"]
   const [phase, setPhase] = useState(0)
 
   useEffect(() => {
-    const t = setTimeout(() => setPhase(1), 1400)
-    return () => clearTimeout(t)
+    // Advance through the phases; hold on the last until the answer lands.
+    const timers = [
+      setTimeout(() => setPhase(1), 1200),
+      setTimeout(() => setPhase(2), 2600),
+    ]
+    return () => timers.forEach(clearTimeout)
   }, [])
 
   return (
-    <div
-      className="flex items-center gap-2.5 py-2 text-sm text-muted-foreground animate-in fade-in duration-300"
-      aria-live="polite"
-      role="status"
-    >
-      <span className="relative flex size-2">
-        <span className="absolute inline-flex size-full animate-ping rounded-full bg-[var(--kn-ai)] opacity-60 motion-reduce:hidden" />
-        <span className="relative inline-flex size-2 rounded-full bg-[var(--kn-ai)]" />
-      </span>
-      {phases[phase]}
-    </div>
+    <ol className="flex flex-col gap-3.5 animate-in fade-in duration-300" aria-live="polite" role="status">
+      {LOADING_PHASES.map((label, i) => {
+        const state = i < phase ? "done" : i === phase ? "active" : "pending"
+        return (
+          <li key={label} className="flex items-center gap-3">
+            <span className="relative flex size-3 items-center justify-center">
+              {state === "active" ? (
+                <>
+                  <span className="absolute inline-flex size-3 animate-ping rounded-full bg-[var(--kn-ai)] opacity-60 motion-reduce:hidden" />
+                  <span className="relative inline-flex size-2 rounded-full bg-[var(--kn-ai)]" />
+                </>
+              ) : state === "done" ? (
+                <span className="inline-flex size-2 rounded-full bg-[var(--kn-ai)]/45" />
+              ) : (
+                <span className="inline-flex size-2 rounded-full border border-muted-foreground/30" />
+              )}
+            </span>
+            <span
+              className={cn(
+                "text-[15px] transition-colors",
+                state === "active"
+                  ? "font-medium text-foreground"
+                  : state === "done"
+                    ? "text-muted-foreground"
+                    : "text-muted-foreground/45",
+              )}
+            >
+              {label}
+            </span>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 
@@ -105,19 +134,19 @@ export function AiEmptyLibrary({ onSave }: { onSave: () => void }) {
       </span>
 
       <div className="max-w-md space-y-2">
-        <h2 className="text-pretty text-xl font-medium tracking-tight text-foreground">Your knowledge starts here.</h2>
-        <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
-          WhiteHabbit answers from what you’ve saved. Save an article, video or note first — then it becomes something
-          you can ask about.
+        <h2 className="text-pretty text-2xl font-medium tracking-tight text-foreground">Your knowledge starts here.</h2>
+        <p className="text-pretty text-[15px] leading-relaxed text-muted-foreground">
+          Save something you want to remember. WhiteHabbit will organize it, understand it, and make it searchable — so
+          you can ask about it later.
         </p>
       </div>
 
       <ol className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-        <OnboardingStep n="1" label="Save something" />
+        <OnboardingStep n="1" label="Save" />
         <StepArrow />
-        <OnboardingStep n="2" label="WhiteHabbit understands it" />
+        <OnboardingStep n="2" label="Understand" />
         <StepArrow />
-        <OnboardingStep n="3" label="Ask about it" />
+        <OnboardingStep n="3" label="Ask" />
       </ol>
 
       <button
@@ -161,57 +190,57 @@ export function AiSuggestions({
   onPick: (q: string) => void
 }) {
   return (
-    <div className="mt-8 flex flex-col gap-7">
-      {/* Examples — clearly suggestions. A leading spark marks them as
-          prompts to try; clicking only fills the composer. */}
-      <SuggestionGroup label="Try asking">
-        {examples.map((q) => (
-          <SuggestionRow key={q} q={q} icon="example" onPick={onPick} />
-        ))}
-      </SuggestionGroup>
-
-      {/* Recent — clearly the user's own history, same row language, a
-          leading clock instead of a spark. Never invented. */}
-      {recent.length > 0 ? (
-        <SuggestionGroup label="Recent">
-          {recent.map((q) => (
-            <SuggestionRow key={q} q={q} icon="recent" onPick={onPick} />
+    <div className="mt-10 flex flex-col gap-9">
+      {/* Examples — large editorial rows, not chat pills. Clicking one only
+          fills the composer; it never fabricates an executed query. */}
+      <div>
+        <p className="mb-1 text-[12px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/70">
+          Try asking
+        </p>
+        <ul className="flex flex-col">
+          {examples.map((q, i) => (
+            <li key={q}>
+              <button
+                type="button"
+                onClick={() => onPick(q)}
+                className={cn(
+                  "group flex w-full items-center justify-between gap-4 py-4 text-left transition-colors",
+                  i > 0 ? "border-t border-[var(--kn-edge)]" : "",
+                )}
+              >
+                <span className="text-pretty text-[15px] leading-snug text-foreground/80 transition-colors group-hover:text-foreground">
+                  {q}
+                </span>
+                <ArrowUpRight className="size-[18px] shrink-0 text-muted-foreground/35 transition-all group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-[var(--kn-ai)]" />
+              </button>
+            </li>
           ))}
-        </SuggestionGroup>
+        </ul>
+      </div>
+
+      {/* Recent — the user's own history, deliberately secondary and compact.
+          Never invented; sourced from the view's localStorage. */}
+      {recent.length > 0 ? (
+        <div>
+          <p className="mb-2 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/60">
+            <Clock className="size-3.5" /> Recent
+          </p>
+          <div className="flex flex-col">
+            {recent.map((q) => (
+              <button
+                key={q}
+                type="button"
+                onClick={() => onPick(q)}
+                className="group flex items-center gap-2.5 rounded-lg px-1 py-1.5 text-left text-[13.5px] text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <span className="min-w-0 flex-1 truncate">{q}</span>
+                <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-[var(--kn-ai)]" />
+              </button>
+            ))}
+          </div>
+        </div>
       ) : null}
     </div>
-  )
-}
-
-function SuggestionGroup({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <p className="mb-3 text-[12px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">{label}</p>
-      <div className="flex flex-col gap-1.5">{children}</div>
-    </div>
-  )
-}
-
-function SuggestionRow({
-  q,
-  icon,
-  onPick,
-}: {
-  q: string
-  icon: "example" | "recent"
-  onPick: (q: string) => void
-}) {
-  const Leading = icon === "recent" ? Clock : Sparkles
-  return (
-    <button
-      type="button"
-      onClick={() => onPick(q)}
-      className="group flex items-center gap-3 rounded-xl border border-[var(--kn-edge)] bg-card/50 px-4 py-2.5 text-left text-sm text-foreground/85 transition-colors hover:border-[var(--kn-ai)]/40 hover:bg-card hover:text-foreground"
-    >
-      <Leading className="size-3.5 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-[var(--kn-ai)]" />
-      <span className="min-w-0 flex-1 truncate text-pretty">{q}</span>
-      <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/40 transition-all group-hover:translate-x-0.5 group-hover:text-[var(--kn-ai)]" />
-    </button>
   )
 }
 

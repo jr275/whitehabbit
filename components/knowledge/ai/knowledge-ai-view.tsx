@@ -1,12 +1,14 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { Plus } from "lucide-react"
 import { askKnowledge, KnowledgeAiUnavailableError, type KnowledgeAIResponse } from "@/lib/knowledge/ai"
 import { fetchLibrary } from "@/lib/knowledge/client"
 import { openSaveDialog } from "@/lib/knowledge/config"
 import { AiComposer } from "./composer"
 import { AiAnswer } from "./answer"
 import { AiSources } from "./sources"
+import { ResearchThread, ResearchStage } from "./research-thread"
 import {
   AiEmptyLibrary,
   AiError,
@@ -26,9 +28,9 @@ const RECENT_MAX = 6
 /** Static example prompts — populate the composer only, never executed. */
 const EXAMPLES = [
   "What have I saved about AI agents?",
-  "What are the main ideas across my research on RAG?",
-  "Which sources disagree about this?",
-  "What should I revisit?",
+  "Which ideas appear repeatedly across my research?",
+  "What are the most important trends in my library?",
+  "Show me sources that disagree with each other.",
 ]
 
 function loadRecent(): string[] {
@@ -51,17 +53,22 @@ export function KnowledgeAiView() {
   const [activeCitation, setActiveCitation] = useState<string | null>(null)
   const [recent, setRecent] = useState<string[]>([])
   const [library, setLibrary] = useState<LibraryState>("checking")
+  const [libraryTotal, setLibraryTotal] = useState<number | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => setRecent(loadRecent()), [])
 
   // Lightweight, honest empty-library check using the existing list API —
-  // just the count, so we know whether the user has anything to ask about.
+  // the real total, so we know whether the user has anything to ask about
+  // and can scope the composer with a true count (never invented).
   useEffect(() => {
     const ac = new AbortController()
     fetchLibrary({ limit: 1 }, ac.signal)
-      .then((r) => setLibrary(r.total > 0 ? "has-items" : "empty"))
+      .then((r) => {
+        setLibrary(r.total > 0 ? "has-items" : "empty")
+        setLibraryTotal(r.total)
+      })
       .catch(() => setLibrary("has-items")) // never block the composer on a check failure
     return () => ac.abort()
   }, [])
@@ -88,6 +95,7 @@ export function KnowledgeAiView() {
       abortRef.current = ac
 
       setSubmitted(q)
+      setQuery("") // the composer clears, ready for the next question
       setResponse(null)
       setErrorMessage(undefined)
       setActiveCitation(null)
@@ -118,112 +126,145 @@ export function KnowledgeAiView() {
     [pushRecent],
   )
 
+  const reset = useCallback(() => {
+    abortRef.current?.abort()
+    setStatus("idle")
+    setQuery("")
+    setSubmitted("")
+    setResponse(null)
+    setErrorMessage(undefined)
+    setActiveCitation(null)
+  }, [])
+
   const pickSuggestion = useCallback((q: string) => setQuery(q), [])
 
   const idle = status === "idle"
 
-  // ── Empty idle + empty library → save-first state ─────────────────
+  // ── Empty idle + empty library → save-first onboarding ────────────
   if (idle && library === "empty") {
     return (
-      <Shell>
+      <HeroShell>
         <Hero />
-        <div className="mt-8">
+        <div className="mt-10">
           <AiEmptyLibrary onSave={openSaveDialog} />
         </div>
-      </Shell>
+      </HeroShell>
     )
   }
 
-  // ── Empty idle → centered research hero ───────────────────────────
+  // ── Empty idle → the research desk hero ───────────────────────────
   if (idle) {
     return (
-      <Shell>
+      <HeroShell>
         <Hero />
         <div className="mt-8">
-          <AiComposer value={query} onChange={setQuery} onSubmit={() => runQuery(query)} autoFocus size="hero" />
+          <AiComposer
+            value={query}
+            onChange={setQuery}
+            onSubmit={() => runQuery(query)}
+            autoFocus
+            size="hero"
+            scopeCount={libraryTotal}
+          />
         </div>
         <AiSuggestions examples={EXAMPLES} recent={recent} onPick={pickSuggestion} />
-      </Shell>
+      </HeroShell>
     )
   }
 
-  // ── Active states: compact composer on top, result below ──────────
+  // ── Active states: a connected research thread ────────────────────
   const showSources =
     (status === "answer" || status === "insufficient") && (response?.citations.length ?? 0) > 0
 
   return (
-    <Shell>
-      {/* Quiet section label — the app identity, deliberately understated
-          so it never competes with the user's question below. */}
-      <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
-        Ask your knowledge
-      </p>
-
-      <div className="mt-4">
-        <AiComposer
-          value={query}
-          onChange={setQuery}
-          onSubmit={() => runQuery(query)}
-          loading={status === "loading"}
-          size="compact"
-        />
+    <ResultShell>
+      {/* Top bar — quiet app identity on the left, a way back to a fresh
+          question on the right. Neither competes with the query below. */}
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/60">
+          Ask your knowledge
+        </p>
+        <button
+          type="button"
+          onClick={reset}
+          className="flex items-center gap-1.5 rounded-lg border border-[var(--kn-edge)] bg-card/50 px-2.5 py-1.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:border-[var(--kn-ai)]/40 hover:text-foreground"
+        >
+          <Plus className="size-3.5" /> New question
+        </button>
       </div>
 
-      {/* The submitted question is the focal point — the start of a
-          research thread, marked by a slim accent rule rather than a
-          chat bubble. */}
-      {submitted ? (
-        <h1 className="mt-8 text-balance border-l-2 border-[var(--kn-ai)]/60 pl-4 font-serif text-2xl font-medium leading-tight tracking-tight text-foreground sm:text-[1.75rem]">
-          {submitted}
-        </h1>
-      ) : null}
+      <AiComposer
+        value={query}
+        onChange={setQuery}
+        onSubmit={() => runQuery(query)}
+        loading={status === "loading"}
+        size="compact"
+        scopeCount={libraryTotal}
+      />
 
-      <div className="mt-6">
-        {status === "loading" ? <AiLoading /> : null}
-        {status === "answer" && response ? (
-          <AiAnswer
-            response={response}
-            activeCitation={activeCitation}
-            onCite={setActiveCitation}
-            onFollowUp={(q) => {
-              setQuery(q)
-              runQuery(q)
-            }}
-          />
-        ) : null}
-        {status === "insufficient" ? <AiInsufficient /> : null}
-        {status === "no-results" ? <AiNoResults /> : null}
-        {status === "unavailable" ? <AiUnavailable message={errorMessage} /> : null}
-        {status === "error" ? <AiError message={errorMessage} onRetry={() => runQuery(submitted)} /> : null}
+      <div className="mt-8">
+        <ResearchThread>
+          <ResearchStage label="Question">
+            <h1 className="text-balance font-serif text-2xl font-medium leading-tight tracking-tight text-foreground sm:text-[1.7rem]">
+              {submitted}
+            </h1>
+          </ResearchStage>
 
-        {showSources && response ? (
-          <AiSources
-            citations={response.citations}
-            activeCitation={activeCitation}
-            title={status === "insufficient" ? "Related sources" : "Sources"}
-            confidence={response.confidence}
-          />
-        ) : null}
+          <ResearchStage label="Answer" emphasis last={!showSources}>
+            {status === "loading" ? <AiLoading /> : null}
+            {status === "answer" && response ? (
+              <AiAnswer
+                response={response}
+                activeCitation={activeCitation}
+                onCite={setActiveCitation}
+                onFollowUp={(q) => {
+                  setQuery(q)
+                  runQuery(q)
+                }}
+              />
+            ) : null}
+            {status === "insufficient" ? <AiInsufficient /> : null}
+            {status === "no-results" ? <AiNoResults /> : null}
+            {status === "unavailable" ? <AiUnavailable message={errorMessage} /> : null}
+            {status === "error" ? <AiError message={errorMessage} onRetry={() => runQuery(submitted)} /> : null}
+          </ResearchStage>
+
+          {showSources && response ? (
+            <ResearchStage label="Sources" subtitle="Evidence from your knowledge" last>
+              <AiSources
+                citations={response.citations}
+                activeCitation={activeCitation}
+                confidence={response.confidence}
+              />
+            </ResearchStage>
+          ) : null}
+        </ResearchThread>
       </div>
-    </Shell>
+    </ResultShell>
   )
 }
 
-/** A comfortable, centered reading column — answers stay easy to read
- *  and sources sit as secondary content below. */
-function Shell({ children }: { children: React.ReactNode }) {
-  return <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6 sm:py-14 lg:py-16">{children}</div>
+/** Centered hero column — the idle research desk. */
+function HeroShell({ children }: { children: React.ReactNode }) {
+  return <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6 sm:py-16 lg:py-20">{children}</div>
+}
+
+/** A slightly wider column for results — a comfortable research reading
+ *  measure with room for the thread's left spine. */
+function ResultShell({ children }: { children: React.ReactNode }) {
+  return <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">{children}</div>
 }
 
 function Hero() {
   return (
     <header className="text-center">
-      <p className="text-sm font-medium text-primary">Ask your knowledge</p>
-      <h1 className="mt-3 text-balance font-serif text-3xl font-medium leading-[1.1] tracking-tight text-foreground sm:text-4xl">
-        What do you want to understand?
+      <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[var(--kn-ai)]">Ask your knowledge</p>
+      <h1 className="mt-4 text-balance font-serif text-[2rem] font-medium leading-[1.08] tracking-tight text-foreground sm:text-[2.6rem]">
+        Understand what you’ve saved.
       </h1>
-      <p className="mx-auto mt-3 max-w-md text-pretty text-[15px] leading-relaxed text-muted-foreground">
-        Search across everything you’ve saved and get answers grounded in your own knowledge.
+      <p className="mx-auto mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-muted-foreground sm:text-base">
+        Ask questions across your saved articles, notes and sources. WhiteHabbit finds the relevant evidence and
+        connects the answer back to where it came from.
       </p>
     </header>
   )
