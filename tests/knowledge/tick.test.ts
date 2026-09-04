@@ -261,7 +261,24 @@ describe("drainJobs — real claimAndRunJob against real Postgres", () => {
       claim: (opts) => claimAndRunJob({ ...opts, fetchDeps: { transport: fakeHtmlTransport(REAL_ARTICLE_HTML) } }),
       batchSize: 2,
     })
-    assert.equal(summary.claimed, 2, "both jobs in the batch were claimed and run, none skipped")
+    // Four, not two: a successful ingestion enqueues an index job for
+    // the item it just gave content to, and drainJobs keeps going
+    // until nothing is claimable — so one sweep now does both kinds
+    // of work. The property this test exists for is unchanged and
+    // asserted below per type: nothing in the batch was skipped.
+    assert.equal(summary.claimed, 4, "both ingest jobs ran, and both chained index jobs ran, none skipped")
+
+    const byType = (
+      await getTestPool().query<{ job_type: string; status: string; n: string }>(
+        `SELECT job_type, status, COUNT(*)::text AS n FROM knowledge_jobs
+          WHERE item_id = ANY($1) GROUP BY job_type, status`,
+        [[badItem.id, goodItem.id]],
+      )
+    ).rows
+    const ingest = byType.find((r) => r.job_type === "ingest")
+    const index = byType.find((r) => r.job_type === "index")
+    assert.equal(Number(ingest?.n), 2, "exactly one ingest job per item, no duplicates")
+    assert.equal(Number(index?.n), 2, "exactly one index job per item, no duplicates")
   })
 
   it("terminal failure and max_attempts are reached the same way through the tick path as through a direct claimAndRunJob call", async () => {
@@ -310,8 +327,22 @@ describe("drainJobs — real claimAndRunJob against real Postgres", () => {
       drainJobs({ claim: (opts) => claimAndRunJob({ ...opts, fetchDeps: { transport: fakeHtmlTransport(REAL_ARTICLE_HTML) } }), batchSize: 3 }),
     ])
 
-    assert.equal(summaryA.claimed + summaryB.claimed, 6, "together they claimed exactly the 6 available jobs, none lost, none double-claimed")
-    assert.equal(summaryA.succeeded + summaryB.succeeded, 6)
+    // 12, not 6: each of the 6 ingestions succeeds and chains an
+    // index job, which the same overlapping sweeps then claim. The
+    // fencing property under test is unchanged — and is now checked
+    // where it actually matters, on the job rows themselves: exactly
+    // one ingest and one index job per item, each run exactly once.
+    assert.equal(summaryA.claimed + summaryB.claimed, 12, "together they claimed every available job, none lost, none double-claimed")
+    assert.equal(summaryA.succeeded + summaryB.succeeded, 12)
+
+    const rows = (
+      await getTestPool().query<{ item_id: string; job_type: string; status: string }>(
+        `SELECT item_id, job_type, status FROM knowledge_jobs WHERE item_id = ANY($1)`,
+        [items.map((i) => i.id)],
+      )
+    ).rows
+    assert.equal(rows.length, 12, "one ingest + one index job per item, and no job created twice")
+    assert.ok(rows.every((r) => r.status === "done"), "every job ended done exactly once")
 
     for (const item of items) {
       const readyItem = await repo.getItem(item.id, alice.orgId, alice.userId)

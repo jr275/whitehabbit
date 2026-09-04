@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto"
 import { safeFetch, SafeFetchError, type SafeFetchOptions } from "@/lib/security/safe-fetch"
 import { assertSafeUrl, UnsafeUrlError } from "@/lib/security/ssrf-guard"
 import { logger } from "@/lib/observability/logger"
+import { runIndexJob } from "./indexing"
 import { isAiSummaryConfigured, summarizeText, type AiSummaryDeps } from "./ai-summary"
 import { extractFavicon, extractFromHtml } from "./extract"
 import * as repo from "./repo"
@@ -474,10 +475,39 @@ export async function claimAndRunJob(opts: ClaimAndRunOptions = {}, workerId: st
  * repo.ts's completeJob/failJob). */
 async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetchDeps: FetchDeps, workerId: string): Promise<void> {
   try {
-    await runIngestJob(job.item_id, job.org_id, job.created_by, fetchDeps)
+    // Dispatch on job_type. 0006 left this column here precisely so a
+    // second kind of work could share the queue's lease, backoff and
+    // reaping rather than grow a parallel one; this is the first
+    // caller to use it. An unknown type is treated as ingest, which
+    // is what every row written before indexing existed means.
+    if (job.job_type === "index") {
+      await runIndexJob(job.item_id, job.org_id, job.created_by)
+    } else {
+      await runIngestJob(job.item_id, job.org_id, job.created_by, fetchDeps)
+    }
     const landed = await repo.completeJob(job.id, workerId)
     if (landed) {
       summary.succeeded++
+      // Ingestion is what produces content_text, so the moment it
+      // lands is the moment there is something to chunk. Enqueued
+      // here rather than inside runIngestJob because
+      // uq_knowledge_jobs_item_open allows only ONE queued job per
+      // item: the ingest job has to leave the queue first, and
+      // completeJob above is exactly when it does.
+      //
+      // Best effort on purpose. A failure to enqueue must not undo a
+      // successful ingestion — the item is saved and readable either
+      // way, and an unindexed item is a gap in search, not lost data.
+      if (job.job_type !== "index") {
+        try {
+          await repo.enqueueIndexJob(job.item_id, job.org_id, job.created_by)
+        } catch (err) {
+          logger.warn("knowledge_index_enqueue_failed", {
+            itemId: job.item_id,
+            message: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
     } else {
       // Our lease was already reclaimed by someone else by the time we
       // finished — whoever holds the job now owns its outcome, not us.
@@ -497,7 +527,19 @@ async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetch
         // on the UI-facing row — knowledge_items.status stays exactly
         // what it always meant, only reached through a durable retry
         // loop instead of a single best-effort attempt.
-        await repo.setStatus(job.item_id, job.org_id, job.created_by, "failed", message)
+        //
+        // ONLY for ingestion. A failed INDEX job must not mark the
+        // item failed: the piece was fetched, extracted and is
+        // readable — it is simply missing from search. Saying
+        // "failed" would tell the user their save broke when it did
+        // not, and would offer them a Retry that re-fetches a page
+        // that was never the problem. The job row carries the real
+        // failure, and stays queryable.
+        if (job.job_type !== "index") {
+          await repo.setStatus(job.item_id, job.org_id, job.created_by, "failed", message)
+        } else {
+          logger.error("knowledge_index_job_exhausted", { jobId: job.id, itemId: job.item_id, attempts, message })
+        }
         summary.failed++
       } else {
         logger.warn("knowledge_job_stale_fail", { jobId: job.id, itemId: job.item_id, workerId, terminal: true })

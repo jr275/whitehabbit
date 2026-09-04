@@ -56,6 +56,9 @@ export interface KnowledgeRow {
   lang: string | null
   content_text: string | null
   summary: string | null
+  /** sha256 of content_text at the time it was chunked — see
+   *  lib/knowledge/indexing.ts. NULL until first indexed. */
+  content_hash: string | null
   favorite: boolean
   archived: boolean
   read_at: string | null
@@ -74,7 +77,7 @@ export interface ListOptions {
 
 const SELECT_COLS = `id, org_id, created_by, url, normalized_url, canonical_url, domain, status, kind, error, attempts,
   title, author, site_name, excerpt, image_url, favicon, published_at, word_count, reading_min, lang,
-  content_text, summary, favorite, archived, read_at, created_at, updated_at`
+  content_text, summary, content_hash, favorite, archived, read_at, created_at, updated_at`
 
 /** Insert a freshly-saved item in the `saved` state. Content columns
  * stay NULL until the ingestion pipeline fills them from real markup.
@@ -674,4 +677,165 @@ export async function failJob(
  * state without reaching into SQL directly. */
 export async function getJob(jobId: string): Promise<KnowledgeJobRow | null> {
   return queryOne<KnowledgeJobRow>(`SELECT ${JOB_COLS} FROM knowledge_jobs WHERE id = $1`, [jobId])
+}
+
+/* ================================================================== *
+ * CHUNKS — the retrieval substrate (Phase C).
+ *
+ * Every function here is owner-scoped the same way the item reads
+ * are: (org_id, created_by), taken from the session and never from a
+ * request body. Chunks mirror their parent's ownership onto their own
+ * rows (see 0007), so these filters sit on the row being touched
+ * rather than on a join that a later refactor could drop.
+ * ================================================================== */
+
+export interface KnowledgeChunkRow {
+  id: string
+  item_id: string
+  org_id: string
+  created_by: string | null
+  ordinal: number
+  text: string
+  char_start: number | null
+  char_end: number | null
+  token_estimate: number | null
+  content_hash: string
+  created_at: number
+  updated_at: number
+}
+
+const CHUNK_COLS = `id, item_id, org_id, created_by, ordinal, text, char_start, char_end,
+  token_estimate, content_hash, created_at, updated_at`
+
+/** A document's chunks in reading order. Served by
+ *  uq_knowledge_chunks_item_ordinal as a prefix scan. */
+export async function getChunks(itemId: string, orgId: string, userId: string | null): Promise<KnowledgeChunkRow[]> {
+  return query<KnowledgeChunkRow>(
+    `SELECT ${CHUNK_COLS} FROM knowledge_chunks
+      WHERE item_id = $1 AND org_id = $2 AND created_by IS NOT DISTINCT FROM $3
+      ORDER BY ordinal ASC`,
+    [itemId, orgId, userId],
+  )
+}
+
+export interface ChunkInput {
+  id: string
+  ordinal: number
+  text: string
+  charStart: number
+  charEnd: number
+  tokenEstimate: number
+  contentHash: string
+}
+
+export type ReplaceChunksOutcome =
+  | { status: "replaced"; chunks: number }
+  | { status: "unchanged"; chunks: number }
+  | { status: "not_found" }
+
+/**
+ * Writes a document's chunks and stamps the item's content_hash, all
+ * in one transaction.
+ *
+ * CONCURRENCY. Two indexers racing on the same item would otherwise
+ * both DELETE and both INSERT, and the loser would violate
+ * uq_knowledge_chunks_item_ordinal — a crash where the correct
+ * outcome is "the other one already did it". The first statement
+ * takes a row lock on the parent item, so the second waits, then
+ * re-reads the hash inside the lock and finds its work already done.
+ * That double-check is what makes this idempotent under concurrency
+ * rather than merely idempotent when run twice in sequence.
+ *
+ * The same lock is the ownership check: the SELECT filters on
+ * (org_id, created_by), so an item the caller does not own is simply
+ * not found and nothing is written — there is no path here that
+ * creates a chunk under an owner the caller could not already read.
+ */
+export async function replaceChunks(
+  itemId: string,
+  orgId: string,
+  userId: string | null,
+  contentHash: string,
+  chunks: ChunkInput[],
+): Promise<ReplaceChunksOutcome> {
+  const now = Date.now()
+  return withTransaction(async (client) => {
+    const locked = await client.query<{ content_hash: string | null }>(
+      `SELECT content_hash FROM knowledge_items
+        WHERE id = $1 AND org_id = $2 AND created_by IS NOT DISTINCT FROM $3
+        FOR UPDATE`,
+      [itemId, orgId, userId],
+    )
+    if (locked.rowCount === 0) return { status: "not_found" }
+
+    // Re-checked under the lock, not before it: between our caller's
+    // read and this transaction, another indexer may have finished
+    // the identical work. Rewriting identical rows would churn the
+    // table and, once embeddings exist, throw away vectors we would
+    // immediately pay to recompute.
+    if (locked.rows[0].content_hash === contentHash) {
+      const existing = await client.query<{ n: string }>(
+        `SELECT COUNT(*)::text AS n FROM knowledge_chunks WHERE item_id = $1`,
+        [itemId],
+      )
+      const n = Number(existing.rows[0].n)
+      if (n === chunks.length) return { status: "unchanged", chunks: n }
+      // Hash matches but the chunk rows do not: a previous run was
+      // interrupted between writing chunks and stamping the hash, or
+      // rows were removed underneath us. Fall through and rebuild.
+    }
+
+    // Stale chunks must not survive a content change. DELETE-then-
+    // INSERT rather than upsert-and-prune: the chunk count can shrink,
+    // and a leftover high-ordinal chunk from longer content would stay
+    // retrievable forever, citing text the document no longer has.
+    await client.query(`DELETE FROM knowledge_chunks WHERE item_id = $1`, [itemId])
+
+    for (const chunk of chunks) {
+      await client.query(
+        `INSERT INTO knowledge_chunks
+           (id, item_id, org_id, created_by, ordinal, text, char_start, char_end,
+            token_estimate, content_hash, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)`,
+        [
+          chunk.id, itemId, orgId, userId, chunk.ordinal, chunk.text,
+          chunk.charStart, chunk.charEnd, chunk.tokenEstimate, chunk.contentHash, now,
+        ],
+      )
+    }
+
+    await client.query(
+      `UPDATE knowledge_items SET content_hash = $1, updated_at = $2 WHERE id = $3`,
+      [contentHash, now, itemId],
+    )
+
+    return { status: "replaced", chunks: chunks.length }
+  })
+}
+
+/** Enqueues an indexing job for an item whose content is ready.
+ *
+ * Shares knowledge_jobs with ingestion rather than opening a second
+ * queue: the lease, backoff, attempt cap and stale-claim reaping are
+ * already solved there, and a parallel queue would need all of it
+ * again. See the job_type dispatch in service.ts.
+ *
+ * uq_knowledge_jobs_item_open permits only ONE queued job per item,
+ * whatever its type — so this is called after the ingest job leaves
+ * the queue, never alongside it. ON CONFLICT DO NOTHING makes a
+ * double-enqueue resolve to the existing job instead of an error. */
+export async function enqueueIndexJob(itemId: string, orgId: string, userId: string | null): Promise<KnowledgeJobRow | null> {
+  const now = Date.now()
+  const inserted = await queryOne<KnowledgeJobRow>(
+    `INSERT INTO knowledge_jobs (id, item_id, org_id, created_by, job_type, status, attempts, max_attempts, available_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 'index', 'queued', 0, $5, $6, $6, $6)
+     ON CONFLICT (item_id) WHERE status = 'queued' DO NOTHING
+     RETURNING ${JOB_COLS}`,
+    [`knj_${randomUUID()}`, itemId, orgId, userId, DEFAULT_MAX_ATTEMPTS, now],
+  )
+  if (inserted) return inserted
+  return queryOne<KnowledgeJobRow>(
+    `SELECT ${JOB_COLS} FROM knowledge_jobs WHERE item_id = $1 AND status = 'queued' ORDER BY created_at DESC LIMIT 1`,
+    [itemId],
+  )
 }
