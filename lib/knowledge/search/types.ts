@@ -27,6 +27,14 @@ export interface SearchInput {
   mode?: RetrievalMode
   limit?: number
   filters?: SearchFilters
+  /** Diversify the ranking with MMR before truncating to `limit`.
+   *
+   *  Off by default, and deliberately so. A results LIST showing five
+   *  strong passages from one strong article is a good results list.
+   *  A generated ANSWER built from those same five passages cites one
+   *  source and claims to have read a library — so the answering
+   *  pipeline turns this on and the browse UI leaves it off. */
+  rerank?: boolean
 }
 
 export interface SearchFilters {

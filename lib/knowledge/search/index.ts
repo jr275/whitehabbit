@@ -13,11 +13,18 @@ import "server-only"
 import { EmbeddingNotConfiguredError, resolveEmbeddingProvider, type EmbeddingProvider } from "@/lib/ai/embeddings"
 import { logger } from "@/lib/observability/logger"
 import { reciprocalRankFusion } from "./fusion"
+import { rerankKnowledge, type RerankingProvider } from "./rerank"
 import { lexicalSearch, semanticSearch } from "./retrievers"
 import type { RetrievedChunk, SearchInput, SearchResult } from "./types"
 
 export * from "./types"
 export { reciprocalRankFusion, RRF_K } from "./fusion"
+export { assembleKnowledgeContext, DEFAULT_CONTEXT_TOKENS } from "./context"
+export type { AssembledContext, AssembledPassage, AssembleContextInput } from "./context"
+export { buildExcerpt, citationMarker, extractCitationIds } from "./citations"
+export type { KnowledgeCitation } from "./citations"
+export { createMmrReranker, rerankKnowledge, resolveReranker } from "./rerank"
+export type { RerankingProvider, RerankOptions } from "./rerank"
 
 export const DEFAULT_LIMIT = 10
 const MAX_LIMIT = 50
@@ -32,6 +39,8 @@ const OVERFETCH = 3
 export interface SearchDeps {
   /** Test seam. Production resolves the configured provider. */
   embeddings?: EmbeddingProvider
+  /** Test seam, and the swap point for a cross-encoder later. */
+  reranker?: RerankingProvider
 }
 
 export async function searchKnowledge(input: SearchInput, deps: SearchDeps = {}): Promise<SearchResult> {
@@ -39,6 +48,11 @@ export async function searchKnowledge(input: SearchInput, deps: SearchDeps = {})
   const mode = input.mode ?? "hybrid"
   const limit = Math.min(Math.max(1, input.limit ?? DEFAULT_LIMIT), MAX_LIMIT)
   const q = input.query.trim()
+
+  const truncate = async (candidates: RetrievedChunk[], take: number) =>
+    input.rerank
+      ? rerankKnowledge(q, candidates, { topK: take }, deps.reranker)
+      : candidates.slice(0, take)
 
   const empty = (): SearchResult => ({
     chunks: [],
@@ -101,7 +115,7 @@ export async function searchKnowledge(input: SearchInput, deps: SearchDeps = {})
   if (!wantsSemantic || !ranSemantic || !wantsLexical) {
     const single = wantsLexical ? lexical : semantic
     return {
-      chunks: single.slice(0, limit),
+      chunks: await truncate(single, limit),
       mode,
       executed: { lexical: wantsLexical, semantic: ranSemantic },
       timings: { lexicalMs, semanticMs, embedMs, totalMs: Date.now() - startedAt },
@@ -117,15 +131,14 @@ export async function searchKnowledge(input: SearchInput, deps: SearchDeps = {})
     semantic.map((c) => ({ id: c.chunkId })),
   )
 
-  const chunks = fused
-    .slice(0, limit)
-    .map((f) => {
-      const chunk = byId.get(f.id)!
-      // The fused score replaces the retriever-local one: a caller
-      // comparing a ts_rank against a cosine similarity would be
-      // comparing two different things that happen to be numbers.
-      return { ...chunk, score: f.score }
-    })
+  // Rescore before truncating: a caller comparing a ts_rank against a
+  // cosine similarity would be comparing two different things that
+  // happen to be numbers. Reranking, when on, therefore sees fused
+  // scores for every candidate rather than the top `limit` only —
+  // which is the whole point, since the chunk it should promote is
+  // usually the one ranked just below the cut.
+  const fusedChunks = fused.map((f) => ({ ...byId.get(f.id)!, score: f.score }))
+  const chunks = await truncate(fusedChunks, limit)
 
   return {
     chunks,

@@ -237,6 +237,42 @@ describe("hybrid retrieval", () => {
     const scores = result.chunks.map((c) => c.score)
     assert.deepEqual(scores, [...scores].sort((a, b) => b - a), "results must be ordered by fused score")
   })
+
+  it("does not rerank unless asked — a results list is not an answer", async () => {
+    // Reranking trades precision for diversity, which is right for a
+    // generated answer and wrong for a browse UI. Defaulting it on
+    // would change /api/knowledge/search behaviour invisibly.
+    let called = 0
+    await searchKnowledge(
+      { query: "chunking failures", scope: alice, mode: "hybrid" },
+      {
+        embeddings: fakeProvider,
+        reranker: { id: "spy", async rerank(_q, chunks) { called += 1; return [...chunks] } },
+      },
+    )
+    assert.equal(called, 0)
+  })
+
+  it("reranks every fused candidate, not just the ones that made the cut", async () => {
+    // The chunk a reranker should promote is usually the one ranked
+    // just below the limit. Truncating first would hide it.
+    let seen = 0
+    const result = await searchKnowledge(
+      { query: "chunking failures", scope: alice, mode: "hybrid", limit: 2, rerank: true },
+      {
+        embeddings: fakeProvider,
+        reranker: {
+          id: "spy",
+          async rerank(_q, chunks, options) {
+            seen = chunks.length
+            return chunks.slice(0, options.topK)
+          },
+        },
+      },
+    )
+    assert.ok(seen > 2, `reranker saw only ${seen} candidates — it was handed a truncated list`)
+    assert.equal(result.chunks.length, 2)
+  })
 })
 
 describe("authorization", () => {
