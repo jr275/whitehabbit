@@ -10,7 +10,12 @@ import "server-only"
  * second implementation of the security model.
  * ================================================================== */
 
-import { EmbeddingNotConfiguredError, resolveEmbeddingProvider, type EmbeddingProvider } from "@/lib/ai/embeddings"
+import {
+  EmbeddingNotConfiguredError,
+  resolveEmbeddingProvider,
+  type EmbeddingProvider,
+  type SemanticSearchStatus,
+} from "@/lib/ai/embeddings"
 import { logger } from "@/lib/observability/logger"
 import { reciprocalRankFusion } from "./fusion"
 import { rerankKnowledge, type RerankingProvider } from "./rerank"
@@ -58,6 +63,7 @@ export async function searchKnowledge(input: SearchInput, deps: SearchDeps = {})
     chunks: [],
     mode,
     executed: { lexical: false, semantic: false },
+    semanticSearch: { enabled: false, reason: "not_requested" },
     timings: { totalMs: Date.now() - startedAt },
     candidates: { lexical: 0, semantic: 0 },
   })
@@ -74,6 +80,9 @@ export async function searchKnowledge(input: SearchInput, deps: SearchDeps = {})
   let semanticMs: number | undefined
   let embedMs: number | undefined
   let ranSemantic = false
+  // Defaults to "the caller did not ask for it", which is the honest
+  // answer for mode: "lexical" and is overwritten below otherwise.
+  let semanticStatus: SemanticSearchStatus = { enabled: false, reason: "not_requested" }
 
   const wantsLexical = mode === "lexical" || mode === "hybrid"
   const wantsSemantic = mode === "semantic" || mode === "hybrid"
@@ -86,7 +95,11 @@ export async function searchKnowledge(input: SearchInput, deps: SearchDeps = {})
 
   if (wantsSemantic) {
     const provider = deps.embeddings ?? resolveEmbeddingProvider()
-    if (provider.isConfigured()) {
+    if (!provider.isConfigured()) {
+      // A deployment task, not an incident. Distinguishing the two is
+      // the whole point of reporting a reason rather than a boolean.
+      semanticStatus = { enabled: false, reason: "provider_not_configured" }
+    } else {
       try {
         const t0 = Date.now()
         const vector = await provider.embedQuery(q)
@@ -95,13 +108,20 @@ export async function searchKnowledge(input: SearchInput, deps: SearchDeps = {})
         semantic = await semanticSearch(vector.values, input.scope, fetchCount, input.filters)
         semanticMs = Date.now() - t1
         ranSemantic = true
+        semanticStatus = { enabled: true }
       } catch (err) {
         // Semantic retrieval is an enhancement, not a precondition. A
         // provider outage must degrade search to lexical rather than
         // fail it — but `executed` reports what really ran, so a
         // caller can tell the difference and a silently degraded
         // system does not look healthy.
+        semanticStatus = {
+          enabled: false,
+          reason: err instanceof EmbeddingNotConfiguredError ? "provider_not_configured" : "provider_error",
+        }
         if (!(err instanceof EmbeddingNotConfiguredError)) {
+          // The detail stays here. It can carry a provider message,
+          // and the status above travels to the browser.
           logger.warn("knowledge_semantic_unavailable", {
             message: err instanceof Error ? err.message : String(err),
           })
@@ -118,6 +138,7 @@ export async function searchKnowledge(input: SearchInput, deps: SearchDeps = {})
       chunks: await truncate(single, limit),
       mode,
       executed: { lexical: wantsLexical, semantic: ranSemantic },
+      semanticSearch: semanticStatus,
       timings: { lexicalMs, semanticMs, embedMs, totalMs: Date.now() - startedAt },
       candidates: { lexical: lexical.length, semantic: semantic.length },
     }
@@ -153,6 +174,7 @@ export async function searchKnowledge(input: SearchInput, deps: SearchDeps = {})
     chunks,
     mode,
     executed: { lexical: true, semantic: true },
+    semanticSearch: semanticStatus,
     timings: { lexicalMs, semanticMs, embedMs, totalMs: Date.now() - startedAt },
     candidates: { lexical: lexical.length, semantic: semantic.length },
   }

@@ -43,11 +43,11 @@ export async function GET(req: Request) {
 
     // S5: the library is private per user — never the whole org's.
     const { rows, total } = await repo.listItems(organizationId, userId, { limit, offset, filter, kind })
-    // Fetch tags per row in parallel — small N (page size), each a
-    // single indexed query.
-    const items = await Promise.all(
-      rows.map(async (row) => rowToItem(row, await repo.getTags(row.id, organizationId, userId))),
-    )
+    // One query for the whole page's tags. Per-row lookups cost a
+    // round-trip each, and on a serverless Postgres that is the
+    // dominant term for a page this size.
+    const tags = await repo.getTagsForItems(rows.map((r) => r.id), organizationId, userId)
+    const items = rows.map((row) => rowToItem(row, tags.get(row.id) ?? []))
 
     const nextOffset = offset + rows.length
     return NextResponse.json({

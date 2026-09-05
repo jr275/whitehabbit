@@ -58,7 +58,15 @@ export const EMBEDDING_DIMENSIONS = 768
 
 /* ---- Gemini ------------------------------------------------------ */
 
-const GEMINI_BASE = (process.env.GEMINI_BASE_URL_PUBLIC || "https://generativelanguage.googleapis.com").replace(/\/$/, "")
+/** Read at call time, not at module load. A module-level
+ *  `process.env` read is a build-time constant in Next.js: it gets
+ *  inlined into the bundle, so a deployment could not point this at a
+ *  proxy without a rebuild, while the key and model beside it WOULD
+ *  change — the inconsistency is the trap. Matches lib/ai/llm/
+ *  gemini.ts's apiBase(). */
+function geminiBase(): string {
+  return (process.env.GEMINI_BASE_URL_PUBLIC || "https://generativelanguage.googleapis.com").replace(/\/$/, "")
+}
 
 /** Deliberately no default, matching lib/agent/tools/llm-providers/
  *  gemini.ts's existing convention in this repository: no model id
@@ -92,7 +100,7 @@ export function createGeminiEmbeddingProvider(fetchImpl: typeof fetch = fetch): 
 
     let res: Response
     try {
-      res = await fetchImpl(`${GEMINI_BASE}/v1beta/models/${encodeURIComponent(modelId)}:embedContent`, {
+      res = await fetchImpl(`${geminiBase()}/v1beta/models/${encodeURIComponent(modelId)}:embedContent`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-goog-api-key": key },
         body: JSON.stringify({
@@ -147,4 +155,30 @@ export function createGeminiEmbeddingProvider(fetchImpl: typeof fetch = fetch): 
  *  Knowledge's business logic. */
 export function resolveEmbeddingProvider(): EmbeddingProvider {
   return createGeminiEmbeddingProvider()
+}
+
+/* ---- Diagnostics ------------------------------------------------- *
+ * Semantic search failing open to lexical is the right behaviour and
+ * the dangerous one: a degraded system answers, so it looks healthy.
+ * These types exist so "is semantic search actually on?" is a question
+ * with an answer, at every layer, without anyone reading env vars or
+ * inferring it from an empty result set.
+ * ------------------------------------------------------------------ */
+
+/** not_requested — the caller asked for lexical only; nothing is wrong
+ *  provider_not_configured — no GEMINI_API_KEY / GEMINI_EMBEDDING_MODEL
+ *  provider_error — configured, but the call failed (detail is logged
+ *                   server-side; it never travels in this value) */
+export type SemanticDisabledReason = "not_requested" | "provider_not_configured" | "provider_error"
+
+export type SemanticSearchStatus =
+  | { enabled: true }
+  | { enabled: false; reason: SemanticDisabledReason }
+
+/** Is semantic search available right now? Answerable without running
+ *  a search, which is what makes it usable as a health check. Reports
+ *  configuration only — a configured provider can still fail at call
+ *  time, and that is reported per-search. */
+export function describeSemanticSearch(provider: EmbeddingProvider = resolveEmbeddingProvider()): SemanticSearchStatus {
+  return provider.isConfigured() ? { enabled: true } : { enabled: false, reason: "provider_not_configured" }
 }

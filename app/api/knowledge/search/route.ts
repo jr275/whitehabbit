@@ -28,7 +28,9 @@ export async function GET(req: Request) {
     // S5: search never surfaces another user's content, in the same
     // org or not.
     const rows = await repo.searchItems(organizationId, userId, q, MAX_RESULTS)
-    const items = await Promise.all(rows.map(async (row) => rowToItem(row, await repo.getTags(row.id, organizationId, userId))))
+    // One query for every result's tags — see getTagsForItems.
+    const tags = await repo.getTagsForItems(rows.map((r) => r.id), organizationId, userId)
+    const items = rows.map((row) => rowToItem(row, tags.get(row.id) ?? []))
     return NextResponse.json({ items, query: q })
   })
 }

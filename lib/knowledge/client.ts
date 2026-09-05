@@ -8,6 +8,7 @@
  * real Error messages so the UI can show honest failure states.
  * ================================================================== */
 
+import { MalformedAnswerError, parseKnowledgeAnswer, type KnowledgeAnswer } from "./ai"
 import type { KnowledgeDocument, KnowledgeItem, KnowledgeListResult, PrimaryFilter } from "./types"
 import {
   guestDelete,
@@ -20,12 +21,16 @@ import {
 } from "./guest-store"
 
 export class KnowledgeApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
+  /** The real HTTP status, so a caller can tell a rate limit from an
+   *  outage from a bad request. Assigned in the body rather than as a
+   *  parameter property because node --experimental-strip-types (this
+   *  repo's test runner) cannot parse the latter. */
+  readonly status: number
+
+  constructor(message: string, status: number) {
     super(message)
     this.name = "KnowledgeApiError"
+    this.status = status
   }
 }
 
@@ -202,6 +207,86 @@ export async function retryItem(id: string): Promise<KnowledgeItem> {
     }
     throw err
   }
+}
+
+/** Why the ask failed, resolved from the real HTTP status so the UI
+ *  can say the true thing. A rate limit shown as "something went
+ *  wrong" trains people to retry immediately, which is precisely what
+ *  the limit is there to stop. */
+export type AskFailureKind =
+  | "unauthorized" // 401 — no session
+  | "invalid_request" // 400 — the server rejected the question
+  | "rate_limited" // 429
+  | "provider_unavailable" // 503 — no model credential configured
+  | "provider_error" // 502 — the model call failed
+  | "malformed_response" // the body did not match the contract
+  | "network" // the request never completed
+  | "unknown" // 500 and anything unclassified
+
+export interface AskFailure {
+  kind: AskFailureKind
+  message: string
+  /** True when trying the same question again could plausibly work. */
+  retryable: boolean
+}
+
+/** Exported so the mapping can be tested: showing a rate limit as
+ *  "something went wrong" trains people to retry immediately, which is
+ *  exactly what the limit exists to stop. */
+export function classifyFailure(err: unknown): AskFailure {
+  if (err instanceof MalformedAnswerError) {
+    return { kind: "malformed_response", message: err.message, retryable: true }
+  }
+  if (err instanceof KnowledgeApiError) {
+    switch (err.status) {
+      case 400:
+        return { kind: "invalid_request", message: err.message, retryable: false }
+      case 401:
+        return { kind: "unauthorized", message: "Sign in to ask your library.", retryable: false }
+      case 429:
+        return { kind: "rate_limited", message: err.message, retryable: true }
+      case 502:
+        return { kind: "provider_error", message: err.message, retryable: true }
+      case 503:
+        return { kind: "provider_unavailable", message: err.message, retryable: false }
+      default:
+        return { kind: "unknown", message: err.message, retryable: true }
+    }
+  }
+  if (err instanceof TypeError) {
+    return { kind: "network", message: "Couldn't reach the server. Check your connection.", retryable: true }
+  }
+  return { kind: "unknown", message: "Something went wrong. Try again.", retryable: true }
+}
+
+export interface AskParams {
+  /** Restrict the search to specific saved items. Narrows only — the
+   *  server applies org and user scope beneath every filter, so this
+   *  can never reach something the caller does not own. */
+  itemIds?: string[]
+  includeArchived?: boolean
+}
+
+/** Ask the user's own library a question.
+ *
+ * NO GUEST FALLBACK, unlike almost everything else in this file. A
+ * guest library lives in this browser and has no chunks, no
+ * embeddings and no model credential; there is nothing to answer
+ * from. A 401 here is a real state the UI must show — falling back
+ * would mean inventing an answer, which is the one thing this feature
+ * must never do. */
+export async function askLibrary(question: string, params: AskParams = {}, signal?: AbortSignal): Promise<KnowledgeAnswer> {
+  const res = await fetch("/api/knowledge/ai", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ question, ...params }),
+    signal,
+  })
+  // parse() raises KnowledgeApiError with the real status, which is
+  // what lets the UI tell a rate limit from an outage from a bad
+  // request instead of showing one generic failure for all three.
+  const body = await parse<unknown>(res)
+  return parseKnowledgeAnswer(body)
 }
 
 /** An item is still "in flight" while the pipeline runs — the signal

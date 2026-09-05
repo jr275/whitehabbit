@@ -7,6 +7,10 @@
  * whether they came from a GIN index, a vector index, or both.
  * ================================================================== */
 
+import type { SemanticSearchStatus } from "@/lib/ai/embeddings"
+
+export type { SemanticDisabledReason, SemanticSearchStatus } from "@/lib/ai/embeddings"
+
 /** lexical  — exact word matching, no stemming (see migration 0009)
  *  semantic — nearest neighbours in embedding space
  *  hybrid   — both, fused. The default: each covers the other's
@@ -86,6 +90,13 @@ export interface SearchResult {
    *  to tell — a result set that looks the same but was produced a
    *  different way is how a broken provider goes unnoticed. */
   executed: { lexical: boolean; semantic: boolean }
+  /** WHY semantic did or did not run. `executed.semantic` says
+   *  whether it ran; this says why not, which is the difference
+   *  between "this deployment has no embedding credential" and "the
+   *  provider is down right now" — one is a configuration task and
+   *  the other is an incident. Carries no provider detail: the
+   *  message is logged server-side and never travels here. */
+  semanticSearch: SemanticSearchStatus
   timings: { lexicalMs?: number; semanticMs?: number; embedMs?: number; totalMs: number }
   candidates: { lexical: number; semantic: number }
 }

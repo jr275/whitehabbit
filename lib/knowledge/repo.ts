@@ -296,6 +296,41 @@ export async function saveExtraction(id: string, orgId: string, userId: string |
  * that fact is enforced for every tag read (S5: tags are a lateral path
  * to another user's item and must be closed the same as the item
  * itself). */
+/**
+ * Tags for many items in ONE query.
+ *
+ * getTags below answers for a single item, which is right when a
+ * route has one item and wrong when it has a page of them: rendering
+ * a 24-item library issued 24 extra round-trips (measured), and on a
+ * serverless Postgres the round-trip, not the query, is the cost.
+ *
+ * The scope predicate is character-for-character the same as
+ * getTags's — this is a batching change, not a security change, and
+ * an item outside the caller's scope contributes no tags here for
+ * exactly the same reason it contributes none there.
+ *
+ * Every requested id gets an entry, so a caller never has to
+ * distinguish "no tags" from "not in the map".
+ */
+export async function getTagsForItems(
+  ids: string[],
+  orgId: string,
+  userId: string | null,
+): Promise<Map<string, string[]>> {
+  const byItem = new Map<string, string[]>(ids.map((id) => [id, []]))
+  if (ids.length === 0) return byItem
+
+  const rows = await query<{ item_id: string; tag: string }>(
+    `SELECT t.item_id, t.tag FROM knowledge_item_tags t
+     JOIN knowledge_items i ON i.id = t.item_id
+     WHERE t.item_id = ANY($1) AND t.org_id = $2 AND i.created_by IS NOT DISTINCT FROM $3
+     ORDER BY t.item_id, t.tag`,
+    [ids, orgId, userId],
+  )
+  for (const row of rows) byItem.get(row.item_id)?.push(row.tag)
+  return byItem
+}
+
 export async function getTags(id: string, orgId: string, userId: string | null): Promise<string[]> {
   const rows = await query<{ tag: string }>(
     `SELECT t.tag FROM knowledge_item_tags t
@@ -824,7 +859,21 @@ export async function replaceChunks(
  * whatever its type — so this is called after the ingest job leaves
  * the queue, never alongside it. ON CONFLICT DO NOTHING makes a
  * double-enqueue resolve to the existing job instead of an error. */
-export async function enqueueIndexJob(itemId: string, orgId: string, userId: string | null): Promise<KnowledgeJobRow | null> {
+/** `created` distinguishes an INSERT from a row that was already
+ *  queued. Both return a job, and from the row alone they are
+ *  indistinguishable — a freshly re-observed queued job also has
+ *  attempts 0 — so a caller that needs to report how much work it
+ *  actually started has to be told here rather than guess. */
+export interface EnqueuedJob {
+  job: KnowledgeJobRow | null
+  created: boolean
+}
+
+export async function enqueueIndexJobDetailed(
+  itemId: string,
+  orgId: string,
+  userId: string | null,
+): Promise<EnqueuedJob> {
   const now = Date.now()
   const inserted = await queryOne<KnowledgeJobRow>(
     `INSERT INTO knowledge_jobs (id, item_id, org_id, created_by, job_type, status, attempts, max_attempts, available_at, created_at, updated_at)
@@ -833,11 +882,16 @@ export async function enqueueIndexJob(itemId: string, orgId: string, userId: str
      RETURNING ${JOB_COLS}`,
     [`knj_${randomUUID()}`, itemId, orgId, userId, DEFAULT_MAX_ATTEMPTS, now],
   )
-  if (inserted) return inserted
-  return queryOne<KnowledgeJobRow>(
+  if (inserted) return { job: inserted, created: true }
+  const existing = await queryOne<KnowledgeJobRow>(
     `SELECT ${JOB_COLS} FROM knowledge_jobs WHERE item_id = $1 AND status = 'queued' ORDER BY created_at DESC LIMIT 1`,
     [itemId],
   )
+  return { job: existing, created: false }
+}
+
+export async function enqueueIndexJob(itemId: string, orgId: string, userId: string | null): Promise<KnowledgeJobRow | null> {
+  return (await enqueueIndexJobDetailed(itemId, orgId, userId)).job
 }
 
 /* ---- chunk embeddings (Phase D) ---------------------------------- */

@@ -32,11 +32,10 @@ import { logger } from "@/lib/observability/logger"
 import { assembleKnowledgeContext, DEFAULT_CONTEXT_TOKENS } from "./search/context"
 import { extractCitationIds, type KnowledgeCitation } from "./search/citations"
 import { searchKnowledge, type SearchDeps } from "./search"
+import { MAX_QUESTION_CHARS, type KnowledgeAnswer } from "./ai"
 import type { AccessScope, RetrievalMode, RetrievedChunk, SearchFilters, SearchResult } from "./search/types"
 
-/** Long enough for a real question, short enough that the prompt cost
- *  of one request is bounded. */
-export const MAX_QUESTION_CHARS = 1_000
+export { MAX_QUESTION_CHARS } from "./ai"
 
 const RETRIEVAL_LIMIT = 12
 const MAX_ANSWER_TOKENS = 1_200
@@ -103,37 +102,15 @@ const SYSTEM_PROMPT = [
   "only if the user's question is about it.",
 ].join("\n")
 
-export type AnswerStatus = "answered" | "no_evidence"
-
-export interface AnsweredCitation extends KnowledgeCitation {
-  /** Whether the generated answer actually referenced this marker.
-   *  A source consulted but not cited is not evidence for anything. */
-  used: boolean
-}
-
-export interface KnowledgeAnswer {
-  status: AnswerStatus
-  question: string
-  answer: string
-  citations: AnsweredCitation[]
-  /** Markers the model produced that resolve to no source. Empty is
-   *  the expected case; anything else is a fabricated citation and the
-   *  caller must not render it as a link. */
-  unresolvedCitationIds: string[]
-  retrieval: {
-    mode: RetrievalMode
-    executed: SearchResult["executed"]
-    candidates: SearchResult["candidates"]
-    chunksRetrieved: number
-    chunksRejected: number
-    chunksUsed: number
-    droppedChunks: number
-    contextTokens: number
-  }
-  /** Absent when no model call happened — the refusal path. */
-  usage?: { provider: string; model: string; inputTokens: number; outputTokens: number }
-  timings: { retrievalMs: number; generationMs: number; totalMs: number }
-}
+/* The response shape lives in ./ai.ts, which the browser also compiles
+ * against — see that file's header. Redeclaring it here is how the two
+ * ends drift. */
+export type {
+  AnswerStatus,
+  AnsweredCitation,
+  AnswerRetrievalReport,
+  KnowledgeAnswer,
+} from "./ai"
 
 /** A real provider call failed. The message is always the same safe,
  *  generic one; the detail is logged server-side. Local to
@@ -206,6 +183,7 @@ export async function answerFromKnowledge(input: AnswerInput, deps: AnswerDeps =
   const retrieval: KnowledgeAnswer["retrieval"] = {
     mode: search.mode,
     executed: search.executed,
+    semanticSearch: search.semanticSearch,
     candidates: search.candidates,
     chunksRetrieved: search.chunks.length,
     /** Retrieved but rejected as evidence. A large number here against
