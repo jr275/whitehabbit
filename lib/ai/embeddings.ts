@@ -88,8 +88,6 @@ interface GeminiEmbedResponse {
 type GeminiTask = "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY"
 
 export function createGeminiEmbeddingProvider(fetchImpl: typeof fetch = fetch): EmbeddingProvider {
-  const model = geminiEmbeddingModel()
-
   async function embed(input: string, taskType: GeminiTask): Promise<EmbeddingVector> {
     const key = process.env.GEMINI_API_KEY
     const modelId = geminiEmbeddingModel()
@@ -142,7 +140,24 @@ export function createGeminiEmbeddingProvider(fetchImpl: typeof fetch = fetch): 
 
   return {
     id: "gemini",
-    model: model ?? "(unset)",
+    /* A GETTER, not a snapshot, and the distinction is load-bearing.
+     *
+     * embed() reads geminiEmbeddingModel() fresh on every call, so a
+     * captured value would drift the moment a provider outlived a
+     * configuration change — reporting one model while calling
+     * another. Today every call site builds a provider per request and
+     * the two agree, which is exactly what makes this the kind of bug
+     * a later refactor introduces silently: hoisting `const provider =
+     * resolveEmbeddingProvider()` to module scope looks harmless.
+     *
+     * What it would cost: embedItemChunks passes this value to
+     * chunksNeedingEmbedding, whose predicate is "no embedding row
+     * with THIS model". A stale value matches nothing, so every pass
+     * would re-embed every chunk — paying the provider again, in full,
+     * each time, while the counts still looked plausible. */
+    get model() {
+      return geminiEmbeddingModel() ?? "(unset)"
+    },
     dimensions: EMBEDDING_DIMENSIONS,
     isConfigured: () => Boolean(process.env.GEMINI_API_KEY && geminiEmbeddingModel()),
     embedDocument: (input) => embed(input, "RETRIEVAL_DOCUMENT"),

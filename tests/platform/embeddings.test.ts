@@ -145,6 +145,33 @@ describe("configuration", () => {
     assert.equal(calls.length, 1)
   })
 
+  it("reports the model that a call would actually use, not one captured at construction", async () => {
+    // The regression this guards: `model` used to be captured when the
+    // provider was built, while embed() read it fresh. A provider that
+    // outlived a configuration change reported one model and called
+    // another — harmless while every call site builds per request, and
+    // silently expensive the moment one is hoisted to module scope,
+    // because embedItemChunks feeds this value to a "chunks with no
+    // embedding from THIS model" query. A stale value matches nothing
+    // and re-embeds the whole library, at cost, on every pass.
+    const provider = createGeminiEmbeddingProvider(stub({ body: vectorOf(768) }).impl)
+    assert.equal(provider.model, "(unset)", "unconfigured must be visible, not blank")
+
+    configure()
+    assert.equal(provider.model, MODEL, "the provider still reports its construction-time snapshot")
+
+    const vector = await provider.embedDocument("a passage")
+    assert.equal(vector.model, provider.model, "what was reported and what was called must agree")
+  })
+
+  it("tracks a model change on a provider that is already built", () => {
+    configure()
+    const provider = createGeminiEmbeddingProvider(stub({}).impl)
+    assert.equal(provider.model, MODEL)
+    process.env.GEMINI_EMBEDDING_MODEL = "a-different-model"
+    assert.equal(provider.model, "a-different-model")
+  })
+
   it("resolveEmbeddingProvider returns the Gemini provider at the declared width", () => {
     configure()
     const provider = resolveEmbeddingProvider()
