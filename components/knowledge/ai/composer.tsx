@@ -109,6 +109,7 @@ export function AiComposer({
             aria-label={loading ? "Searching your knowledge" : "Ask"}
             className={cn(
               "flex items-center justify-center rounded-xl transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]",
               hero ? "size-10" : "size-9",
               canSubmit
                 ? "bg-[var(--kn-ai)] text-primary-foreground hover:opacity-90"
