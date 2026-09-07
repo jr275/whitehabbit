@@ -59,6 +59,17 @@ export function KnowledgeAiView() {
 
   useEffect(() => setRecent(loadRecent()), [])
 
+  // Pre-fill the composer from a contextual "Ask about this" / "Ask about
+  // this topic" entry point. Only the `q` query string is read — the same
+  // free-text the composer already accepts — and it is never auto-run, so
+  // the user reviews the question and the surface still shows its real
+  // state (including "unavailable") when they submit. No scope is invented.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const q = new URLSearchParams(window.location.search).get("q")
+    if (q && q.trim()) setQuery(q.trim())
+  }, [])
+
   // Lightweight, honest empty-library check using the existing list API —
   // the real total, so we know whether the user has anything to ask about
   // and can scope the composer with a true count (never invented).

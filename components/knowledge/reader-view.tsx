@@ -20,7 +20,7 @@ import {
   Square,
 } from "lucide-react"
 import type { KnowledgeDocument } from "@/lib/knowledge/types"
-import { KIND_META, durationLabel, savedAgo } from "@/lib/knowledge/config"
+import { KIND_META, askAboutHref, durationLabel, savedAgo } from "@/lib/knowledge/config"
 import { patchItem, summarizeItem } from "@/lib/knowledge/client"
 import { useReadAloud, type UseReadAloudResult } from "@/lib/knowledge/use-read-aloud"
 import { cn } from "@/lib/utils"
@@ -148,7 +148,18 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
             >
               <ArrowLeft className="h-4 w-4" /> Back to Library
             </Link>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
+              {/* Ask about this — routes to the existing Ask surface with
+                  the composer pre-filled. Passes only the `q` free-text
+                  the flow already accepts; nothing is auto-run or faked. */}
+              <Link
+                href={askAboutHref(`What are the main ideas in "${doc.title}"?`)}
+                aria-label="Ask about this"
+                className="flex h-9 items-center gap-1.5 rounded-full border border-[var(--kn-edge)] bg-card px-2.5 text-[13px] font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--background)] sm:px-3"
+              >
+                <Sparkles className="size-3.5 text-[var(--kn-ai)]" />
+                <span className="hidden sm:inline">Ask about this</span>
+              </Link>
               <IconButton
                 label={favorite ? "Remove favorite" : "Add favorite"}
                 active={favorite}
@@ -201,7 +212,7 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
             <AiSummaryCard summary={doc.aiSummary.trim()} />
           ) : null}
 
-          {/* ── Body, routed by real state then kind ────────────── */}
+          {/* ─��� Body, routed by real state then kind ────────────── */}
           {processing ? (
             <ProcessingBlock />
           ) : failed ? (

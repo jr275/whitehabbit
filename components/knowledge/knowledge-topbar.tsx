@@ -39,7 +39,8 @@ export function KnowledgeTopbar({ onOpenPalette, onOpenSave }: KnowledgeTopbarPr
         {/* center — prominent search */}
         <button
           onClick={onOpenPalette}
-          className="group flex h-10 flex-1 items-center gap-3 rounded-full border border-[var(--kn-edge)] bg-card px-4 text-left shadow-sm transition-colors hover:border-foreground/25 lg:max-w-md"
+          aria-label="Search your knowledge"
+          className="group flex h-10 flex-1 items-center gap-3 rounded-full border border-[var(--kn-edge)] bg-card px-4 text-left shadow-sm transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--background)] lg:max-w-md"
         >
           <Search className="size-4 text-muted-foreground" />
           <span className="flex-1 truncate text-sm text-muted-foreground">Search your knowledge…</span>
@@ -52,7 +53,7 @@ export function KnowledgeTopbar({ onOpenPalette, onOpenSave }: KnowledgeTopbarPr
         <div className="flex flex-1 items-center justify-end">
           <button
             onClick={onOpenSave}
-            className="flex h-10 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02] active:scale-95"
+            className="flex h-10 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--background)]"
           >
             <Plus className="size-4" strokeWidth={2.5} />
             <span className="hidden sm:inline">Save</span>
