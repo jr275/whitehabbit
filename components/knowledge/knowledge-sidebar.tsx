@@ -1,17 +1,12 @@
 "use client"
 
-import { LibraryBig, LogIn, LogOut, Settings } from "lucide-react"
+import { LibraryBig, LogIn, LogOut, Search, Settings } from "lucide-react"
 import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import { KNOWLEDGE_NAV, isNavActive } from "@/lib/knowledge/config"
-
-/** The flat config, split into an editorial "browse" set and a quieter
- *  "tools" set below a divider — closer to a reading app than a console. */
-const BROWSE = KNOWLEDGE_NAV.slice(0, 5)
-const TOOLS = KNOWLEDGE_NAV.slice(5)
+import { KNOWLEDGE_NAV, KNOWLEDGE_SECONDARY_NAV, isNavActive, openCommandPalette } from "@/lib/knowledge/config"
 
 export function KnowledgeSidebar() {
   const pathname = usePathname()
@@ -40,7 +35,18 @@ export function KnowledgeSidebar() {
       {/* primary nav */}
       <nav className="mt-7 flex-1 px-3" aria-label="Knowledge navigation">
         <div className="space-y-0.5">
-          {BROWSE.map((item) => (
+          {/* Home · Library · Topics */}
+          {KNOWLEDGE_NAV.slice(0, 3).map((item) => (
+            <NavLink key={item.href} item={item} active={isNavActive(pathname, item.href)} />
+          ))}
+
+          {/* Search is an action, not a route: it opens the existing
+              command palette (same engine as ⌘K), surfaced here so it is
+              discoverable without knowing the shortcut. */}
+          <SearchNavButton />
+
+          {/* Ask */}
+          {KNOWLEDGE_NAV.slice(3).map((item) => (
             <NavLink key={item.href} item={item} active={isNavActive(pathname, item.href)} />
           ))}
         </div>
@@ -48,7 +54,7 @@ export function KnowledgeSidebar() {
         <div className="my-4 h-px bg-[var(--kn-edge)]" />
 
         <div className="space-y-0.5">
-          {TOOLS.map((item) => (
+          {KNOWLEDGE_SECONDARY_NAV.map((item) => (
             <NavLink key={item.href} item={item} active={isNavActive(pathname, item.href)} />
           ))}
         </div>
@@ -135,7 +141,7 @@ function NavLink({ item, active }: { item: (typeof KNOWLEDGE_NAV)[number]; activ
       href={item.href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex items-center gap-3 rounded-lg px-3 py-2 text-[15px] transition-colors",
+        "flex items-center gap-3 rounded-lg px-3 py-2 text-[15px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--kn-ai)]",
         active
           ? "bg-primary/10 font-medium text-primary"
           : "text-muted-foreground hover:bg-secondary hover:text-foreground",
@@ -144,5 +150,22 @@ function NavLink({ item, active }: { item: (typeof KNOWLEDGE_NAV)[number]; activ
       <Icon className="size-[18px]" strokeWidth={active ? 2.25 : 2} />
       {item.label}
     </Link>
+  )
+}
+
+/** Search rendered as a nav-styled action. Visually a sibling of the
+ *  NavLinks, but it opens the command palette instead of routing, so the
+ *  same real search engine is one click (or ⌘K) away from every screen. */
+function SearchNavButton() {
+  return (
+    <button
+      type="button"
+      onClick={openCommandPalette}
+      className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[15px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--kn-ai)]"
+    >
+      <Search className="size-[18px]" strokeWidth={2} />
+      <span className="flex-1 text-left">Search</span>
+      <kbd className="rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">⌘K</kbd>
+    </button>
   )
 }
