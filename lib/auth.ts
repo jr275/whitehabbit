@@ -22,11 +22,17 @@ import Google from "next-auth/providers/google"
 import { authConfig } from "@/lib/auth.config"
 import { findOrCreateOAuthUser, getPrimaryOrgForUser, getUserByEmail } from "@/lib/db/repo"
 import { verifyPassword } from "@/lib/auth-password"
+import { googleAuthConfigured } from "@/lib/auth-features"
 
-/** True when real Google OAuth credentials are configured. The login/
- * signup pages read this (via lib/auth-features) so the Google button
- * only appears when it will actually work. */
-export const isGoogleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+/** Whether to register the Google provider on THIS process's Auth.js
+ * config. Evaluated once, which is correct here and only here: the
+ * provider list is built when this module loads and Auth.js keeps it
+ * for the life of the process.
+ *
+ * Pages must NOT use this. They need lib/auth-features'
+ * googleAuthConfigured(), which reads fresh — see that module for what
+ * the difference costs. */
+const registerGoogleProvider = googleAuthConfigured()
 
 const providers: NextAuthConfig["providers"] = [
   Credentials({
@@ -53,7 +59,7 @@ const providers: NextAuthConfig["providers"] = [
   }),
 ]
 
-if (isGoogleConfigured) {
+if (registerGoogleProvider) {
   providers.push(
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
