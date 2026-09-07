@@ -93,7 +93,7 @@ export function KnowledgeCard({
           aria-label={selected ? "Deselect item" : "Select item"}
           aria-pressed={selected}
           className={cn(
-            "absolute left-3 top-3 z-20 flex size-6 items-center justify-center rounded-md border backdrop-blur transition-all",
+            "absolute left-3 top-3 z-20 flex size-6 items-center justify-center rounded-md border backdrop-blur transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)]",
             selected
               ? "border-primary bg-primary text-primary-foreground opacity-100"
               : "border-white/25 bg-black/40 text-white/80 opacity-0 group-hover:opacity-100",
@@ -305,7 +305,7 @@ export function KnowledgeCard({
               aria-label={item.favorite ? "Remove from favorites" : "Add to favorites"}
               aria-pressed={item.favorite}
               className={cn(
-                "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-secondary hover:text-foreground",
+                "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)]",
                 item.favorite && "text-[var(--kn-ai)]",
               )}
             >
@@ -315,7 +315,7 @@ export function KnowledgeCard({
             <button
               onClick={() => onArchive?.(item)}
               aria-label="Archive"
-              className="hidden size-7 items-center justify-center rounded-md opacity-0 transition-all hover:bg-secondary hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 sm:flex"
+              className="hidden size-7 items-center justify-center rounded-md opacity-0 transition-all hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] group-hover:opacity-100 sm:flex"
             >
               <Archive className="size-3.5" />
             </button>
@@ -325,7 +325,7 @@ export function KnowledgeCard({
                 aria-label="More actions"
                 aria-expanded={menuOpen}
                 className={cn(
-                  "flex size-7 items-center justify-center rounded-md transition-all hover:bg-secondary hover:text-foreground focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100",
+                  "flex size-7 items-center justify-center rounded-md transition-all hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] sm:opacity-0 sm:group-hover:opacity-100",
                   menuOpen && "opacity-100",
                 )}
               >

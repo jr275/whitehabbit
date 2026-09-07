@@ -172,7 +172,7 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="Open original in a new tab"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)]"
               >
                 <ExternalLink className="h-4 w-4" />
               </a>
@@ -284,39 +284,58 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
 
         <div className="p-6">
           {tab === "info" ? (
-            <>
+            <div className="space-y-7">
               <a
                 href={doc.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mb-6 flex items-center justify-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25"
+                className="flex items-center justify-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
               >
                 <ExternalLink className="size-4" /> Open original
               </a>
-              <dl className="space-y-4 text-sm">
-                <Meta label="Source" value={doc.source} />
-                {doc.author ? <Meta label="Author" value={doc.author} /> : null}
-                {doc.domain ? <Meta label="Origin" value={doc.domain} /> : null}
-                <Meta label="Type" value={KIND_META[doc.kind].label} />
-                {doc.wordCount ? <Meta label="Words" value={doc.wordCount.toLocaleString()} /> : null}
-                <Meta label="Saved" value={savedAgo(doc.savedAt)} />
-                {doc.publishedAt ? (
-                  <Meta label="Published" value={new Date(doc.publishedAt).toLocaleDateString()} />
-                ) : null}
-                {doc.topics.length > 0 ? (
-                  <div>
-                    <dt className="text-[12px] font-medium text-muted-foreground">Topics</dt>
-                    <dd className="mt-2 flex flex-wrap gap-1.5">
-                      {doc.topics.map((t) => (
-                        <span key={t} className="rounded-md bg-secondary/60 px-2 py-1 text-xs text-foreground/80">
-                          {t}
-                        </span>
-                      ))}
-                    </dd>
-                  </div>
-                ) : null}
-              </dl>
-            </>
+
+              {/* Insights — what Keeply understood about this piece. Only
+                  real signals are shown as data (Topics comes straight from
+                  the item). Key ideas and Related are honest, prepared slots
+                  for the extraction / Discover services that don't exist yet:
+                  clearly marked "Soon" and never populated with fake data, so
+                  those services can plug in here without a redesign. */}
+              <section aria-label="Insights">
+                <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Insights</h3>
+                <div className="mt-3 space-y-3">
+                  {doc.topics.length > 0 ? (
+                    <div>
+                      <p className="text-[12px] font-medium text-foreground/70">Topics</p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {doc.topics.map((t) => (
+                          <span key={t} className="rounded-md bg-secondary/60 px-2 py-1 text-xs text-foreground/80">
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  <InsightSlot label="Key ideas" hint="Keeply will distil the key ideas here once idea extraction ships." />
+                  <InsightSlot label="Related" hint="Saves connected to this one will surface here as Discover comes online." />
+                </div>
+              </section>
+
+              {/* Details — the source facts we genuinely have today. */}
+              <section aria-label="Details">
+                <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Details</h3>
+                <dl className="mt-3 space-y-4 text-sm">
+                  <Meta label="Source" value={doc.source} />
+                  {doc.author ? <Meta label="Author" value={doc.author} /> : null}
+                  {doc.domain ? <Meta label="Origin" value={doc.domain} /> : null}
+                  <Meta label="Type" value={KIND_META[doc.kind].label} />
+                  {doc.wordCount ? <Meta label="Words" value={doc.wordCount.toLocaleString()} /> : null}
+                  <Meta label="Saved" value={savedAgo(doc.savedAt)} />
+                  {doc.publishedAt ? (
+                    <Meta label="Published" value={new Date(doc.publishedAt).toLocaleDateString()} />
+                  ) : null}
+                </dl>
+              </section>
+            </div>
           ) : (
             <div className="flex flex-col items-center gap-2 py-10 text-center">
               <p className="text-[12px] font-medium text-muted-foreground">Highlights</p>
@@ -443,7 +462,7 @@ function AiSummaryBlock({
         disabled={state === "loading"}
         aria-label="Summarize this article with AI"
         title="Summarize this article with AI"
-        className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25 disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
       >
         {state === "loading" ? (
           <Loader2 className="size-3.5 animate-spin" aria-hidden />
@@ -493,7 +512,7 @@ function ReadAloudControls({ read }: { read: UseReadAloudResult }) {
         aria-label={isPlaying ? "Pause reading" : isPaused ? "Resume reading" : "Listen to this article"}
         aria-pressed={isPlaying}
         title={isPlaying ? "Pause reading" : isPaused ? "Resume reading" : "Listen to this article"}
-        className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25"
+        className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
         {isPlaying ? "Pause" : isPaused ? "Resume" : "Listen"}
@@ -750,13 +769,32 @@ function TabButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "relative py-4 text-sm transition-colors",
+        "relative rounded-sm py-4 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)]",
         active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
       )}
     >
       {children}
       {active ? <span className="absolute inset-x-0 -bottom-px h-0.5 bg-foreground" /> : null}
     </button>
+  )
+}
+
+/** A prepared, honest "coming soon" slot for a future understanding
+ *  signal (key ideas, related knowledge). Dashed border + a "Soon" tag
+ *  reuse the same visual language as the Coming Soon surfaces, so it reads
+ *  as scaffolding — never as data. When the backing service exists, the
+ *  real content simply replaces the hint in this exact slot. */
+function InsightSlot({ label, hint }: { label: string; hint: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-[var(--kn-edge)] bg-[var(--kn-well)]/40 px-3.5 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[12px] font-medium text-foreground/70">{label}</p>
+        <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          Soon
+        </span>
+      </div>
+      <p className="mt-1 text-pretty text-[12px] leading-relaxed text-muted-foreground">{hint}</p>
+    </div>
   )
 }
 
@@ -790,7 +828,7 @@ function IconButton({
       aria-label={label}
       title={label}
       className={cn(
-        "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+        "flex h-9 w-9 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)]",
         disabled
           ? "cursor-not-allowed text-muted-foreground/40"
           : active

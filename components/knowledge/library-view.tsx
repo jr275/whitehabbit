@@ -224,7 +224,7 @@ export function LibraryView({
             <button
               onClick={() => setQuery("")}
               aria-label="Clear search"
-              className="absolute right-9 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              className="absolute right-9 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)]"
             >
               <X className="size-3.5" />
             </button>
@@ -255,7 +255,7 @@ export function LibraryView({
                   aria-label={`${v.label} view`}
                   aria-pressed={layout === v.id}
                   className={cn(
-                    "flex size-8 items-center justify-center rounded-full transition-colors",
+                    "flex size-8 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)]",
                     layout === v.id ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
@@ -332,7 +332,7 @@ export function LibraryView({
                 <button
                   onClick={loadMore}
                   disabled={loadingMore}
-                  className="flex h-10 items-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-5 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25 disabled:opacity-50"
+                  className="flex h-10 items-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-5 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
                 >
                   {loadingMore && <Loader2 className="size-4 animate-spin" />}
                   {loadingMore ? "Loading…" : "Load more"}
@@ -359,7 +359,7 @@ function TypeChip({
     <button
       onClick={onClick}
       className={cn(
-        "shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] transition-colors",
+        "shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)]",
         active ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:text-foreground",
       )}
     >
