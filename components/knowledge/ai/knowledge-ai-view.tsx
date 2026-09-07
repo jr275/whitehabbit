@@ -187,7 +187,7 @@ export function KnowledgeAiView() {
         <button
           type="button"
           onClick={reset}
-          className="flex items-center gap-1.5 rounded-lg border border-[var(--kn-edge)] bg-card/50 px-2.5 py-1.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:border-[var(--kn-ai)]/40 hover:text-foreground"
+          className="flex items-center gap-1.5 rounded-lg border border-[var(--kn-edge)] bg-card/50 px-2.5 py-1.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:border-[var(--kn-ai)]/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--background)]"
         >
           <Plus className="size-3.5" /> New question
         </button>
@@ -263,8 +263,8 @@ function Hero() {
         Understand what you’ve saved.
       </h1>
       <p className="mx-auto mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-muted-foreground sm:text-base">
-        Ask questions across your saved articles, notes and sources. WhiteHabbit finds the relevant evidence and
-        connects the answer back to where it came from.
+        Ask questions across your saved articles, notes and sources. Keeply finds the relevant evidence and connects
+        the answer back to where it came from.
       </p>
     </header>
   )

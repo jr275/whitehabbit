@@ -97,7 +97,7 @@ export function AiError({ message, onRetry }: { message?: string; onRetry: () =>
         <button
           type="button"
           onClick={onRetry}
-          className="flex h-10 items-center gap-2 rounded-xl bg-[var(--kn-ai)] px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          className="flex h-10 items-center gap-2 rounded-xl bg-[var(--kn-ai)] px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
         >
           <RotateCw className="size-4" /> Try again
         </button>
@@ -136,8 +136,8 @@ export function AiEmptyLibrary({ onSave }: { onSave: () => void }) {
       <div className="max-w-md space-y-2">
         <h2 className="text-pretty text-2xl font-medium tracking-tight text-foreground">Your knowledge starts here.</h2>
         <p className="text-pretty text-[15px] leading-relaxed text-muted-foreground">
-          Save something you want to remember. WhiteHabbit will organize it, understand it, and make it searchable — so
-          you can ask about it later.
+          Save something you want to remember. Keeply will organize it, understand it, and make it searchable — so you
+          can ask about it later.
         </p>
       </div>
 
@@ -152,7 +152,7 @@ export function AiEmptyLibrary({ onSave }: { onSave: () => void }) {
       <button
         type="button"
         onClick={onSave}
-        className="flex h-10 items-center gap-2 rounded-xl bg-[var(--kn-ai)] px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        className="flex h-10 items-center gap-2 rounded-xl bg-[var(--kn-ai)] px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
       >
         Save your first source <ArrowRight className="size-4" />
       </button>
@@ -204,7 +204,8 @@ export function AiSuggestions({
                 type="button"
                 onClick={() => onPick(q)}
                 className={cn(
-                  "group flex w-full items-center justify-between gap-4 py-4 text-left transition-colors",
+                  "group flex w-full items-center justify-between gap-4 rounded-lg py-4 text-left transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--background)]",
                   i > 0 ? "border-t border-[var(--kn-edge)]" : "",
                 )}
               >
@@ -231,7 +232,7 @@ export function AiSuggestions({
                 key={q}
                 type="button"
                 onClick={() => onPick(q)}
-                className="group flex items-center gap-2.5 rounded-lg px-1 py-1.5 text-left text-[13.5px] text-muted-foreground transition-colors hover:text-foreground"
+                className="group flex items-center gap-2.5 rounded-lg px-1 py-1.5 text-left text-[13.5px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--background)]"
               >
                 <span className="min-w-0 flex-1 truncate">{q}</span>
                 <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-[var(--kn-ai)]" />
