@@ -315,8 +315,8 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
                       </div>
                     </div>
                   ) : null}
-                  <InsightSlot label="Key ideas" hint="Keeply will distil the key ideas here once idea extraction ships." />
-                  <InsightSlot label="Related" hint="Saves connected to this one will surface here as Discover comes online." />
+                  <InsightSlot label="Key ideas" hint="Key ideas will appear here after analysis." />
+                  <InsightSlot label="Related knowledge" hint="Related knowledge will appear here as your library grows." />
                 </div>
               </section>
 
