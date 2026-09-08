@@ -3,13 +3,21 @@
 import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react"
 import Link from "next/link"
 import { useSession } from "next-auth/react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { fetchLibrary } from "@/lib/knowledge/client"
 import { openCommandPalette, openSaveDialog } from "@/lib/knowledge/config"
 import { useKnowledgeLibrary } from "@/lib/knowledge/use-knowledge"
 import type { KnowledgeItem } from "@/lib/knowledge/types"
 import { cn } from "@/lib/utils"
 import { EmptyLibrary } from "./empty-state"
 import { KnowledgeCard } from "./knowledge-card"
+import {
+  DiscoverTeaser,
+  KnowledgeSignals,
+  TopicsPreview,
+  type KnowledgeSignal,
+  type TopicGlimpse,
+} from "./home-sections"
 
 function greeting(now = new Date()): string {
   const h = now.getHours()
@@ -49,6 +57,46 @@ export function KnowledgeHome() {
   const recent = items.slice(0, 10)
 
   const actions = { onToggleFavorite: toggleFavorite, onArchive: archive, onDelete: remove, onRetry: retry }
+
+  // ── Real aggregate signals ──────────────────────────────────────
+  // Saved is the true global total from the library hook. Unread and
+  // Favorites are their real global totals, fetched with a 1-row list
+  // request purely for the count — never derived from the loaded page
+  // (which would under-report) and never invented. They refresh whenever
+  // the total changes (e.g. after a new save).
+  const [unreadTotal, setUnreadTotal] = useState<number | null>(null)
+  const [favoritesTotal, setFavoritesTotal] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (status !== "ready" || total === 0) return
+    const ac = new AbortController()
+    fetchLibrary({ filter: "unread", limit: 1 }, ac.signal)
+      .then((r) => setUnreadTotal(r.total))
+      .catch(() => {})
+    fetchLibrary({ filter: "favorites", limit: 1 }, ac.signal)
+      .then((r) => setFavoritesTotal(r.total))
+      .catch(() => {})
+    return () => ac.abort()
+  }, [status, total])
+
+  const signals: KnowledgeSignal[] = [
+    { label: "Saved", value: status === "ready" ? total : null, href: "/knowledge/library" },
+    { label: "Unread", value: unreadTotal, href: "/knowledge/library" },
+    { label: "Favorites", value: favoritesTotal, href: "/knowledge/favorites" },
+  ]
+
+  // ── Topics surfacing across the loaded library ──────────────────
+  // A live, honest glimpse: distinct topics from the ready items on the
+  // page, ranked by real frequency. Never fabricated; the authoritative
+  // full set lives on the Topics page (linked from the section).
+  const topicGlimpse: TopicGlimpse[] = useMemo(() => {
+    const freq = new Map<string, number>()
+    for (const it of ready) for (const t of it.topics) freq.set(t, (freq.get(t) ?? 0) + 1)
+    return [...freq.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 12)
+  }, [ready])
 
   return (
     <div>
@@ -94,7 +142,9 @@ export function KnowledgeHome() {
         ) : total === 0 ? (
           <EmptyLibrary onSave={openSaveDialog} />
         ) : (
-          <div className="flex flex-col gap-16">
+          <div className="flex flex-col gap-14">
+            <KnowledgeSignals signals={signals} />
+
             {unread.length > 0 && (
               <CarouselSection
                 title="Jump back in"
@@ -113,6 +163,8 @@ export function KnowledgeHome() {
               actions={actions}
             />
 
+            <TopicsPreview topics={topicGlimpse} />
+
             {favorites.length > 0 && (
               <CarouselSection
                 title="Favorites"
@@ -122,6 +174,8 @@ export function KnowledgeHome() {
                 actions={actions}
               />
             )}
+
+            <DiscoverTeaser />
           </div>
         )}
       </div>
