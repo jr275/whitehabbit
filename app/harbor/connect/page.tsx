@@ -1,12 +1,25 @@
 'use client';
 
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { HarborConnect } from '@/components/HarborConnect';
 
-export default function HarborConnectPage() {
+function ConnectionError() {
   const searchParams = useSearchParams();
   const error = searchParams.get('error');
 
+  if (!error) return null;
+
+  return (
+    <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+      <p className="text-sm text-red-700">
+        <span className="font-semibold">Connection Error:</span> {error}
+      </p>
+    </div>
+  );
+}
+
+export default function HarborConnectPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
       <div className="max-w-md mx-auto mt-20">
@@ -16,13 +29,9 @@ export default function HarborConnectPage() {
             <p className="text-gray-600">Connect your account to get started</p>
           </div>
 
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-sm text-red-700">
-                <span className="font-semibold">Connection Error:</span> {error}
-              </p>
-            </div>
-          )}
+          <Suspense fallback={null}>
+            <ConnectionError />
+          </Suspense>
 
           <HarborConnect />
 
