@@ -22,7 +22,7 @@ import Google from "next-auth/providers/google"
 import { authConfig } from "@/lib/auth.config"
 import { findOrCreateOAuthUser, getPrimaryOrgForUser, getUserByEmail } from "@/lib/db/repo"
 import { verifyPassword } from "@/lib/auth-password"
-import { googleAuthConfigured } from "@/lib/auth-features"
+import { googleAuthConfigured, isVerifiedOAuthEmail } from "@/lib/auth-features"
 
 /** Whether to register the Google provider on THIS process's Auth.js
  * config. Evaluated once, which is correct here and only here: the
@@ -80,6 +80,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      * from authorize(), so it falls through to the base jwt callback. */
     async jwt({ token, user, account, profile }) {
       if (account?.provider === "google") {
+        // The email is the ONLY thing that links this Google identity
+        // to a Whitehabbit account (allowDangerousEmailAccountLinking
+        // above), so it has to be an address Google says it verified.
+        // Refuse rather than degrade: returning a token without ids
+        // would produce a half-signed-in state that looks authenticated
+        // to middleware and fails at every API call. See
+        // isVerifiedOAuthEmail for what this is defending against.
+        if (!isVerifiedOAuthEmail(profile)) {
+          throw new Error("Google did not confirm this email address is verified.")
+        }
         const email = (profile?.email as string | undefined) ?? user?.email ?? undefined
         if (email) {
           const { user: dbUser, org } = await findOrCreateOAuthUser({

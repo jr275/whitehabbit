@@ -24,6 +24,7 @@ import { enforceRateLimit } from "@/lib/rate-limit"
 import { generateResetToken } from "@/lib/auth-password"
 import { createPasswordResetToken, getUserByEmail } from "@/lib/db/repo"
 import { clientIpFrom } from "@/lib/auth-features"
+import { logger } from "@/lib/observability/logger"
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const RESET_TTL_MS = 60 * 60 * 1000 // 1 hour
@@ -56,8 +57,23 @@ export async function POST(req: Request) {
         (forwardedHost ? `${forwardedProto ?? "https"}://${forwardedHost}` : new URL(req.url).origin)
       const resetUrl = `${origin}/reset-password?token=${token}`
 
-      // Server-side breadcrumb so the owner can always retrieve it from logs.
-      console.log(`[v0] password reset requested for ${email} -> ${resetUrl}`)
+      // A breadcrumb that the reset was requested — NEVER the link.
+      //
+      // This line used to log `resetUrl`, which embeds the raw
+      // single-use token. That token IS the credential: anyone who can
+      // read the application's logs (a platform log drain, a shared
+      // dashboard, an aggregator, a support export) could request a
+      // reset for any address and then complete it from the log line,
+      // without ever touching that person's inbox. Log retention also
+      // outlives the token's one-hour TTL by months, so the exposure
+      // is not bounded by expiry either.
+      //
+      // The non-production response below still returns the link to
+      // the caller who asked for it, which is the intended manual
+      // fallback while no mailer is wired up; that is a deliberate
+      // hand-back to the requester, not a broadcast to everyone with
+      // log access.
+      logger.info("password_reset_requested", { emailDomain: email.split("@")[1] ?? "unknown" })
 
       if (process.env.NODE_ENV !== "production") manualResetUrl = resetUrl
     }

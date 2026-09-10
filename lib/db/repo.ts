@@ -251,7 +251,18 @@ export async function resetPasswordWithToken(tokenHash: string, newPasswordHash:
     const row = res.rows[0]
     if (!row || row.used_at != null || Number(row.expires_at) < Date.now()) return false
     const now = Date.now()
-    await client.query("UPDATE password_reset_tokens SET used_at = $1 WHERE token_hash = $2", [now, tokenHash])
+    // Burn EVERY outstanding token for this user, not only the one
+    // being spent. Requesting a reset several times mints several
+    // valid tokens; consuming one used to leave the older ones live
+    // for the rest of their hour. That matters because the reason a
+    // person requests a second link is often that something went
+    // wrong with the first — it went to an old address, or someone
+    // else triggered it. Changing the password must close every door
+    // that was opened, not just the one walked through.
+    await client.query(
+      "UPDATE password_reset_tokens SET used_at = $1 WHERE user_id = $2 AND used_at IS NULL",
+      [now, row.user_id],
+    )
     // Setting a password also converts an OAuth-only account into one
     // that can additionally sign in with credentials — harmless and expected.
     await client.query("UPDATE users SET password_hash = $1 WHERE id = $2", [newPasswordHash, row.user_id])

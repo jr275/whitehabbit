@@ -47,6 +47,39 @@ export function googleAuthConfigured(env: GoogleAuthEnv = process.env): boolean 
   return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET)
 }
 
+/* ---- OAuth identity trust ------------------------------------------ *
+ *
+ * lib/auth.ts registers the Google provider with
+ * `allowDangerousEmailAccountLinking: true`, which means a Google
+ * sign-in is matched to an EXISTING Whitehabbit account purely by
+ * email address. That setting is what lets someone who signed up with
+ * a password later use the Google button on the same account, which
+ * is the behaviour we want — but it also makes the email claim the
+ * entire proof of identity.
+ *
+ * So the claim has to be one Google actually stands behind. An OIDC
+ * `email` is only an assertion that the provider knows the address;
+ * `email_verified` is the assertion that the provider CHECKED it.
+ * Google normally sets it true, but not always — some Workspace and
+ * directory-provisioned accounts carry an address the tenant asserted
+ * rather than one Google confirmed. Linking on an unverified address
+ * turns "can obtain a Google account naming this address" into "can
+ * sign in as this person", including into an account whose real owner
+ * has a password and has never used Google at all.
+ *
+ * Hence: verified, or no link. This deliberately requires an explicit
+ * true. A missing claim is not treated as consent — an identity
+ * provider that will not say the address is verified has not verified
+ * it, and this is the one decision where guessing in the permissive
+ * direction hands over someone's account. */
+export function isVerifiedOAuthEmail(profile: { email?: unknown; email_verified?: unknown } | null | undefined): boolean {
+  if (!profile) return false
+  const email = typeof profile.email === "string" ? profile.email.trim() : ""
+  if (!email) return false
+  // Google sends a real JSON boolean; some providers stringify it.
+  return profile.email_verified === true || profile.email_verified === "true"
+}
+
 /* ---- trusted client IP -------------------------------------------- *
  *
  * This value is the SUBJECT of every pre-session rate limit — password

@@ -22,7 +22,7 @@ import { describe, it } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { googleAuthConfigured } from "@/lib/auth-features"
+import { googleAuthConfigured, isVerifiedOAuthEmail } from "@/lib/auth-features"
 
 describe("googleAuthConfigured", () => {
   it("is true only when BOTH credentials are present", () => {
@@ -77,4 +77,59 @@ describe("the auth pages must render per request", () => {
       assert.doesNotMatch(source, /isGoogleConfigured/)
     })
   }
+})
+
+/* ================================================================== *
+ * OAUTH IDENTITY TRUST — isVerifiedOAuthEmail
+ *
+ * lib/auth.ts registers Google with allowDangerousEmailAccountLinking,
+ * so the email claim is the ENTIRE proof that this Google identity may
+ * take over an existing Whitehabbit account — including one whose real
+ * owner has a password and has never used Google.
+ *
+ * That makes `email_verified` load-bearing, and makes the permissive
+ * reading of a missing claim an account-takeover path rather than a
+ * convenience. These tests pin the strict reading in place.
+ * ================================================================== */
+
+describe("isVerifiedOAuthEmail", () => {
+  it("accepts an address the provider says it verified", () => {
+    assert.equal(isVerifiedOAuthEmail({ email: "person@example.com", email_verified: true }), true)
+    // Some providers stringify the boolean.
+    assert.equal(isVerifiedOAuthEmail({ email: "person@example.com", email_verified: "true" }), true)
+  })
+
+  it("refuses an address the provider says it did NOT verify", () => {
+    assert.equal(isVerifiedOAuthEmail({ email: "victim@example.com", email_verified: false }), false)
+    assert.equal(isVerifiedOAuthEmail({ email: "victim@example.com", email_verified: "false" }), false)
+  })
+
+  it("refuses a MISSING claim rather than assuming consent", () => {
+    // The important one. An identity provider that will not say the
+    // address is verified has not verified it, and this is the single
+    // decision where guessing permissively hands over an account.
+    assert.equal(isVerifiedOAuthEmail({ email: "victim@example.com" }), false)
+    assert.equal(isVerifiedOAuthEmail({ email: "victim@example.com", email_verified: undefined }), false)
+    assert.equal(isVerifiedOAuthEmail({ email: "victim@example.com", email_verified: null }), false)
+  })
+
+  it("is not fooled by a truthy non-boolean", () => {
+    for (const truthy of [1, "yes", "1", {}, [], "TRUE", "True"]) {
+      assert.equal(
+        isVerifiedOAuthEmail({ email: "victim@example.com", email_verified: truthy }),
+        false,
+        `accepted ${JSON.stringify(truthy)} as verification`,
+      )
+    }
+  })
+
+  it("refuses a profile with no usable address at all", () => {
+    assert.equal(isVerifiedOAuthEmail(null), false)
+    assert.equal(isVerifiedOAuthEmail(undefined), false)
+    assert.equal(isVerifiedOAuthEmail({}), false)
+    assert.equal(isVerifiedOAuthEmail({ email_verified: true }), false)
+    assert.equal(isVerifiedOAuthEmail({ email: "", email_verified: true }), false)
+    assert.equal(isVerifiedOAuthEmail({ email: "   ", email_verified: true }), false)
+    assert.equal(isVerifiedOAuthEmail({ email: 42, email_verified: true }), false)
+  })
 })
