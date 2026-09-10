@@ -44,7 +44,6 @@ export const KNOWLEDGE_SECONDARY_NAV: NavItem[] = [
 export const MOBILE_NAV: NavItem[] = [
   { href: "/knowledge", label: "Home", icon: Home },
   { href: "/knowledge/library", label: "Library", icon: Library },
-  { href: "/knowledge/topics", label: "Topics", icon: Tag },
   { href: "/knowledge/ai", label: "Ask", icon: Sparkles },
 ]
 
