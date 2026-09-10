@@ -9,6 +9,7 @@
  * ================================================================== */
 
 import { MalformedAnswerError, parseKnowledgeAnswer, type KnowledgeAnswer } from "./ai"
+import type { ResearchBrief } from "./research-contract"
 import type { KnowledgeDocument, KnowledgeItem, KnowledgeListResult, PrimaryFilter } from "./types"
 import {
   guestDelete,
@@ -287,6 +288,22 @@ export async function askLibrary(question: string, params: AskParams = {}, signa
   // request instead of showing one generic failure for all three.
   const body = await parse<unknown>(res)
   return parseKnowledgeAnswer(body)
+}
+
+/** Research an objective against the user's own library.
+ *
+ *  No guest fallback, for the same reason askLibrary has none: a guest
+ *  library lives in this browser, has no chunks and no model
+ *  credential, and there is nothing to research from. A 401 is a real
+ *  state the UI must show. */
+export async function researchObjective(objective: string, signal?: AbortSignal): Promise<ResearchBrief> {
+  const res = await fetch("/api/knowledge/research", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ objective }),
+    signal,
+  })
+  return parse<ResearchBrief>(res)
 }
 
 /** An item is still "in flight" while the pipeline runs — the signal
