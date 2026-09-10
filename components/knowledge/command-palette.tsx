@@ -3,7 +3,6 @@
 import {
   ArrowRight,
   BookOpen,
-  Compass,
   CornerDownLeft,
   Heart,
   Home,
@@ -39,7 +38,6 @@ const COMMANDS: Command[] = [
   { id: "nav-library", label: "Go to Library", hint: "All your saved knowledge", icon: BookOpen, group: "Navigate", href: "/knowledge/library" },
   { id: "nav-favorites", label: "Go to Favorites", hint: "The ones you starred", icon: Heart, group: "Navigate", href: "/knowledge/favorites" },
   { id: "nav-topics", label: "Go to Topics", hint: "Themes across your library", icon: Layers, group: "Navigate", href: "/knowledge/topics" },
-  { id: "nav-explore", label: "Go to Explore", hint: "Concepts, connections & insights", icon: Compass, group: "Navigate", href: "/knowledge/explore" },
   { id: "nav-ask", label: "Go to Ask", hint: "Ask your knowledge", icon: Sparkles, group: "Navigate", href: "/knowledge/ai" },
   { id: "nav-home", label: "Go to Home", hint: "Your library overview", icon: Home, group: "Navigate", href: "/knowledge" },
 ]
