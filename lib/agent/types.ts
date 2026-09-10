@@ -184,8 +184,17 @@ export type RuntimeEventType =
  * external call is attempted for the missing capability. */
 export class SkillBlockedError extends Error {
   readonly code: ExecutionReasonCode = "missing_credential"
-  constructor(public reason: string) {
+  /* Declared and assigned explicitly rather than as a constructor
+   * parameter property: parameter properties are TypeScript that has
+   * to be COMPILED, and Node's strip-only type stripping (which the
+   * test runner uses) refuses the whole module on sight. That made
+   * every value in this file — these error classes included —
+   * unimportable from a test, which is why lib/agent had no tests.
+   * The signature and the public field are unchanged. */
+  readonly reason: string
+  constructor(reason: string) {
     super(reason)
+    this.reason = reason
     this.name = "SkillBlockedError"
   }
 }
@@ -220,13 +229,16 @@ export class ProviderError extends Error {
  * went wrong) — this is neither: the capability exists and works, a
  * human just has to say yes first. */
 export class ApprovalRequiredError extends Error {
-  constructor(
-    public toolId: string,
-    public toolName: string,
-    public actionLabel: string,
-    public permission: ToolPermission,
-  ) {
+  readonly toolId: string
+  readonly toolName: string
+  readonly actionLabel: string
+  readonly permission: ToolPermission
+  constructor(toolId: string, toolName: string, actionLabel: string, permission: ToolPermission) {
     super(`"${actionLabel}" on ${toolName} requires human approval (${permission}) before it can run.`)
+    this.toolId = toolId
+    this.toolName = toolName
+    this.actionLabel = actionLabel
+    this.permission = permission
     this.name = "ApprovalRequiredError"
   }
 }

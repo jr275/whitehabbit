@@ -9,7 +9,7 @@
  * show real inputs/instructions for a skill that actually executes.
  *
  * This is intentionally small: ONE vertical (Marketing Intelligence),
- * 3 real skills, 4 real tools. Every entry here has a real, working
+ * 7 real skills, 5 real tools. Every entry here has a real, working
  * (or honestly not-yet-connected) implementation on the server — there
  * is no metadata for a skill or tool that doesn't actually exist.
  * ================================================================== */
@@ -37,6 +37,24 @@ export const SKILL_CATALOG: SkillTemplate[] = [
     taskTitle: "Research trends",
     requiredTools: ["tool_web_search", "tool_llm"],
     inputs: [{ key: "query", label: "What should it research?", type: "text", required: true, placeholder: "The most important trends in AI agents today" }],
+  },
+  {
+    id: "skill_objective_research",
+    name: "Objective Research",
+    category: "research",
+    description: "Researches a stated objective against the live web via Tavily and synthesizes an answer grounded only in the pages it retrieved.",
+    outputType: "research_result",
+    taskTitle: "Research an objective",
+    requiredTools: ["tool_tavily_search", "tool_llm"],
+    inputs: [
+      {
+        key: "objective",
+        label: "What should it find out?",
+        type: "textarea",
+        required: true,
+        placeholder: "Which pricing models are B2B SaaS companies moving to in 2026, and why",
+      },
+    ],
   },
   {
     id: "skill_content_intelligence",
@@ -101,6 +119,7 @@ export interface ToolTemplate {
 
 export const TOOL_CATALOG: ToolTemplate[] = [
   { id: "tool_web_search", name: "Web Search", provider: "npm registry", description: "Searches real, current package activity as a signal for what's trending.", risk: "low", permission: "read" },
+  { id: "tool_tavily_search", name: "Tavily Search", provider: "tavily", description: "Searches the live web and returns real pages with their titles, URLs and extracted content.", risk: "low", permission: "read" },
   { id: "tool_browser", name: "Browser", provider: "HTTP fetch", description: "Opens a real URL and extracts its page text.", risk: "low", permission: "read" },
   { id: "tool_analytics", name: "Analytics", provider: "Not connected", description: "Reads engagement and performance metrics from a connected provider.", risk: "low", permission: "read" },
   // "provider" here is only the seed default — the server overwrites it
