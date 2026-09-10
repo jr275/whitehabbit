@@ -17,6 +17,7 @@ import { assertSafeUrl, UnsafeUrlError } from "@/lib/security/ssrf-guard"
 import { logger } from "@/lib/observability/logger"
 import { runIndexJob } from "./indexing"
 import { isAiSummaryConfigured, summarizeText, type AiSummaryDeps } from "./ai-summary"
+import { extractConceptsForItem } from "./concepts/extract"
 import { extractFavicon, extractFromHtml } from "./extract"
 import * as repo from "./repo"
 import type { KnowledgeJobRow, KnowledgeRow } from "./repo"
@@ -480,7 +481,16 @@ async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetch
     // reaping rather than grow a parallel one; this is the first
     // caller to use it. An unknown type is treated as ingest, which
     // is what every row written before indexing existed means.
-    if (job.job_type === "index") {
+    if (job.job_type === "concepts") {
+      // Concept extraction is the LAST stage: it reads chunks the index
+      // job produced. A failure here leaves the item fully readable and
+      // searchable — only its concepts are missing — so it must never
+      // fail the item, and does not.
+      const outcome = await extractConceptsForItem(job.item_id, { orgId: job.org_id, userId: job.created_by })
+      if (outcome.status === "failed") {
+        logger.warn("knowledge_concepts_failed", { itemId: job.item_id, reason: outcome.reason })
+      }
+    } else if (job.job_type === "index") {
       await runIndexJob(job.item_id, job.org_id, job.created_by)
     } else {
       await runIngestJob(job.item_id, job.org_id, job.created_by, fetchDeps)
@@ -498,7 +508,19 @@ async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetch
       // Best effort on purpose. A failure to enqueue must not undo a
       // successful ingestion — the item is saved and readable either
       // way, and an unindexed item is a gap in search, not lost data.
-      if (job.job_type !== "index") {
+      if (job.job_type === "index") {
+        // The pipeline's last link. Chunks exist now, so the concepts
+        // pass has something to read; enqueued the same best-effort way
+        // indexing itself is, so a queue hiccup never fails the item.
+        try {
+          await repo.enqueueConceptJob(job.item_id, job.org_id, job.created_by)
+        } catch (err) {
+          logger.warn("knowledge_concepts_enqueue_failed", {
+            itemId: job.item_id,
+            message: err instanceof Error ? err.message : String(err),
+          })
+        }
+      } else if (job.job_type !== "concepts") {
         try {
           await repo.enqueueIndexJob(job.item_id, job.org_id, job.created_by)
         } catch (err) {

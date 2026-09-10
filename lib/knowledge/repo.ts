@@ -894,6 +894,29 @@ export async function enqueueIndexJob(itemId: string, orgId: string, userId: str
   return (await enqueueIndexJobDetailed(itemId, orgId, userId)).job
 }
 
+/** Third job_type on the SAME queue. 0006 put job_type here so another
+ *  kind of work could share the lease, backoff and reaping rather than
+ *  grow a parallel one; index was the first to use it and concepts are
+ *  the second. No new table, no second worker.
+ *
+ *  Same partial-unique guard as the others: one queued job per item, so
+ *  a save followed by a retry cannot stack duplicate work. */
+export async function enqueueConceptJob(itemId: string, orgId: string, userId: string | null): Promise<KnowledgeJobRow | null> {
+  const now = Date.now()
+  const inserted = await queryOne<KnowledgeJobRow>(
+    `INSERT INTO knowledge_jobs (id, item_id, org_id, created_by, job_type, status, attempts, max_attempts, available_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 'concepts', 'queued', 0, $5, $6, $6, $6)
+     ON CONFLICT (item_id) WHERE status = 'queued' DO NOTHING
+     RETURNING ${JOB_COLS}`,
+    [`knj_${randomUUID()}`, itemId, orgId, userId, DEFAULT_MAX_ATTEMPTS, now],
+  )
+  if (inserted) return inserted
+  return queryOne<KnowledgeJobRow>(
+    `SELECT ${JOB_COLS} FROM knowledge_jobs WHERE item_id = $1 AND status = 'queued' ORDER BY created_at DESC LIMIT 1`,
+    [itemId],
+  )
+}
+
 /* ---- chunk embeddings (Phase D) ---------------------------------- */
 
 export interface ChunkEmbeddingInput {
