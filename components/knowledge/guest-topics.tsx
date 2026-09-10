@@ -7,8 +7,11 @@
  * extraction (or a signed-in library) provides them. */
 
 import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
+import { Sparkles } from "lucide-react"
 import { PageContainer, PageHeader } from "./page-header"
 import { fetchLibrary } from "@/lib/knowledge/client"
+import { askAboutHref } from "@/lib/knowledge/config"
 import type { KnowledgeItem, Topic } from "@/lib/knowledge/types"
 
 export function GuestTopics() {
@@ -72,6 +75,12 @@ export function GuestTopics() {
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
                 <div className="h-full rounded-full bg-[var(--kn-ai)]/70" style={{ width: `${(t.count / max) * 100}%` }} />
               </div>
+              <Link
+                href={askAboutHref(`What have I saved about ${t.label}?`)}
+                className="inline-flex items-center gap-1.5 rounded text-[12.5px] font-medium text-[var(--kn-ai)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
+              >
+                <Sparkles className="size-3.5" /> Ask about this topic
+              </Link>
             </div>
           ))}
         </div>

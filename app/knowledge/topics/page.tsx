@@ -1,7 +1,10 @@
+import Link from "next/link"
+import { Sparkles } from "lucide-react"
 import { PageContainer, PageHeader } from "@/components/knowledge/page-header"
 import { requireSession, UnauthenticatedError } from "@/lib/session"
 import { listTagCounts } from "@/lib/knowledge/repo"
 import { tagsToTopics } from "@/lib/knowledge/adapter"
+import { askAboutHref } from "@/lib/knowledge/config"
 import { GuestTopics } from "@/components/knowledge/guest-topics"
 
 export const metadata = {
@@ -59,6 +62,12 @@ export default async function TopicsPage() {
                   style={{ width: `${(t.count / max) * 100}%` }}
                 />
               </div>
+              <Link
+                href={askAboutHref(`What have I saved about ${t.label}?`)}
+                className="inline-flex items-center gap-1.5 rounded text-[12.5px] font-medium text-[var(--kn-ai)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
+              >
+                <Sparkles className="size-3.5" /> Ask about this topic
+              </Link>
             </div>
           ))}
         </div>

@@ -19,7 +19,7 @@
 
 import { AlertTriangle, ArrowUp, BookOpen, Clock, Info, Loader2, Search, ShieldAlert, Sparkles, WifiOff } from "lucide-react"
 import Link from "next/link"
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { PageContainer, PageHeader } from "../page-header"
 import { openSaveDialog } from "@/lib/knowledge/config"
 import { useKnowledgeAsk, type AskFailure } from "@/lib/knowledge/use-knowledge-ai"
@@ -27,10 +27,57 @@ import { isFullyGrounded, MAX_QUESTION_CHARS, MIN_QUESTION_CHARS, type Knowledge
 import { AnswerBody } from "./answer-body"
 import { CitationList } from "./citation-list"
 
-export function AskView({ libraryIsEmpty }: { libraryIsEmpty: boolean }) {
+/* ---- recent questions -------------------------------------------- *
+ *
+ * Carried over from the Ask surface this replaced. Per-browser only:
+ * a question someone typed is theirs, and there is no reason for it to
+ * reach the server, so it never does. Reads and writes are wrapped
+ * because storage throws outright in some privacy modes — a blocked
+ * convenience must not take the page down with it. */
+const RECENT_KEY = "keeply.ask.recent"
+const RECENT_MAX = 4
+
+function loadRecent(): string[] {
+  if (typeof window === "undefined") return []
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(RECENT_KEY) ?? "[]") as unknown
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string").slice(0, RECENT_MAX) : []
+  } catch {
+    return []
+  }
+}
+
+function rememberQuestion(question: string): string[] {
+  const next = [question, ...loadRecent().filter((q) => q !== question)].slice(0, RECENT_MAX)
+  try {
+    window.localStorage.setItem(RECENT_KEY, JSON.stringify(next))
+  } catch {
+    /* storage unavailable — the feature degrades, nothing else does */
+  }
+  return next
+}
+
+export function AskView({ libraryIsEmpty, scopeCount = null }: { libraryIsEmpty: boolean; scopeCount?: number | null }) {
   const { state, ask } = useKnowledgeAsk()
   const [draft, setDraft] = useState("")
+  const [recent, setRecent] = useState<string[]>([])
   const busy = state.phase === "loading"
+
+  // Read after mount: localStorage is per-browser, so touching it during
+  // render would disagree with the server-rendered markup.
+  useEffect(() => {
+    setRecent(loadRecent())
+  }, [])
+
+  const submit = useCallback(
+    (question: string) => {
+      const q = question.trim()
+      if (q.length < MIN_QUESTION_CHARS) return
+      setRecent(rememberQuestion(q))
+      ask(q)
+    },
+    [ask],
+  )
 
   return (
     <PageContainer>
@@ -44,7 +91,7 @@ export function AskView({ libraryIsEmpty }: { libraryIsEmpty: boolean }) {
         className="mt-8"
         onSubmit={(e) => {
           e.preventDefault()
-          ask(draft)
+          submit(draft)
         }}
       >
         <div className="flex items-center gap-2 rounded-2xl border border-[var(--kn-edge)] bg-[var(--kn-paper)] px-4 py-2 focus-within:border-[var(--kn-ai)]/50">
@@ -67,6 +114,30 @@ export function AskView({ libraryIsEmpty }: { libraryIsEmpty: boolean }) {
             {busy ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" strokeWidth={2.5} />}
           </button>
         </div>
+        {!libraryIsEmpty && scopeCount !== null && (
+          <p className="mt-2 px-1 text-[12px] text-muted-foreground">
+            Answered from {scopeCount === 1 ? "the 1 item" : `all ${scopeCount.toLocaleString()} items`} you&rsquo;ve saved.
+          </p>
+        )}
+
+        {!libraryIsEmpty && recent.length > 0 && state.phase === "idle" && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 px-1">
+            <span className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Recent</span>
+            {recent.map((q) => (
+              <button
+                key={q}
+                type="button"
+                onClick={() => {
+                  setDraft(q)
+                  submit(q)
+                }}
+                className="max-w-[22ch] truncate rounded-full border border-[var(--kn-edge)] px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:border-[var(--kn-ai)]/50 hover:text-foreground"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
       </form>
 
       <div className="mt-8">

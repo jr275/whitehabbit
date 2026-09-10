@@ -12,5 +12,9 @@ import { AskView } from "./ask-view"
 
 export function AskPage() {
   const { status, total } = useKnowledgeLibrary({ pageSize: 1 })
-  return <AskView libraryIsEmpty={status === "ready" && total === 0} />
+  // The count is passed through as well as the emptiness verdict: the
+  // composer states what an answer will actually be drawn from, which
+  // is a real number from the list API and never an estimate. Carried
+  // over from the Ask surface this replaced.
+  return <AskView libraryIsEmpty={status === "ready" && total === 0} scopeCount={status === "ready" ? total : null} />
 }

@@ -1,7 +1,5 @@
 import {
-  Compass,
   FileText,
-  Headphones,
   Heart,
   Home,
   Library,
@@ -22,23 +20,30 @@ export interface NavItem {
   icon: LucideIcon
 }
 
-/** Primary Knowledge navigation (distinct from Workforce's grouped nav). */
+/** Primary Knowledge navigation — only real, shipped destinations. The
+ *  order narrates the product: capture (Home/Library), organise (Topics),
+ *  ask (Ask). Search is not here because it is an action, not a route —
+ *  the sidebar renders it inline as a button that opens the command
+ *  palette. Collections, Audio and Research are intentionally omitted
+ *  while they are Coming Soon, so the menu only advertises what works. */
 export const KNOWLEDGE_NAV: NavItem[] = [
   { href: "/knowledge/home", label: "Home", icon: Home },
   { href: "/knowledge/library", label: "Library", icon: Library },
-  { href: "/knowledge/collections", label: "Collections", icon: Compass },
   { href: "/knowledge/topics", label: "Topics", icon: Tag },
-  { href: "/knowledge/favorites", label: "Favorites", icon: Heart },
-  { href: "/knowledge/audio", label: "Audio", icon: Headphones },
-  { href: "/knowledge/ai", label: "AI", icon: Sparkles },
-  { href: "/knowledge/research", label: "Research", icon: FileText },
+  { href: "/knowledge/ai", label: "Ask", icon: Sparkles },
 ]
 
-/** Compact set surfaced in the mobile bottom bar. */
+/** Secondary destination — a saved-filter view, not a pillar of its own,
+ *  so it sits below the primary nav under a divider. */
+export const KNOWLEDGE_SECONDARY_NAV: NavItem[] = [
+  { href: "/knowledge/favorites", label: "Favorites", icon: Heart },
+]
+
+/** Compact set surfaced in the mobile bottom bar (Search lives in the
+ *  persistent top-bar field, reachable on every screen). */
 export const MOBILE_NAV: NavItem[] = [
   { href: "/knowledge/home", label: "Home", icon: Home },
   { href: "/knowledge/library", label: "Library", icon: Library },
-  { href: "/knowledge/audio", label: "Audio", icon: Headphones },
   { href: "/knowledge/ai", label: "Ask", icon: Sparkles },
 ]
 
@@ -64,6 +69,16 @@ export function openSaveDialog(): void {
 /** Ask the Knowledge shell to open the command palette from anywhere. */
 export function openCommandPalette(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event("knowledge:command"))
+}
+
+/** Build a link into the Ask experience with the composer pre-filled.
+ *  Only the `q` query string is passed — the exact input the existing
+ *  askKnowledge() flow already accepts. No per-item or per-topic scope is
+ *  invented: the question text itself carries the intent, and the Ask
+ *  surface still shows its real state (including "unavailable") on submit.
+ *  The question is never auto-run, so nothing is simulated. */
+export function askAboutHref(question: string): string {
+  return `/knowledge/ai?q=${encodeURIComponent(question)}`
 }
 
 export function isNavActive(pathname: string, href: string): boolean {

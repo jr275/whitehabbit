@@ -27,8 +27,10 @@ export function ComingSoon({ eyebrow, title, description, icon: Icon, bullets }:
         <span className="flex size-14 items-center justify-center rounded-2xl bg-[var(--kn-ai)]/12 text-[var(--kn-ai)]">
           <Icon className="size-7" />
         </span>
-        <div className="max-w-md space-y-2">
-          <p className="text-[13px] font-medium text-primary">Not available yet</p>
+        <div className="flex max-w-md flex-col items-center gap-2.5">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--kn-ai)]/30 bg-[var(--kn-ai)]/10 px-3 py-1 text-[12px] font-medium text-[var(--kn-ai)]">
+            Coming soon
+          </span>
           <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
             This surface is designed but not wired to a real service yet, so there&apos;s nothing to show — we&apos;d
             rather leave it honest than fill it with fake data.
