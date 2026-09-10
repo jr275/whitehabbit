@@ -24,7 +24,7 @@ export interface NavItem {
 
 /** Primary Knowledge navigation (distinct from Workforce's grouped nav). */
 export const KNOWLEDGE_NAV: NavItem[] = [
-  { href: "/knowledge", label: "Home", icon: Home },
+  { href: "/knowledge/home", label: "Home", icon: Home },
   { href: "/knowledge/library", label: "Library", icon: Library },
   { href: "/knowledge/collections", label: "Collections", icon: Compass },
   { href: "/knowledge/topics", label: "Topics", icon: Tag },
@@ -36,7 +36,7 @@ export const KNOWLEDGE_NAV: NavItem[] = [
 
 /** Compact set surfaced in the mobile bottom bar. */
 export const MOBILE_NAV: NavItem[] = [
-  { href: "/knowledge", label: "Home", icon: Home },
+  { href: "/knowledge/home", label: "Home", icon: Home },
   { href: "/knowledge/library", label: "Library", icon: Library },
   { href: "/knowledge/audio", label: "Audio", icon: Headphones },
   { href: "/knowledge/ai", label: "Ask", icon: Sparkles },
