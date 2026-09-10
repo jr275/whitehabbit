@@ -24,6 +24,10 @@ export const authConfig = {
         token.userId = (user as { id: string }).id
         token.organizationId = (user as { organizationId: string }).organizationId
         token.organizationName = (user as { organizationName: string }).organizationName
+        // Read from the identity authorize() returned, never looked up:
+        // this callback also runs on the Edge runtime, which cannot
+        // load `pg`.
+        token.sessionVersion = (user as { sessionVersion?: number }).sessionVersion ?? 0
       }
       return token
     },
@@ -33,6 +37,12 @@ export const authConfig = {
       }
       ;(session as typeof session & { organizationId: string; organizationName: string }).organizationId = token.organizationId as string
       ;(session as typeof session & { organizationName: string }).organizationName = token.organizationName as string
+      // Absent on tokens minted before this claim existed. Surfaced as
+      // 0 rather than undefined so requireSession() compares numbers
+      // and those sessions keep working until a real reset bumps past
+      // them — shipping a security fix must not sign everyone out.
+      ;(session as typeof session & { sessionVersion: number }).sessionVersion =
+        typeof token.sessionVersion === "number" ? token.sessionVersion : 0
       return session
     },
   },

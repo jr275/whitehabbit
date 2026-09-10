@@ -29,9 +29,14 @@ import {
   getPrimaryOrgForUser,
   getUserByEmail,
   getValidResetToken,
+  createEmailVerificationToken,
+  isEmailVerified,
   resetPasswordWithToken,
+  resolveSessionSubject,
   userBelongsToOrg,
+  verifyEmailWithToken,
 } from "@/lib/db/repo"
+import { emailProvider, isEmailDeliveryConfigured } from "@/lib/auth-email"
 
 before(async () => {
   await prepareDatabase()
@@ -390,5 +395,228 @@ describe("organization membership", () => {
   it("is false for ids that do not exist at all", async () => {
     assert.equal(await userBelongsToOrg("user_nope", "org_nope"), false)
     assert.equal(await userBelongsToOrg("", ""), false)
+  })
+})
+
+/* ================================================================== *
+ * SESSION INVALIDATION — what a password reset must actually end.
+ *
+ * Sessions are JWTs: valid because they are signed, not because
+ * anything looked them up. Until session_version existed there was no
+ * point in the system where an already-issued cookie could be refused,
+ * which meant the one action a person takes to eject an intruder —
+ * changing the password — did not eject them.
+ *
+ * These tests exercise the version at the repository level, where the
+ * comparison requireSession() performs is decided.
+ * ================================================================== */
+
+describe("session invalidation", () => {
+  it("a new account starts at version 0, matching tokens that carry no claim", async () => {
+    // The deploy-safety property. Tokens minted before this feature
+    // existed have no version claim; requireSession reads that as 0.
+    // If new accounts started at 1, shipping the fix would sign every
+    // existing user out.
+    const email = freshEmail("sv-new")
+    const { user, org } = await createUserWithOrganization(email, await hashPassword("password123"), "SV")
+    assert.equal(user.sessionVersion, 0)
+
+    const subject = await resolveSessionSubject(user.id, org.id)
+    assert.equal(subject.belongs, true)
+    assert.equal(subject.sessionVersion, 0)
+  })
+
+  it("a completed password reset bumps the version", async () => {
+    const email = freshEmail("sv-reset")
+    const { user, org } = await createUserWithOrganization(email, await hashPassword("old-password"), "SV")
+    const before = (await resolveSessionSubject(user.id, org.id)).sessionVersion
+
+    const { tokenHash } = generateResetToken()
+    await createPasswordResetToken(user.id, tokenHash, 60_000)
+    assert.equal(await resetPasswordWithToken(tokenHash, await hashPassword("new-password")), true)
+
+    const after = (await resolveSessionSubject(user.id, org.id)).sessionVersion
+    assert.ok(after > before, `version did not advance: ${before} -> ${after}`)
+  })
+
+  it("a token minted before the reset is now stale, and a fresh one is not", async () => {
+    // This is the comparison requireSession() makes, stated directly.
+    const email = freshEmail("sv-stale")
+    const { user, org } = await createUserWithOrganization(email, await hashPassword("old-password"), "SV")
+    const attackerToken = (await resolveSessionSubject(user.id, org.id)).sessionVersion
+
+    const { tokenHash } = generateResetToken()
+    await createPasswordResetToken(user.id, tokenHash, 60_000)
+    await resetPasswordWithToken(tokenHash, await hashPassword("new-password"))
+
+    const current = (await resolveSessionSubject(user.id, org.id)).sessionVersion
+    assert.ok(attackerToken < current, "the cookie held since before the reset must now be refused")
+
+    const ownerToken = current
+    assert.ok(!(ownerToken < current), "a token minted after the reset must still be accepted")
+  })
+
+  it("a FAILED reset does not evict anyone", async () => {
+    // An expired or replayed link must not log a person out of their
+    // own account — that would make the endpoint a denial-of-service
+    // against any address an attacker knows.
+    const email = freshEmail("sv-failed")
+    const { user, org } = await createUserWithOrganization(email, await hashPassword("password123"), "SV")
+    const before = (await resolveSessionSubject(user.id, org.id)).sessionVersion
+
+    const { tokenHash } = generateResetToken()
+    await createPasswordResetToken(user.id, tokenHash, -1_000) // already expired
+    assert.equal(await resetPasswordWithToken(tokenHash, await hashPassword("nope")), false)
+
+    assert.equal((await resolveSessionSubject(user.id, org.id)).sessionVersion, before)
+  })
+
+  it("resetting one account never evicts another", async () => {
+    const a = await createUserWithOrganization(freshEmail("sv-a"), await hashPassword("a-password"), "A")
+    const b = await createUserWithOrganization(freshEmail("sv-b"), await hashPassword("b-password"), "B")
+    const bBefore = (await resolveSessionSubject(b.user.id, b.org.id)).sessionVersion
+
+    const { tokenHash } = generateResetToken()
+    await createPasswordResetToken(a.user.id, tokenHash, 60_000)
+    await resetPasswordWithToken(tokenHash, await hashPassword("a-new-password"))
+
+    assert.equal((await resolveSessionSubject(b.user.id, b.org.id)).sessionVersion, bBefore)
+  })
+
+  it("bumps again on a second reset — versions never go backwards", async () => {
+    const email = freshEmail("sv-twice")
+    const { user, org } = await createUserWithOrganization(email, await hashPassword("p1"), "SV")
+    const versions: number[] = [(await resolveSessionSubject(user.id, org.id)).sessionVersion]
+
+    for (const next of ["p2-password", "p3-password"]) {
+      const { tokenHash } = generateResetToken()
+      await createPasswordResetToken(user.id, tokenHash, 60_000)
+      await resetPasswordWithToken(tokenHash, await hashPassword(next))
+      versions.push((await resolveSessionSubject(user.id, org.id)).sessionVersion)
+    }
+
+    assert.deepEqual(versions, [...versions].sort((x, y) => x - y))
+    assert.equal(new Set(versions).size, versions.length, "each reset must produce a distinct version")
+  })
+
+  it("resolveSessionSubject refuses a user/org pair that is not a real membership", async () => {
+    const a = await createUserWithOrganization(freshEmail("sv-iso-a"), await hashPassword("password123"), "A")
+    const b = await createUserWithOrganization(freshEmail("sv-iso-b"), await hashPassword("password123"), "B")
+
+    assert.equal((await resolveSessionSubject(a.user.id, b.org.id)).belongs, false)
+    assert.equal((await resolveSessionSubject("user_nope", a.org.id)).belongs, false)
+  })
+})
+
+/* ================================================================== *
+ * EMAIL VERIFICATION
+ *
+ * The token half is real and behaves exactly like password reset:
+ * hash-at-rest, single-use, expiring. Nothing yet BLOCKS an unverified
+ * account from signing in — that is a product decision, recorded in
+ * migration 0011 rather than taken quietly here.
+ * ================================================================== */
+
+describe("email verification", () => {
+  it("stores only a hash, and marks the address verified when spent", async () => {
+    const email = freshEmail("ev-ok")
+    const { user } = await createUserWithOrganization(email, await hashPassword("password123"), "EV")
+    assert.equal(await isEmailVerified(user.id), false)
+
+    const { token, tokenHash } = generateResetToken()
+    await createEmailVerificationToken(user.id, email, tokenHash, 60_000)
+
+    const stored = await getTestPool().query("SELECT token_hash FROM email_verification_tokens WHERE user_id = $1", [user.id])
+    assert.equal(stored.rows[0].token_hash, tokenHash)
+    assert.notEqual(stored.rows[0].token_hash, token, "the raw token must never be stored")
+
+    assert.equal(await verifyEmailWithToken(tokenHash), true)
+    assert.equal(await isEmailVerified(user.id), true)
+  })
+
+  it("is single-use", async () => {
+    const email = freshEmail("ev-replay")
+    const { user } = await createUserWithOrganization(email, await hashPassword("password123"), "EV")
+    const { tokenHash } = generateResetToken()
+    await createEmailVerificationToken(user.id, email, tokenHash, 60_000)
+
+    assert.equal(await verifyEmailWithToken(tokenHash), true)
+    assert.equal(await verifyEmailWithToken(tokenHash), false, "a spent token must not be replayable")
+  })
+
+  it("refuses an expired token", async () => {
+    const email = freshEmail("ev-expired")
+    const { user } = await createUserWithOrganization(email, await hashPassword("password123"), "EV")
+    const { tokenHash } = generateResetToken()
+    await createEmailVerificationToken(user.id, email, tokenHash, -1_000)
+
+    assert.equal(await verifyEmailWithToken(tokenHash), false)
+    assert.equal(await isEmailVerified(user.id), false)
+  })
+
+  it("refuses a token that was never issued", async () => {
+    assert.equal(await verifyEmailWithToken(hashToken("invented")), false)
+  })
+
+  it("burns the account's other outstanding tokens", async () => {
+    const email = freshEmail("ev-siblings")
+    const { user } = await createUserWithOrganization(email, await hashPassword("password123"), "EV")
+    const older = generateResetToken()
+    const newer = generateResetToken()
+    await createEmailVerificationToken(user.id, email, older.tokenHash, 60_000)
+    await createEmailVerificationToken(user.id, email, newer.tokenHash, 60_000)
+
+    assert.equal(await verifyEmailWithToken(newer.tokenHash), true)
+    assert.equal(await verifyEmailWithToken(older.tokenHash), false, "the older link must be dead too")
+  })
+
+  it("does not verify an address the account has since changed away from", async () => {
+    // Proving control of the OLD address must not mark a NEW one
+    // verified — otherwise changing the email to someone else's and
+    // clicking an old link would vouch for an address never proven.
+    const original = freshEmail("ev-changed")
+    const { user } = await createUserWithOrganization(original, await hashPassword("password123"), "EV")
+    const { tokenHash } = generateResetToken()
+    await createEmailVerificationToken(user.id, original, tokenHash, 60_000)
+
+    await getTestPool().query("UPDATE users SET email = $1 WHERE id = $2", [freshEmail("ev-new-address"), user.id])
+
+    assert.equal(await verifyEmailWithToken(tokenHash), false)
+    assert.equal(await isEmailVerified(user.id), false)
+  })
+
+  it("a Google account is already verified — the provider vouched for it", async () => {
+    const { user } = await findOrCreateOAuthUser({ email: freshEmail("ev-google"), displayName: null, imageUrl: null })
+    assert.equal(await isEmailVerified(user.id), true)
+  })
+})
+
+/* ================================================================== *
+ * EMAIL DELIVERY BOUNDARY
+ * ================================================================== */
+
+describe("email delivery", () => {
+  it("reports itself unconfigured rather than silently succeeding", async () => {
+    // A no-op that returns success is how a product ends up telling
+    // people to check an inbox nothing was ever sent to.
+    const provider = emailProvider()
+    assert.equal(provider.isConfigured(), false)
+    assert.equal(isEmailDeliveryConfigured(), false)
+    assert.match(provider.notConfiguredReason(), /no email provider/i)
+
+    const reset = await provider.sendPasswordReset({
+      to: "someone@example.test",
+      resetUrl: "https://app.test/reset-password?token=x",
+      expiresInMinutes: 60,
+    })
+    assert.equal(reset.ok, false)
+    assert.equal(reset.ok === false && reset.reason, "not_configured")
+
+    const verify = await provider.sendEmailVerification({
+      to: "someone@example.test",
+      verifyUrl: "https://app.test/verify?token=x",
+      expiresInMinutes: 60,
+    })
+    assert.equal(verify.ok, false)
   })
 })

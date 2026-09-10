@@ -117,12 +117,33 @@ describe("running an index job through the shared queue", () => {
   it("does not chain another index job off an index job", async () => {
     // Otherwise every completed index would schedule the next one and
     // the queue would never drain.
+    //
+    // Indexing DOES now chain one concepts job — the pipeline's last
+    // link. The property under test is unchanged and still exactly as
+    // strict: no SECOND index job, and the chain terminates. Counting
+    // total rows would have quietly turned this into an assertion
+    // about pipeline length, which is not what it is for.
     const itemId = await makeReadyItem(t)
     const job = await repo.enqueueIndexJob(itemId, t.orgId, t.userId)
     await claimAndRunJob({ jobId: job!.id })
+
+    const all = await jobsFor(itemId)
+    const indexJobs = all.filter((j) => j.job_type === "index")
+    assert.equal(indexJobs.length, 1, `expected exactly one index job, got ${JSON.stringify(all)}`)
+    assert.equal(indexJobs[0].status, "done")
+    assert.equal(all.filter((j) => j.job_type === "concepts").length, 1, "exactly one concepts job is chained")
+  })
+
+  it("does not chain anything off a concepts job — the pipeline terminates", async () => {
+    // The other half of the same property, for the new last stage. If
+    // concepts chained anything, the queue would never drain.
+    const itemId = await makeReadyItem(t)
+    const job = await repo.enqueueConceptJob(itemId, t.orgId, t.userId)
+    await claimAndRunJob({ jobId: job!.id })
+
     const all = await jobsFor(itemId)
     assert.equal(all.length, 1, `expected exactly one job, got ${JSON.stringify(all)}`)
-    assert.equal(all[0].status, "done")
+    assert.equal(all[0].job_type, "concepts")
   })
 
   it("leaves the item's own status untouched when indexing runs", async () => {

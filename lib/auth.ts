@@ -54,7 +54,15 @@ const providers: NextAuthConfig["providers"] = [
       const org = await getPrimaryOrgForUser(user.id)
       if (!org) return null // a real account with no organization is a data-integrity problem, not something to paper over
 
-      return { id: user.id, email: user.email, organizationId: org.id, organizationName: org.name }
+      // sessionVersion travels with the identity so the edge-safe jwt
+      // callback can stamp it without importing the database.
+      return {
+        id: user.id,
+        email: user.email,
+        organizationId: org.id,
+        organizationName: org.name,
+        sessionVersion: user.sessionVersion,
+      }
     },
   }),
 ]
@@ -100,6 +108,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           token.userId = dbUser.id
           token.organizationId = org.id
           token.organizationName = org.name
+          // Google sign-in mints a token the same way credentials does,
+          // so it has to carry the same version claim — otherwise an
+          // OAuth session would read as version 0 and survive a reset
+          // that was supposed to end it.
+          token.sessionVersion = dbUser.sessionVersion
         }
         return token
       }

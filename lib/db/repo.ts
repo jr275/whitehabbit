@@ -51,6 +51,12 @@ export interface UserRow {
   authProvider: string
   /** Epoch-ms the user finished onboarding, or null if they haven't. */
   onboardingCompletedAt: number | null
+  /** Bumped whenever every existing session must stop working. Stamped
+   *  into the JWT at sign-in and compared on every request. */
+  sessionVersion: number
+  /** Epoch-ms the address was proven, or null. Recorded but not yet
+   *  enforced anywhere — see migration 0011. */
+  emailVerifiedAt: number | null
   createdAt: number
 }
 
@@ -62,6 +68,8 @@ interface UserDbRow {
   image_url: string | null
   auth_provider: string
   onboarding_completed_at: string | null
+  session_version: number | string
+  email_verified_at: string | null
   created_at: string
 }
 
@@ -74,12 +82,14 @@ function rowToUser(row: UserDbRow): UserRow {
     imageUrl: row.image_url,
     authProvider: row.auth_provider,
     onboardingCompletedAt: row.onboarding_completed_at != null ? Number(row.onboarding_completed_at) : null,
+    sessionVersion: Number(row.session_version ?? 0),
+    emailVerifiedAt: row.email_verified_at != null ? Number(row.email_verified_at) : null,
     createdAt: Number(row.created_at),
   }
 }
 
 const USER_COLUMNS =
-  "id, email, password_hash, display_name, image_url, auth_provider, onboarding_completed_at, created_at"
+  "id, email, password_hash, display_name, image_url, auth_provider, onboarding_completed_at, session_version, email_verified_at, created_at"
 
 export async function getUserByEmail(email: string): Promise<UserRow | null> {
   const row = await queryOne<UserDbRow>(`SELECT ${USER_COLUMNS} FROM users WHERE email = $1`, [email.toLowerCase().trim()])
@@ -114,6 +124,8 @@ export async function createUserWithOrganization(email: string, passwordHash: st
         imageUrl: null,
         authProvider: "credentials",
         onboardingCompletedAt: null,
+        sessionVersion: 0,
+        emailVerifiedAt: null,
         createdAt: now,
       },
       org: { id: orgId, name: orgName, createdAt: now },
@@ -156,7 +168,7 @@ export async function findOrCreateOAuthUser(params: {
     const orgName = `${email.split("@")[0]}'s organization`
 
     await client.query(
-      "INSERT INTO users (id, email, password_hash, display_name, image_url, auth_provider, created_at) VALUES ($1, $2, NULL, $3, $4, 'google', $5)",
+      "INSERT INTO users (id, email, password_hash, display_name, image_url, auth_provider, email_verified_at, created_at) VALUES ($1, $2, NULL, $3, $4, 'google', $5, $5)",
       [userId, email, params.displayName ?? null, params.imageUrl ?? null, now],
     )
     await client.query("INSERT INTO organizations (id, name, created_at) VALUES ($1, $2, $3)", [orgId, orgName, now])
@@ -171,6 +183,12 @@ export async function findOrCreateOAuthUser(params: {
         imageUrl: params.imageUrl ?? null,
         authProvider: "google",
         onboardingCompletedAt: null,
+        sessionVersion: 0,
+        // Google asserted the address and lib/auth.ts refuses the
+        // sign-in unless it says email_verified. Recording that here
+        // means a Google account never has to prove an address a
+        // provider already vouched for.
+        emailVerifiedAt: now,
         createdAt: now,
       },
       org: { id: orgId, name: orgName, createdAt: now },
@@ -265,9 +283,82 @@ export async function resetPasswordWithToken(tokenHash: string, newPasswordHash:
     )
     // Setting a password also converts an OAuth-only account into one
     // that can additionally sign in with credentials — harmless and expected.
-    await client.query("UPDATE users SET password_hash = $1 WHERE id = $2", [newPasswordHash, row.user_id])
+    //
+    // The version bump is the point of the whole reset. Someone
+    // resetting a password is usually trying to eject somebody, and
+    // until this line the intruder's existing cookie kept working:
+    // JWTs are validated by signature, not by lookup, so nothing else
+    // in the system could refuse one. In the SAME statement as the
+    // password change, so the two can never come apart.
+    await client.query(
+      "UPDATE users SET password_hash = $1, session_version = session_version + 1 WHERE id = $2",
+      [newPasswordHash, row.user_id],
+    )
     return true
   })
+}
+
+/* ---- email verification ------------------------------------------ *
+ *
+ * Deliberately the same shape as the reset tokens above: only the hash
+ * is stored, single-use, expiring. A second, subtly different token
+ * mechanism in one codebase is how one of them ends up weaker. */
+
+export async function createEmailVerificationToken(
+  userId: string,
+  email: string,
+  tokenHash: string,
+  ttlMs: number,
+): Promise<void> {
+  const now = Date.now()
+  await query(
+    "INSERT INTO email_verification_tokens (token_hash, user_id, email, expires_at, used_at, created_at) VALUES ($1, $2, $3, $4, NULL, $5)",
+    [tokenHash, userId, email.toLowerCase().trim(), now + ttlMs, now],
+  )
+}
+
+/**
+ * Consumes the token and marks the address verified, in one
+ * transaction so it can never be spent twice.
+ *
+ * The address is taken from the TOKEN, not from users.email. Someone
+ * who changed their address after requesting the link must not have
+ * the new one marked verified by proving control of the old one.
+ * Returns false when the stored address no longer matches the account.
+ */
+export async function verifyEmailWithToken(tokenHash: string): Promise<boolean> {
+  return withTransaction(async (client) => {
+    const res = await client.query<{ user_id: string; email: string; expires_at: string; used_at: string | null }>(
+      "SELECT user_id, email, expires_at, used_at FROM email_verification_tokens WHERE token_hash = $1 FOR UPDATE",
+      [tokenHash],
+    )
+    const row = res.rows[0]
+    if (!row || row.used_at != null || Number(row.expires_at) < Date.now()) return false
+
+    const user = await client.query<{ email: string }>("SELECT email FROM users WHERE id = $1", [row.user_id])
+    if (user.rows[0]?.email !== row.email) return false
+
+    const now = Date.now()
+    // Burn every outstanding token for this account, not only this one
+    // — the same rule the password reset follows, for the same reason.
+    await client.query(
+      "UPDATE email_verification_tokens SET used_at = $1 WHERE user_id = $2 AND used_at IS NULL",
+      [now, row.user_id],
+    )
+    await client.query("UPDATE users SET email_verified_at = COALESCE(email_verified_at, $1) WHERE id = $2", [
+      now,
+      row.user_id,
+    ])
+    return true
+  })
+}
+
+export async function isEmailVerified(userId: string): Promise<boolean> {
+  const row = await queryOne<{ email_verified_at: string | null }>(
+    "SELECT email_verified_at FROM users WHERE id = $1",
+    [userId],
+  )
+  return row?.email_verified_at != null
 }
 
 /** The organization a user should land in — their first (oldest)
@@ -291,6 +382,39 @@ export async function getPrimaryOrgForUser(userId: string): Promise<OrgRow | nul
 export async function userBelongsToOrg(userId: string, orgId: string): Promise<boolean> {
   const row = await queryOne("SELECT 1 FROM memberships WHERE user_id = $1 AND org_id = $2", [userId, orgId])
   return row !== null
+}
+
+export interface SessionSubject {
+  belongs: boolean
+  /** The account's current session version. A token minted before the
+   *  last bump carries a lower one and must be refused. */
+  sessionVersion: number
+}
+
+/** Membership AND session version in ONE query.
+ *
+ *  requireSession() already pays for a membership round trip on every
+ *  authenticated request; asking for the version separately would
+ *  double that cost on the hottest path in the application, and would
+ *  also open a window where the two answers come from different
+ *  instants. */
+export async function resolveSessionSubject(userId: string, orgId: string): Promise<SessionSubject> {
+  const row = await queryOne<{ session_version: number | string }>(
+    `SELECT u.session_version
+       FROM users u
+       JOIN memberships m ON m.user_id = u.id AND m.org_id = $2
+      WHERE u.id = $1`,
+    [userId, orgId],
+  )
+  if (!row) return { belongs: false, sessionVersion: 0 }
+  return { belongs: true, sessionVersion: Number(row.session_version) }
+}
+
+/** Ends every existing session for this account by invalidating the
+ *  tokens already issued. Called inside the reset transaction so a
+ *  password change and the eviction it implies cannot come apart. */
+export async function bumpSessionVersion(userId: string): Promise<void> {
+  await query("UPDATE users SET session_version = session_version + 1 WHERE id = $1", [userId])
 }
 
 /* ================================================================== *

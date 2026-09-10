@@ -261,12 +261,13 @@ describe("drainJobs — real claimAndRunJob against real Postgres", () => {
       claim: (opts) => claimAndRunJob({ ...opts, fetchDeps: { transport: fakeHtmlTransport(REAL_ARTICLE_HTML) } }),
       batchSize: 2,
     })
-    // Four, not two: a successful ingestion enqueues an index job for
-    // the item it just gave content to, and drainJobs keeps going
-    // until nothing is claimable — so one sweep now does both kinds
-    // of work. The property this test exists for is unchanged and
-    // asserted below per type: nothing in the batch was skipped.
-    assert.equal(summary.claimed, 4, "both ingest jobs ran, and both chained index jobs ran, none skipped")
+    // Six, not four: the pipeline gained a third stage. A successful
+    // ingestion chains an index job, which chains a concepts job, and
+    // drainJobs keeps going until nothing is claimable — so one sweep
+    // now does three kinds of work for two items. The property this
+    // test exists for is unchanged and is asserted per type below:
+    // nothing in the batch was skipped.
+    assert.equal(summary.claimed, 6, "every stage of both items ran, none skipped")
 
     const byType = (
       await getTestPool().query<{ job_type: string; status: string; n: string }>(
@@ -275,10 +276,10 @@ describe("drainJobs — real claimAndRunJob against real Postgres", () => {
         [[badItem.id, goodItem.id]],
       )
     ).rows
-    const ingest = byType.find((r) => r.job_type === "ingest")
-    const index = byType.find((r) => r.job_type === "index")
-    assert.equal(Number(ingest?.n), 2, "exactly one ingest job per item, no duplicates")
-    assert.equal(Number(index?.n), 2, "exactly one index job per item, no duplicates")
+    const countOf = (type: string) => Number(byType.find((r) => r.job_type === type)?.n)
+    assert.equal(countOf("ingest"), 2, "exactly one ingest job per item, no duplicates")
+    assert.equal(countOf("index"), 2, "exactly one index job per item, no duplicates")
+    assert.equal(countOf("concepts"), 2, "exactly one concepts job per item, no duplicates")
   })
 
   it("terminal failure and max_attempts are reached the same way through the tick path as through a direct claimAndRunJob call", async () => {
@@ -327,13 +328,13 @@ describe("drainJobs — real claimAndRunJob against real Postgres", () => {
       drainJobs({ claim: (opts) => claimAndRunJob({ ...opts, fetchDeps: { transport: fakeHtmlTransport(REAL_ARTICLE_HTML) } }), batchSize: 3 }),
     ])
 
-    // 12, not 6: each of the 6 ingestions succeeds and chains an
-    // index job, which the same overlapping sweeps then claim. The
-    // fencing property under test is unchanged — and is now checked
-    // where it actually matters, on the job rows themselves: exactly
-    // one ingest and one index job per item, each run exactly once.
-    assert.equal(summaryA.claimed + summaryB.claimed, 12, "together they claimed every available job, none lost, none double-claimed")
-    assert.equal(summaryA.succeeded + summaryB.succeeded, 12)
+    // 18, not 12: each of the 6 ingestions chains an index job, which
+    // chains a concepts job, and the same overlapping sweeps claim all
+    // three stages. The fencing property under test is unchanged — and
+    // is still checked where it actually matters, on the job rows
+    // themselves: exactly one job per (item, stage), each run once.
+    assert.equal(summaryA.claimed + summaryB.claimed, 18, "together they claimed every available job, none lost, none double-claimed")
+    assert.equal(summaryA.succeeded + summaryB.succeeded, 18)
 
     const rows = (
       await getTestPool().query<{ item_id: string; job_type: string; status: string }>(
@@ -341,8 +342,12 @@ describe("drainJobs — real claimAndRunJob against real Postgres", () => {
         [items.map((i) => i.id)],
       )
     ).rows
-    assert.equal(rows.length, 12, "one ingest + one index job per item, and no job created twice")
+    assert.equal(rows.length, 18, "one ingest + one index + one concepts job per item, and no job created twice")
     assert.ok(rows.every((r) => r.status === "done"), "every job ended done exactly once")
+    // Per-stage, per-item: the fencing claim stated exactly.
+    for (const type of ["ingest", "index", "concepts"]) {
+      assert.equal(rows.filter((r) => r.job_type === type).length, 6, `exactly one ${type} job per item`)
+    }
 
     for (const item of items) {
       const readyItem = await repo.getItem(item.id, alice.orgId, alice.userId)

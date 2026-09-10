@@ -9,7 +9,7 @@ import "server-only"
 import { NextResponse } from "next/server"
 import { DatabaseNotConfiguredError } from "@/lib/db/client"
 import { logger, newRequestId } from "@/lib/observability/logger"
-import { UnauthenticatedError, UnauthorizedOrgError } from "@/lib/session"
+import { StaleSessionError, UnauthenticatedError, UnauthorizedOrgError } from "@/lib/session"
 
 export class RateLimitedError extends Error {
   constructor(message = "Too many requests — try again shortly.") {
@@ -59,7 +59,10 @@ export class UpstreamServiceError extends Error {
 export function withApiHandler(routeName: string, handler: (requestId: string) => Promise<NextResponse>): Promise<NextResponse> {
   const requestId = newRequestId()
   return handler(requestId).catch((err) => {
-    if (err instanceof UnauthenticatedError) {
+    if (err instanceof UnauthenticatedError || err instanceof StaleSessionError) {
+      // 401, not 403: the correct next step for both is to sign in
+      // again, and a distinct status would tell an attacker holding a
+      // revoked cookie that the account still exists.
       return NextResponse.json({ error: err.message }, { status: 401 })
     }
     if (err instanceof UnauthorizedOrgError || err instanceof NotFoundError) {
