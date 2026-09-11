@@ -22,6 +22,7 @@ import {
 import type { KnowledgeDocument } from "@/lib/knowledge/types"
 import { KIND_META, askAboutHref, durationLabel, savedAgo } from "@/lib/knowledge/config"
 import { patchItem, summarizeItem } from "@/lib/knowledge/client"
+import { DiscoveryPanel } from "./discovery-panel"
 import { useReadAloud, type UseReadAloudResult } from "@/lib/knowledge/use-read-aloud"
 import { cn } from "@/lib/utils"
 
@@ -294,12 +295,14 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
                 <ExternalLink className="size-4" /> Open original
               </a>
 
-              {/* Insights — what Keeply understood about this piece. Only
-                  real signals are shown as data (Topics comes straight from
-                  the item). Key ideas and Related are honest, prepared slots
-                  for the extraction / Discover services that don't exist yet:
-                  clearly marked "Soon" and never populated with fake data, so
-                  those services can plug in here without a redesign. */}
+              {/* Insights — what Keeply understood about this piece.
+                  Topics come straight from the item; Key ideas and Related
+                  knowledge come from the concepts pipeline (migration 0010)
+                  through /api/knowledge/:id/related. They were dashed "Soon"
+                  slots until that pipeline existed — DiscoveryPanel is the
+                  service plugging in, exactly as the slots were shaped for.
+                  It still renders nothing it cannot support: an unanalyzed
+                  item says so rather than showing an empty result. */}
               <section aria-label="Insights">
                 <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Insights</h3>
                 <div className="mt-3 space-y-3">
@@ -315,8 +318,7 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
                       </div>
                     </div>
                   ) : null}
-                  <InsightSlot label="Key ideas" hint="Key ideas will appear here after analysis." />
-                  <InsightSlot label="Related knowledge" hint="Related knowledge will appear here as your library grows." />
+                  <DiscoveryPanel itemId={doc.id} />
                 </div>
               </section>
 
@@ -776,25 +778,6 @@ function TabButton({
       {children}
       {active ? <span className="absolute inset-x-0 -bottom-px h-0.5 bg-foreground" /> : null}
     </button>
-  )
-}
-
-/** A prepared, honest "coming soon" slot for a future understanding
- *  signal (key ideas, related knowledge). Dashed border + a "Soon" tag
- *  reuse the same visual language as the Coming Soon surfaces, so it reads
- *  as scaffolding — never as data. When the backing service exists, the
- *  real content simply replaces the hint in this exact slot. */
-function InsightSlot({ label, hint }: { label: string; hint: string }) {
-  return (
-    <div className="rounded-xl border border-dashed border-[var(--kn-edge)] bg-[var(--kn-well)]/40 px-3.5 py-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[12px] font-medium text-foreground/70">{label}</p>
-        <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-          Soon
-        </span>
-      </div>
-      <p className="mt-1 text-pretty text-[12px] leading-relaxed text-muted-foreground">{hint}</p>
-    </div>
   )
 }
 

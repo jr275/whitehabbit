@@ -9,6 +9,7 @@
  * ================================================================== */
 
 import { MalformedAnswerError, parseKnowledgeAnswer, type KnowledgeAnswer } from "./ai"
+import { emptyDiscovery, type DiscoveryResult } from "./discovery-contract"
 import type { ResearchBrief } from "./research-contract"
 import type { KnowledgeDocument, KnowledgeItem, KnowledgeListResult, PrimaryFilter } from "./types"
 import {
@@ -194,6 +195,30 @@ export async function deleteItem(id: string): Promise<void> {
 export async function summarizeItem(id: string): Promise<KnowledgeItem> {
   const res = await fetch(`/api/knowledge/${id}/summarize`, { method: "POST" })
   return (await parse<{ item: KnowledgeItem }>(res)).item
+}
+
+/**
+ * What one item is about, and what else in the library shares those
+ * concepts. Read-only and free — the server derives it from rows the
+ * concepts pipeline already wrote, so the Reader can call it on open.
+ *
+ * Guest items resolve to `unavailable` rather than an error: there is
+ * no server-side row to analyze, and a browser-local library has no
+ * concept extraction behind it. Saying "not available for local saves"
+ * is true; showing "nothing related" would not be.
+ */
+export async function fetchRelatedKnowledge(id: string, signal?: AbortSignal): Promise<DiscoveryResult> {
+  if (id.startsWith("kn_guest_")) return emptyDiscovery(id, "unavailable")
+  try {
+    const res = await fetch(`/api/knowledge/${id}/related`, { signal, cache: "no-store" })
+    return (await parse<{ discovery: DiscoveryResult }>(res)).discovery
+  } catch (err) {
+    if (isAuthMiss(err)) {
+      markGuest()
+      return emptyDiscovery(id, "unavailable")
+    }
+    throw err
+  }
 }
 
 export async function retryItem(id: string): Promise<KnowledgeItem> {
