@@ -223,6 +223,44 @@ describe("discovery — scope", () => {
     assert.deepEqual(seen.related, [])
   })
 
+  it("is not an existence oracle — a stranger's real item answers exactly like a fake id", async () => {
+    // The route 404s before it gets here, but if the layer BELOW the
+    // 404 answered differently for a real-but-not-yours id than for a
+    // fabricated one, discovery would confirm which ids exist to
+    // anyone who could reach it another way. Deep-equal, not
+    // "both empty": a status, a count or a field that differs is the
+    // whole leak.
+    const real = await itemFor(owner, "oracle-real")
+    await replaceItemConcepts(real.id, [extracted("Private Topic")], scopeOf(owner))
+
+    const stranger = await discoverForItem(real.id, scopeOf(sameOrgOther))
+    const fabricated = await discoverForItem("kn_00000000-0000-0000-0000-000000000000", scopeOf(sameOrgOther))
+
+    assert.deepEqual(
+      { ...stranger, itemId: "<id>" },
+      { ...fabricated, itemId: "<id>" },
+      "a real item you do not own must be indistinguishable from one that was never saved",
+    )
+  })
+
+  it("does not surface an ARCHIVED item as related", async () => {
+    // Archiving is the user saying "stop showing me this". Discovery
+    // reintroducing it beside something they are reading would quietly
+    // undo that.
+    const live = await itemFor(owner, "arch-live")
+    const archived = await itemFor(owner, "arch-hidden")
+    await replaceItemConcepts(live.id, [extracted("Archived Overlap")], scopeOf(owner))
+    await replaceItemConcepts(archived.id, [extracted("Archived Overlap")], scopeOf(owner))
+
+    const before = (await discoverForItem(live.id, scopeOf(owner))).related.map((r) => r.id)
+    assert.ok(before.includes(archived.id), "precondition: it is related while live")
+
+    await repo.setArchived(archived.id, owner.orgId, owner.userId, true)
+
+    const after = (await discoverForItem(live.id, scopeOf(owner))).related.map((r) => r.id)
+    assert.ok(!after.includes(archived.id), "an archived item must drop out of related")
+  })
+
   it("never lists another owner's item as related, even on a shared concept name", async () => {
     const mineA = await itemFor(owner, "mine-a")
     const mineB = await itemFor(owner, "mine-b")
