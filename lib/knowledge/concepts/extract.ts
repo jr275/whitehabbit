@@ -59,6 +59,21 @@ export interface ExtractionOutcome {
   written: number
   rejected: number
   reason?: string
+  /** Only set when status is "failed", and the distinction decides
+   *  whether retrying is worth anything:
+   *
+   *  "provider" — the model was never reached, or answered with an
+   *    error: no credential, an outage, a timeout. Nothing about THIS
+   *    document caused it, so the caller must NOT record the job as
+   *    done — the item has not been looked at, and the backfill has to
+   *    be able to find it again.
+   *
+   *  "content"  — the model answered and the answer was unusable
+   *    (prose instead of JSON, the wrong envelope). Re-asking the same
+   *    question about the same text tends to produce the same answer,
+   *    so retrying spends tokens to learn nothing. The caller completes
+   *    the job instead of burning its attempts. */
+  failure?: "provider" | "content"
 }
 
 export interface ExtractionDeps {
@@ -106,13 +121,13 @@ export async function extractConceptsForItem(
     // reported separately so a backfill over a library with no
     // credential does not look like a thousand broken documents.
     const reason = result.reason === "not_configured" ? "no LLM provider configured" : result.message
-    return { status: "failed", written: 0, rejected: 0, reason }
+    return { status: "failed", written: 0, rejected: 0, reason, failure: "provider" }
   }
 
   const json = parseExtractionJson(result.output.text)
   if (json === null) {
     logger.warn("concept_extraction_unparseable", { itemId })
-    return { status: "failed", written: 0, rejected: 0, reason: "the model did not return JSON" }
+    return { status: "failed", written: 0, rejected: 0, reason: "the model did not return JSON", failure: "content" }
   }
 
   let parsed
@@ -120,7 +135,13 @@ export async function extractConceptsForItem(
     parsed = parseExtraction(json, knownChunkIds)
   } catch (err) {
     logger.warn("concept_extraction_malformed", { itemId, message: err instanceof Error ? err.message : String(err) })
-    return { status: "failed", written: 0, rejected: 0, reason: err instanceof Error ? err.message : "malformed" }
+    return {
+      status: "failed",
+      written: 0,
+      rejected: 0,
+      reason: err instanceof Error ? err.message : "malformed",
+      failure: "content",
+    }
   }
 
   if (parsed.rejected.length > 0) {

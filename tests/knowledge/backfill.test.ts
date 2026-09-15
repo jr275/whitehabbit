@@ -21,6 +21,7 @@ import { closeTestPool, createTenant, getTestPool, prepareDatabase, type TestTen
 import { EMBEDDING_DIMENSIONS, type EmbeddingProvider } from "@/lib/ai/embeddings"
 import { embedItemChunks, indexItem } from "@/lib/knowledge/indexing"
 import { countBacklog, enqueueBackfill, findBackfillCandidates } from "@/lib/knowledge/backfill"
+import * as repo from "@/lib/knowledge/repo"
 
 const MODEL = "backfill-test-model"
 
@@ -68,6 +69,27 @@ async function saveItem(
 
 const scopeOf = (t: TestTenant) => ({ orgId: t.orgId, userId: t.userId })
 
+/**
+ * Records that concept analysis has run to completion for this item.
+ *
+ * Needed by every case below that claims an item's ONLY outstanding
+ * work is vectors, or that it has none at all. Those claims are about
+ * the chunk/vector half of the survey, and they are only true of an
+ * item the analysis half is also finished with — otherwise the item is
+ * legitimately a never_analyzed candidate and the case is asserting
+ * something it did not set up. Stating the precondition here makes it
+ * a precondition rather than an accident of what the fixtures happened
+ * to leave out.
+ *
+ * Uses the real queue, because a completed concepts job is exactly the
+ * fact the survey reads — see tests/knowledge/backfill-concepts.test.ts.
+ */
+async function markAnalyzed(t: TestTenant, itemId: string): Promise<void> {
+  const job = await repo.enqueueConceptJob(itemId, t.orgId, t.userId)
+  const claimed = await repo.claimJobById(job!.id, "worker-backfill-test")
+  await repo.completeJob(claimed!.id, "worker-backfill-test")
+}
+
 describe("backfill survey", () => {
   let alice: TestTenant
   let bob: TestTenant
@@ -96,6 +118,7 @@ describe("backfill survey", () => {
   it("a chunked item with no vectors is a candidate for its vectors only", async () => {
     const id = await saveItem(alice)
     await indexItem({ itemId: id, orgId: alice.orgId, userId: alice.userId })
+    await markAnalyzed(alice, id)
     const [candidate] = await findBackfillCandidates(scopeOf(alice), { model: MODEL })
     assert.equal(candidate.reason, "missing_vectors")
     assert.ok(candidate.chunks > 0)
@@ -109,6 +132,7 @@ describe("backfill survey", () => {
       { itemId: id, orgId: alice.orgId, userId: alice.userId },
       { embeddings: fakeProvider() },
     )
+    await markAnalyzed(alice, id)
     assert.deepEqual(await findBackfillCandidates(scopeOf(alice), { model: MODEL }), [])
   })
 
@@ -119,6 +143,7 @@ describe("backfill survey", () => {
     const id = await saveItem(alice)
     await indexItem({ itemId: id, orgId: alice.orgId, userId: alice.userId })
     await embedItemChunks({ itemId: id, orgId: alice.orgId, userId: alice.userId }, { embeddings: fakeProvider() })
+    await markAnalyzed(alice, id)
 
     assert.deepEqual(await findBackfillCandidates(scopeOf(alice), { model: MODEL }), [])
     const afterSwitch = await findBackfillCandidates(scopeOf(alice), { model: "a-different-model" })
@@ -160,11 +185,16 @@ describe("backfill survey", () => {
     await saveItem(alice)
     const chunked = await saveItem(alice)
     await indexItem({ itemId: chunked, orgId: alice.orgId, userId: alice.userId })
+    await markAnalyzed(alice, chunked)
+    const unanalyzed = await saveItem(alice)
+    await indexItem({ itemId: unanalyzed, orgId: alice.orgId, userId: alice.userId })
+    await embedItemChunks({ itemId: unanalyzed, orgId: alice.orgId, userId: alice.userId }, { embeddings: fakeProvider() })
 
     const backlog = await countBacklog(scopeOf(alice), { model: MODEL })
-    assert.equal(backlog.total, 2)
+    assert.equal(backlog.total, 3)
     assert.equal(backlog.neverIndexed, 1)
     assert.equal(backlog.missingVectors, 1)
+    assert.equal(backlog.neverAnalyzed, 1)
     assert.equal(backlog.staleChunks, 0)
   })
 
@@ -229,11 +259,19 @@ describe("backfill enqueue", () => {
     const id = await saveItem(alice)
     await indexItem({ itemId: id, orgId: alice.orgId, userId: alice.userId })
     await embedItemChunks({ itemId: id, orgId: alice.orgId, userId: alice.userId }, { embeddings: fakeProvider() })
+    await markAnalyzed(alice, id)
 
     const result = await enqueueBackfill(scopeOf(alice), { model: MODEL })
     assert.equal(result.candidates, 0)
     assert.equal(result.enqueued, 0)
-    assert.equal((await queuedJobs(id)).length, 0)
+    // Only OPEN work counts: markAnalyzed above leaves a completed
+    // concepts job behind, and a finished job is the evidence that
+    // there is nothing to do — not a contradiction of it.
+    assert.deepEqual(
+      (await queuedJobs(id)).filter((j) => (j as { status: string }).status === "queued"),
+      [],
+      "nothing was queued",
+    )
   })
 
   it("copies ownership from the item row, not from the caller", async () => {

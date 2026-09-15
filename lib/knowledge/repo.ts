@@ -901,7 +901,28 @@ export async function enqueueIndexJob(itemId: string, orgId: string, userId: str
  *
  *  Same partial-unique guard as the others: one queued job per item, so
  *  a save followed by a retry cannot stack duplicate work. */
+export async function enqueueConceptJobDetailed(
+  itemId: string,
+  orgId: string,
+  userId: string | null,
+): Promise<EnqueuedJob> {
+  return enqueueConceptJobInternal(itemId, orgId, userId)
+}
+
 export async function enqueueConceptJob(itemId: string, orgId: string, userId: string | null): Promise<KnowledgeJobRow | null> {
+  return (await enqueueConceptJobInternal(itemId, orgId, userId)).job
+}
+
+/** Shared body. `created` distinguishes an INSERT that landed from a
+ *  conflict that found an existing queued job — the backfill needs
+ *  that difference to report how much work it actually started, and a
+ *  re-observed queued job looks identical to a fresh one otherwise
+ *  (both carry attempts 0). Same lesson as enqueueIndexJobDetailed. */
+async function enqueueConceptJobInternal(
+  itemId: string,
+  orgId: string,
+  userId: string | null,
+): Promise<EnqueuedJob> {
   const now = Date.now()
   const inserted = await queryOne<KnowledgeJobRow>(
     `INSERT INTO knowledge_jobs (id, item_id, org_id, created_by, job_type, status, attempts, max_attempts, available_at, created_at, updated_at)
@@ -910,11 +931,12 @@ export async function enqueueConceptJob(itemId: string, orgId: string, userId: s
      RETURNING ${JOB_COLS}`,
     [`knj_${randomUUID()}`, itemId, orgId, userId, DEFAULT_MAX_ATTEMPTS, now],
   )
-  if (inserted) return inserted
-  return queryOne<KnowledgeJobRow>(
+  if (inserted) return { job: inserted, created: true }
+  const existing = await queryOne<KnowledgeJobRow>(
     `SELECT ${JOB_COLS} FROM knowledge_jobs WHERE item_id = $1 AND status = 'queued' ORDER BY created_at DESC LIMIT 1`,
     [itemId],
   )
+  return { job: existing, created: false }
 }
 
 /* ---- chunk embeddings (Phase D) ---------------------------------- */

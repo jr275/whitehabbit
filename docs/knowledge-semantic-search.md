@@ -239,7 +239,7 @@ budget for third-party latency or failure, which is the opposite of what
 embedding a library needs.
 
 Instead, **`POST /api/knowledge/indexing`** surveys the library and
-queues an index job per candidate **on the existing queue**. The normal
+queues one job per candidate **on the existing queue**. The normal
 tick drains them; the route enqueues and returns, it does not run
 anything itself. Check `GET` on the same path first — it is the dry
 run. It is idempotent by construction: the partial unique
@@ -247,7 +247,63 @@ index `uq_knowledge_jobs_item_open` permits one queued job per item, so
 running it twice — or from two places at once — adds nothing.
 
 There is deliberately no second queue, no second worker, and no second
-definition of "indexed".
+definition of "indexed" or "analyzed".
+
+### How to run it
+
+Both calls are session-scoped and act on the caller's own library only;
+there is no cross-tenant or global backfill, and no CLI. Signed in as
+the owner:
+
+```
+GET  /api/knowledge/indexing    # dry run: what is outstanding, by reason
+POST /api/knowledge/indexing    # queue the work
+```
+
+`POST` is rate-limited (`knowledge_backfill`, 5/min per org) because
+each queued job becomes real provider calls. Watch `jobs` in the `GET`
+response to see the queue drain; `backlog` should fall to zero and stay
+there.
+
+### The four reasons
+
+| Reason | What is missing | Job queued |
+|---|---|---|
+| `never_indexed` | no chunks at all | `index` |
+| `stale_chunks` | chunks built from text that has since changed | `index` |
+| `never_analyzed` | chunks exist, but no concepts and no completed concepts job | `concepts` |
+| `missing_vectors` | chunks are current, some have no embedding from the configured model | `index` |
+
+An item can be several of these at once and only one job may be open
+for it, so the reason is picked in **pipeline order**, not by how much
+work each implies: chunks must exist and be current before anything can
+read them, understanding comes next, and vectors last. Vectors rank
+last deliberately — they are the one stage designed to fail open, so in
+a deployment with no embedding credential *every* chunked item reports
+`missing_vectors` forever; ranking it higher would make the concepts
+backfill unreachable there rather than merely slower. Nothing is lost
+by an item that needs two: whichever job runs first completes, and the
+next run picks up the other.
+
+### Why `never_analyzed` is two conditions
+
+"No concepts" alone cannot tell three situations apart: nobody ever
+looked, we looked and the document is genuinely about nothing nameable,
+and we looked and it broke. Selecting on it would re-spend a model call
+on the middle group on every run.
+
+A **completed concepts job** is the missing fact — it says we looked,
+whatever the answer was. So an item needs analysis when it has no
+concepts *and* no concepts job has ever completed for it. A job that
+could not reach a provider is recorded `failed`, never `done`, so a
+real failure comes back round while an honest empty result does not.
+
+That also means a concepts job blocked by a missing credential fails
+**immediately and terminally** rather than retrying: an absent
+credential is a deployment state, not a transient fault, and retrying
+it `max_attempts` times per item across a library would starve the
+queue. The backfill is this stage's retry, and it runs when an operator
+asks.
 
 ---
 

@@ -485,10 +485,52 @@ async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetch
       // Concept extraction is the LAST stage: it reads chunks the index
       // job produced. A failure here leaves the item fully readable and
       // searchable — only its concepts are missing — so it must never
-      // fail the item, and does not.
+      // fail the ITEM. It may, and now does, fail the JOB.
+      //
+      // This used to complete the job whatever happened, which made a
+      // provider outage indistinguishable from "this document has no
+      // concepts": both left zero rows and a `done` job, so nothing
+      // downstream could tell that we had not actually looked, and the
+      // item was never revisited.
+      //
+      // A CONTENT failure still completes. Re-asking the same question
+      // about the same text produces the same unusable answer, so
+      // spending more calls on it learns nothing — the reasoning in
+      // concepts/extract.ts's header, kept, now that the outcome says
+      // which kind of failure it was.
       const outcome = await extractConceptsForItem(job.item_id, { orgId: job.org_id, userId: job.created_by })
       if (outcome.status === "failed") {
-        logger.warn("knowledge_concepts_failed", { itemId: job.item_id, reason: outcome.reason })
+        logger.warn("knowledge_concepts_failed", {
+          itemId: job.item_id,
+          reason: outcome.reason,
+          failure: outcome.failure,
+        })
+        if (outcome.failure === "provider") {
+          // FAILED IMMEDIATELY AND TERMINALLY, not retried, and above
+          // all not `done`.
+          //
+          // Not `done`, because it was not: nothing looked at this
+          // item, and recording success would hide that from the
+          // backfill's survey forever — the item would be
+          // indistinguishable from one the model read and found
+          // nothing nameable in.
+          //
+          // Not retried either, because the commonest provider failure
+          // by far is "no credential in this deployment", which is a
+          // deployment state rather than a transient fault. Handing it
+          // to the backoff loop would burn max_attempts claims per
+          // item across an entire library, starving the queue of real
+          // work to re-learn the same answer. The retry for this stage
+          // is the backfill, which finds exactly the items in this
+          // state and re-queues them once — after a credential exists.
+          await repo.failJob(job.id, workerId, {
+            attempts: job.max_attempts,
+            error: outcome.reason ?? "Concept extraction could not reach a model provider.",
+            retryAt: null,
+          })
+          summary.failed++
+          return
+        }
       }
     } else if (job.job_type === "index") {
       await runIndexJob(job.item_id, job.org_id, job.created_by)
@@ -550,17 +592,23 @@ async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetch
         // what it always meant, only reached through a durable retry
         // loop instead of a single best-effort attempt.
         //
-        // ONLY for ingestion. A failed INDEX job must not mark the
-        // item failed: the piece was fetched, extracted and is
-        // readable — it is simply missing from search. Saying
-        // "failed" would tell the user their save broke when it did
-        // not, and would offer them a Retry that re-fetches a page
-        // that was never the problem. The job row carries the real
-        // failure, and stays queryable.
-        if (job.job_type !== "index") {
-          await repo.setStatus(job.item_id, job.org_id, job.created_by, "failed", message)
+        // ONLY for ingestion. A failed INDEX or CONCEPTS job must not
+        // mark the item failed: the piece was fetched, extracted and
+        // is readable — it is simply missing from search, or missing
+        // its concepts. Saying "failed" would tell the user their save
+        // broke when it did not, and would offer them a Retry that
+        // re-fetches a page that was never the problem. The job row
+        // carries the real failure, and stays queryable.
+        if (job.job_type === "index" || job.job_type === "concepts") {
+          logger.error("knowledge_post_ingest_job_exhausted", {
+            jobId: job.id,
+            itemId: job.item_id,
+            jobType: job.job_type,
+            attempts,
+            message,
+          })
         } else {
-          logger.error("knowledge_index_job_exhausted", { jobId: job.id, itemId: job.item_id, attempts, message })
+          await repo.setStatus(job.item_id, job.org_id, job.created_by, "failed", message)
         }
         summary.failed++
       } else {

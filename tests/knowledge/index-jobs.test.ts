@@ -44,6 +44,23 @@ const jobsFor = async (itemId: string) =>
     [itemId],
   )).rows
 
+/** Runs the index job so the item really has passages, and returns the
+ *  id of the concepts job indexing chained. Extraction reads chunks —
+ *  pointed at an unindexed item it correctly SKIPS, which is a
+ *  different outcome from the provider failures below and would make
+ *  them pass for the wrong reason. jobsFor projects only type and
+ *  status, so the id is read straight from the queue. */
+async function chainedConceptsJobId(t: TestTenant, itemId: string): Promise<string> {
+  const indexJob = await repo.enqueueIndexJob(itemId, t.orgId, t.userId)
+  await claimAndRunJob({ jobId: indexJob!.id })
+  const { rows } = await getTestPool().query<{ id: string }>(
+    "SELECT id FROM knowledge_jobs WHERE item_id = $1 AND job_type = 'concepts'",
+    [itemId],
+  )
+  assert.equal(rows.length, 1, "indexing must have chained exactly one concepts job")
+  return rows[0].id
+}
+
 describe("enqueueIndexJob", () => {
   let t: TestTenant
   before(async () => {
@@ -132,6 +149,50 @@ describe("running an index job through the shared queue", () => {
     assert.equal(indexJobs.length, 1, `expected exactly one index job, got ${JSON.stringify(all)}`)
     assert.equal(indexJobs[0].status, "done")
     assert.equal(all.filter((j) => j.job_type === "concepts").length, 1, "exactly one concepts job is chained")
+  })
+
+  it("records a provider-blocked concepts job as FAILED, never done", async () => {
+    // The distinction the whole concepts backfill rests on. No model
+    // provider is configured in this suite, so extraction cannot run —
+    // and a job that completes anyway would claim the item had been
+    // looked at, which is how these items became permanently invisible
+    // to the backfill's survey in the first place.
+    const itemId = await makeReadyItem(t)
+    const conceptsJobId = await chainedConceptsJobId(t, itemId)
+    await claimAndRunJob({ jobId: conceptsJobId })
+
+    const settled = await repo.getJob(conceptsJobId)
+    assert.equal(settled?.status, "failed", "a stage that did not run must not be recorded as done")
+    assert.match(settled!.last_error ?? "", /provider/i, "and must carry the real reason")
+  })
+
+  it("does not retry a provider-blocked concepts job — an absent credential is not transient", async () => {
+    // Retrying would burn max_attempts claims per item across a whole
+    // library to re-learn that the same credential is still absent.
+    // The backfill is this stage's retry, and it runs when an operator
+    // asks rather than on a backoff timer.
+    const itemId = await makeReadyItem(t)
+    const conceptsJobId = await chainedConceptsJobId(t, itemId)
+    await claimAndRunJob({ jobId: conceptsJobId })
+
+    const settled = await repo.getJob(conceptsJobId)
+    assert.equal(settled?.status, "failed")
+    assert.equal(settled?.attempts, settled?.max_attempts, "it goes terminal on the first attempt, not after five")
+  })
+
+  it("a failed concepts job leaves the ITEM readable, not failed", async () => {
+    // Same rule indexing already follows: the piece was fetched,
+    // extracted and is readable — only its concepts are missing.
+    // Marking it failed would tell the user their save broke and offer
+    // a Retry that re-fetches a page that was never the problem.
+    const itemId = await makeReadyItem(t)
+    const conceptsJobId = await chainedConceptsJobId(t, itemId)
+    await claimAndRunJob({ jobId: conceptsJobId })
+
+    assert.equal((await repo.getJob(conceptsJobId))?.status, "failed", "precondition: the job really did fail")
+    const item = await repo.getItem(itemId, t.orgId, t.userId)
+    assert.equal(item?.status, "ready", "a missing concept is not a broken save")
+    assert.equal(item?.error, null)
   })
 
   it("does not chain anything off a concepts job — the pipeline terminates", async () => {

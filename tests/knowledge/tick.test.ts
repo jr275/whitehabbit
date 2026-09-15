@@ -334,7 +334,19 @@ describe("drainJobs — real claimAndRunJob against real Postgres", () => {
     // is still checked where it actually matters, on the job rows
     // themselves: exactly one job per (item, stage), each run once.
     assert.equal(summaryA.claimed + summaryB.claimed, 18, "together they claimed every available job, none lost, none double-claimed")
-    assert.equal(summaryA.succeeded + summaryB.succeeded, 18)
+
+    // OUTCOMES ARE ASSERTED PER STAGE, not in one total, because the
+    // three stages do not end the same way here and lumping them
+    // together would hide which one moved. No model provider is
+    // configured in the suite (by design — no test may need a
+    // credential), so every concepts job legitimately fails: it is
+    // recorded `failed` with its real reason rather than `done`,
+    // because nothing actually looked at the item. That is the
+    // behaviour tests/knowledge/backfill-concepts.test.ts depends on
+    // to find these items again.
+    assert.equal(summaryA.succeeded + summaryB.succeeded, 12, "the 6 ingest and 6 index jobs each succeeded once")
+    assert.equal(summaryA.failed + summaryB.failed, 6, "the 6 concepts jobs each failed once — for want of a provider")
+    assert.equal(summaryA.retried + summaryB.retried, 0, "and none of them was retried: an absent provider is not a transient fault")
 
     const rows = (
       await getTestPool().query<{ item_id: string; job_type: string; status: string }>(
@@ -343,10 +355,18 @@ describe("drainJobs — real claimAndRunJob against real Postgres", () => {
       )
     ).rows
     assert.equal(rows.length, 18, "one ingest + one index + one concepts job per item, and no job created twice")
-    assert.ok(rows.every((r) => r.status === "done"), "every job ended done exactly once")
-    // Per-stage, per-item: the fencing claim stated exactly.
-    for (const type of ["ingest", "index", "concepts"]) {
-      assert.equal(rows.filter((r) => r.job_type === type).length, 6, `exactly one ${type} job per item`)
+    // Per-stage, per-item, with its outcome: the fencing claim stated
+    // exactly. Each row was claimed once and reached a terminal state
+    // once — which is the property, regardless of WHICH terminal state
+    // each stage reaches.
+    for (const [type, status] of [
+      ["ingest", "done"],
+      ["index", "done"],
+      ["concepts", "failed"],
+    ] as const) {
+      const forType = rows.filter((r) => r.job_type === type)
+      assert.equal(forType.length, 6, `exactly one ${type} job per item`)
+      assert.ok(forType.every((r) => r.status === status), `every ${type} job ended ${status} exactly once`)
     }
 
     for (const item of items) {
