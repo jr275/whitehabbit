@@ -167,6 +167,16 @@ export interface KnowledgeObject {
   /** Tags from the source's own metadata — publisher-supplied, not
    *  derived. Distinct from concepts, which the extractor named. */
   topics?: string[]
+  /** The summary the pipeline's last stage wrote, verbatim.
+   *
+   *  Undefined has one meaning and one only: no summary exists yet —
+   *  the item predates the stage, has no extracted text, or its run
+   *  could not reach a provider. It is never a stand-in for a failure
+   *  to READ one, which the surface reports separately, and the
+   *  surface never substitutes an excerpt for it: a publisher's meta
+   *  description is the source's own marketing copy, not something
+   *  Keeply understood. */
+  summary?: string
 
   /* ---- prototype-only, and OPTIONAL for that reason --------------- */
   /** One line of what Keeply took from it. Never a summary of the

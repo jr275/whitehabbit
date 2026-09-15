@@ -143,6 +143,10 @@ export async function liveExplorer(scope: ConceptScope, limit = EXPLORER_ITEM_LI
       domain: item.domain,
       author: item.author,
       topics: item.topics,
+      // Already on the row the list query returned — rowToItem maps
+      // knowledge_items.summary to aiSummary — so this costs no second
+      // query and no per-item fetch.
+      summary: item.aiSummary,
       // insight, revisits and relevance are deliberately absent — see
       // KnowledgeObject in ./types.ts. Nothing derives them from a real
       // item, and a plausible value is worse than none.

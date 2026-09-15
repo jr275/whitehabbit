@@ -147,6 +147,17 @@ export function ObjectDetailDrawer({
             </ul>
           </section>
 
+          {/* The summary in full — the drawer has room the row does not,
+              so nothing is clamped here. */}
+          {object.summary && (
+            <section className="mt-9">
+              <Label>In short</Label>
+              <p className="mt-3 text-pretty text-[14.5px] leading-relaxed text-[var(--kp-ink-soft)]">
+                {object.summary}
+              </p>
+            </section>
+          )}
+
           {/* Only when there is one. A live object has no such line —
               nothing derives it — and a heading over an empty space
               reads as something that failed to load. */}

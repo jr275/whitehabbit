@@ -323,16 +323,36 @@ export function KnowledgeExplorer({
                     </p>
                   )}
 
-                  <ul className="mt-2.5 flex flex-wrap gap-1.5">
-                    {object.conceptIds.map((id) => (
-                      <li
-                        key={id}
-                        className="rounded-full border border-[var(--kp-rule)] px-2 py-0.5 text-[11px] text-[var(--kp-ink-faint)]"
-                      >
-                        {conceptById.get(id)?.label ?? id}
-                      </li>
-                    ))}
-                  </ul>
+                  {object.conceptIds.length > 0 && (
+                    <ul className="mt-2.5 flex flex-wrap gap-1.5">
+                      {object.conceptIds.map((id) => (
+                        <li
+                          key={id}
+                          className="rounded-full border border-[var(--kp-rule)] px-2 py-0.5 text-[11px] text-[var(--kp-ink-faint)]"
+                        >
+                          {conceptById.get(id)?.label ?? id}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {/* CONTEXT, NOT CONTENT. The summary sits below the
+                      concepts and is clamped to two lines: it answers
+                      "is this the one I meant?" while scanning, and a
+                      row that unfolded into three paragraphs would stop
+                      the list being scannable, which is the only reason
+                      this section is a list.
+                      Clamped in CSS — the stored text is never altered,
+                      and the full summary is in the Reader.
+                      Absent means no summary exists yet. Nothing is
+                      substituted for it: a publisher's meta description
+                      is the source's marketing copy, not something
+                      Keeply understood. */}
+                  {object.summary && (
+                    <p className="mt-2.5 line-clamp-2 max-w-[68ch] text-pretty text-[13px] leading-relaxed text-[var(--kp-ink-soft)]">
+                      {object.summary}
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 md:flex-col md:items-end md:gap-1.5 md:opacity-0 md:transition-opacity md:duration-[var(--kp-fast)] md:group-focus-within:opacity-100 md:group-hover:opacity-100">

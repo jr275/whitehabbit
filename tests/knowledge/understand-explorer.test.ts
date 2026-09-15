@@ -100,6 +100,36 @@ describe("liveExplorer — the viewer's own library", () => {
     assert.ok(objects[0].url?.startsWith("https://example.test/"), "a real row must be openable")
   })
 
+  it("carries the persisted summary, from the same query — no second read", async () => {
+    // The summary is on the row the list query already returned. If it
+    // ever needed a fetch of its own, this page would issue one request
+    // per item, which is the failure the whole module is shaped to
+    // avoid.
+    const id = await save(owner)
+    await repo.setSummary(id, owner.orgId, owner.userId, "Two plain sentences about the piece.")
+
+    const [object] = (await liveExplorer(scopeOf(owner))).objects
+    assert.equal(object.summary, "Two plain sentences about the piece.")
+  })
+
+  it("leaves summary undefined when the item has none, and substitutes nothing", async () => {
+    // Undefined means "no summary yet". The surface must not fall back
+    // to the excerpt: a publisher's meta description is the source's
+    // own marketing copy, not something Keeply understood, and showing
+    // it in the same place would make the two indistinguishable.
+    const id = await save(owner)
+    await getTestPool().query("UPDATE knowledge_items SET excerpt = $1 WHERE id = $2", ["Publisher blurb.", id])
+
+    const [object] = (await liveExplorer(scopeOf(owner))).objects
+    assert.equal(object.summary, undefined)
+  })
+
+  it("does not read a COLLEAGUE's summary", async () => {
+    const theirs = await save(colleague)
+    await repo.setSummary(theirs, colleague.orgId, colleague.userId, "Their private summary.")
+    assert.deepEqual((await liveExplorer(scopeOf(owner))).objects, [])
+  })
+
   it("carries NO insight, relevance or revisit count — nothing derives them", async () => {
     // These are measures of the sample library. A live object that
     // carried a plausible value for them would put an invented line
@@ -180,6 +210,7 @@ describe("demo and live do not blend", () => {
       "the prototype keeps its own measures",
     )
     assert.ok(OBJECTS.every((o) => o.url === undefined), "and points at nothing, so it offers no reader link")
+    assert.ok(OBJECTS.every((o) => o.summary === undefined), "and carries no summary — it has an insight line instead")
   })
 })
 
