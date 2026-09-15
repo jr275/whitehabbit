@@ -28,10 +28,18 @@ export interface KnowledgeOverview {
   origin: DataOrigin
   savedCount: number
   conceptCount: number
-  themeCount: number
-  questionCount: number
-  /** ISO date of the earliest saved item — anchors the timeline. */
-  since: string
+  /** NULL means "this is not measured yet", which is a different fact
+   *  from zero and has to render differently. Themes and open
+   *  questions have no table, no derivation and no definition in this
+   *  codebase; a live overview therefore omits them rather than
+   *  putting a plausible number where a measurement should be. The
+   *  demo overview still carries both, because the prototype's job is
+   *  to show what the finished surface looks like. */
+  themeCount: number | null
+  questionCount: number | null
+  /** ISO date of the earliest saved item — anchors the timeline. Null
+   *  for an empty library: there is no "collected since" yet. */
+  since: string | null
 }
 
 export interface KnowledgeConcept {

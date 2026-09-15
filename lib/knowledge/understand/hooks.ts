@@ -55,12 +55,39 @@ export interface Resource<T> {
   origin: DataOrigin
 }
 
+/** Everything except the overview is still the prototype's own data,
+ *  so it reports `demo` regardless of what the overview resolved to.
+ *  Reading the origin off OVERVIEW would have quietly relabelled every
+ *  sample theme and connection as live the moment the overview became
+ *  live, which is the exact failure this field exists to prevent. */
 function ready<T>(data: T): Resource<T> {
-  return { data, status: "ready", origin: OVERVIEW.origin }
+  return { data, status: "ready", origin: "demo" }
 }
 
-export function useKnowledgeOverview(): Resource<KnowledgeOverview> {
-  return useMemo(() => ready(OVERVIEW), [])
+/**
+ * The first hook whose data can be real.
+ *
+ * `initial` is resolved on the server (app/knowledge/page.tsx →
+ * lib/knowledge/understand/live.ts) and handed in, rather than fetched
+ * here. Two reasons, and the second is the important one:
+ *
+ *  1. No loading state and no flash. There is no moment where the
+ *     surface shows the sample library's 428 saves to someone who has
+ *     nine, which a client fetch with a demo placeholder would
+ *     guarantee.
+ *  2. The seam stays in one place. A component still asks this hook
+ *     for the overview and still branches on `origin`; what changed is
+ *     where the hook's answer comes from, which is exactly what this
+ *     file exists to be able to change.
+ *
+ * Guests and signed-out visitors pass nothing and get the labelled
+ * prototype, which is what the page was before and still is for them.
+ */
+export function useKnowledgeOverview(initial?: KnowledgeOverview | null): Resource<KnowledgeOverview> {
+  return useMemo(() => {
+    const data = initial ?? OVERVIEW
+    return { data, status: "ready", origin: data.origin }
+  }, [initial])
 }
 
 export function useKnowledgeThemes(): Resource<KnowledgeTheme[]> {

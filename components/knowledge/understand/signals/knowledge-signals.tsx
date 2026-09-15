@@ -40,11 +40,26 @@ function KnowledgeMetric({ signal, index, revealed }: { signal: Signal; index: n
 export function KnowledgeSignals({ overview }: { overview: KnowledgeOverview }) {
   const { ref, revealed } = useReveal<HTMLDivElement>()
 
+  // A measure with no value is LEFT OUT, not rendered as zero. Themes
+  // and open questions are not derived from anything yet, and a "0"
+  // under them would tell the reader their library contains none —
+  // a claim about their library, made by a gap in ours.
+  //
+  // The row still reads left-to-right as raw → understood; it is
+  // simply shorter while fewer measures exist.
   const signals: Signal[] = [
     { value: overview.savedCount, label: "things saved", note: "articles, videos, PDFs and your own notes" },
-    { value: overview.conceptCount, label: "concepts", note: "ideas that recur across more than one source" },
-    { value: overview.themeCount, label: "themes", note: "concepts that cluster into a subject you follow" },
-    { value: overview.questionCount, label: "open questions", note: "raised repeatedly, resolved nowhere" },
+    // The note describes what is actually counted. "ideas that recur
+    // across more than one source" was true of the sample library and
+    // is not true of the measure: this is DISTINCT concepts, including
+    // ones found in a single piece.
+    { value: overview.conceptCount, label: "concepts", note: "distinct ideas Keeply named across your sources" },
+    ...(overview.themeCount !== null
+      ? [{ value: overview.themeCount, label: "themes", note: "concepts that cluster into a subject you follow" }]
+      : []),
+    ...(overview.questionCount !== null
+      ? [{ value: overview.questionCount, label: "open questions", note: "raised repeatedly, resolved nowhere" }]
+      : []),
   ]
 
   return (

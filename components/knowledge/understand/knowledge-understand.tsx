@@ -30,7 +30,7 @@ import {
   useResearch,
   useVoice,
 } from "@/lib/knowledge/understand/hooks"
-import type { KnowledgeInsight } from "@/lib/knowledge/understand/types"
+import type { KnowledgeInsight, KnowledgeOverview } from "@/lib/knowledge/understand/types"
 import { KnowledgeAsk } from "./ask/knowledge-ask"
 import { KnowledgeGraph } from "./connections/knowledge-graph"
 import { KnowledgeExplorer } from "./explorer/knowledge-explorer"
@@ -58,8 +58,15 @@ const CHAPTERS: ChapterLink[] = [
   { id: "research", label: "Research" },
 ]
 
-export function KnowledgeUnderstand() {
-  const overview = useKnowledgeOverview()
+/**
+ * `overview` is resolved on the server when there is a session — the
+ * viewer's own counts — and omitted for guests, who get the labelled
+ * prototype. Everything else on this page is still sample data, which
+ * is why the footer says so per-section rather than for the page as a
+ * whole.
+ */
+export function KnowledgeUnderstand({ overview: liveOverview }: { overview?: KnowledgeOverview | null } = {}) {
+  const overview = useKnowledgeOverview(liveOverview)
   const themes = useKnowledgeThemes()
   const concepts = useKnowledgeConcepts()
   const connections = useKnowledgeConnections()
@@ -262,8 +269,17 @@ export function KnowledgeUnderstand() {
             KEEP<span className="text-[var(--kp-accent)]">ly</span> — save anything, understand everything.
           </p>
           <p className="mt-2 max-w-[56ch] text-[12.5px] leading-relaxed text-[var(--kp-ink-faint)]">
-            A design prototype of the Knowledge surface. The figures shown come from a fixed sample library and are
-            not read from any account.
+            {overview.data.origin === "live" ? (
+              <>
+                The counts at the top are read from your library. Themes, connections, the timeline, questions and
+                insights below are still a design prototype drawn from a fixed sample — not from your account.
+              </>
+            ) : (
+              <>
+                A design prototype of the Knowledge surface. The figures shown come from a fixed sample library and are
+                not read from any account.
+              </>
+            )}
           </p>
         </div>
       </footer>

@@ -33,7 +33,11 @@ import { replaceItemConcepts, upsertConcept } from "@/lib/knowledge/concepts/rep
 import { canonicalConceptName, normalizeConceptName } from "@/lib/knowledge/concepts/normalize"
 
 let owner: TestTenant
+/** A whole separate organization. */
 let stranger: TestTenant
+/** A colleague: the SAME organization, a different person — the case
+ *  an org_id-only predicate silently allows. */
+let colleague: TestTenant
 
 before(async () => {
   await prepareDatabase()
@@ -43,6 +47,9 @@ beforeEach(async () => {
   // left by a previous case would silently join the next one's answer.
   owner = await createTenant("bf-owner")
   stranger = await createTenant("bf-stranger")
+  const mate = await createTenant("bf-colleague")
+  await getTestPool().query("UPDATE memberships SET org_id = $1 WHERE user_id = $2", [owner.orgId, mate.userId])
+  colleague = { orgId: owner.orgId, userId: mate.userId }
 })
 after(closeTestPool)
 
@@ -303,6 +310,46 @@ describe("never_analyzed — scope", () => {
     assert.equal(result.candidates, 0)
     assert.equal(result.enqueued, 0)
     assert.deepEqual(await jobsFor(theirs), [], "their item must be untouched")
+  })
+
+  it("a COLLEAGUE's unanalyzed item is not in my backlog", async () => {
+    // Same organization, different person. org_id alone would put
+    // their whole library in my survey and queue model calls against
+    // items I cannot even read.
+    await analyzableItem(colleague)
+
+    assert.deepEqual(await candidates(owner), [])
+    assert.equal((await countBacklog(scopeOf(owner), { model: MODEL })).total, 0)
+  })
+
+  it("a COLLEAGUE's completed concepts job does not suppress my item", async () => {
+    const mine = await analyzableItem(owner)
+    await getTestPool().query(
+      `INSERT INTO knowledge_jobs (id, item_id, org_id, created_by, job_type, status, attempts, max_attempts, available_at, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,'concepts','done',1,5,$5,$5,$5)`,
+      [`knj_${randomUUID()}`, mine, colleague.orgId, colleague.userId, Date.now()],
+    )
+
+    const found = await candidates(owner)
+    assert.equal(found.length, 1, "their job is not my analysis, even in the same organization")
+    assert.equal(found[0].reason, "never_analyzed")
+  })
+
+  it("a COLLEAGUE's concept association does not suppress my item either", async () => {
+    const mine = await analyzableItem(owner)
+    const theirConcept = await upsertConcept(
+      { canonicalName: "Theirs", normalizedName: normalizeConceptName("Theirs"), type: "TOPIC" },
+      scopeOf(colleague),
+    )
+    await getTestPool().query(
+      `INSERT INTO knowledge_item_concepts (id, item_id, concept_id, org_id, created_by, source, confidence, evidence, created_at)
+       VALUES ($1,$2,$3,$4,$5,'llm',0.9,'[]'::jsonb,$6)`,
+      [`kic_${randomUUID()}`, mine, theirConcept.id, colleague.orgId, colleague.userId, Date.now()],
+    )
+
+    const found = await candidates(owner)
+    assert.equal(found.length, 1)
+    assert.equal(found[0].reason, "never_analyzed")
   })
 
   it("another owner's completed concepts job does not suppress MY item", async () => {

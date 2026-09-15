@@ -17,7 +17,20 @@ export function KnowledgeIntro({ overview, onExplore }: { overview: KnowledgeOve
   const { ref, revealed } = useReveal<HTMLDivElement>({ threshold: 0.05 })
   const saved = useCountUp(overview.savedCount, revealed, 1100)
 
-  const since = new Date(overview.since).toLocaleDateString(undefined, { month: "long", year: "numeric" })
+  const since =
+    overview.since === null
+      ? null
+      : new Date(overview.since).toLocaleDateString(undefined, { month: "long", year: "numeric" })
+
+  // What Keeply can honestly say it found. Themes and open questions
+  // are not derived from anything yet, so a live library names only the
+  // measures that exist — the sentence gets shorter rather than
+  // carrying a number nobody computed.
+  const found: string[] = [
+    `${overview.conceptCount.toLocaleString()} ${overview.conceptCount === 1 ? "concept" : "concepts"}`,
+    ...(overview.themeCount !== null ? [`${overview.themeCount} themes`] : []),
+    ...(overview.questionCount !== null ? [`${overview.questionCount} questions`] : []),
+  ]
 
   return (
     <section id="intro" aria-labelledby="intro-title" className="relative">
@@ -49,12 +62,24 @@ export function KnowledgeIntro({ overview, onExplore }: { overview: KnowledgeOve
 
         <Reveal delay={220}>
           <p className="mt-10 max-w-[46ch] text-[clamp(1.15rem,2vw,1.5rem)] leading-[1.45] tracking-[-0.01em]">
-            Keeply found{" "}
-            <strong className="font-medium text-[var(--kp-accent)]">{overview.conceptCount} concepts</strong> hiding
-            across it, clustered into{" "}
-            <strong className="font-medium text-[var(--kp-accent)]">{overview.themeCount} themes</strong>, circling{" "}
-            <strong className="font-medium text-[var(--kp-accent)]">{overview.questionCount} questions</strong> you
-            haven&rsquo;t answered yet.
+            {overview.savedCount === 0 ? (
+              <>Save something and Keeply will start finding what it is about.</>
+            ) : overview.conceptCount === 0 ? (
+              <>Keeply hasn&rsquo;t finished reading it yet — concepts will appear here as it does.</>
+            ) : overview.themeCount !== null && overview.questionCount !== null ? (
+              <>
+                Keeply found{" "}
+                <strong className="font-medium text-[var(--kp-accent)]">{found[0]}</strong> hiding across it, clustered
+                into <strong className="font-medium text-[var(--kp-accent)]">{found[1]}</strong>, circling{" "}
+                <strong className="font-medium text-[var(--kp-accent)]">{found[2]}</strong> you haven&rsquo;t answered
+                yet.
+              </>
+            ) : (
+              <>
+                Keeply found <strong className="font-medium text-[var(--kp-accent)]">{found[0]}</strong> hiding across
+                it.
+              </>
+            )}
           </p>
         </Reveal>
 
@@ -70,9 +95,7 @@ export function KnowledgeIntro({ overview, onExplore }: { overview: KnowledgeOve
                 ↓
               </span>
             </button>
-            <p className="text-[13px] text-[var(--kp-ink-faint)]">
-              Collected since {since}
-            </p>
+            {since && <p className="text-[13px] text-[var(--kp-ink-faint)]">Collected since {since}</p>}
           </div>
         </Reveal>
 
