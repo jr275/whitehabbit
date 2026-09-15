@@ -199,6 +199,36 @@ export async function searchItems(orgId: string, userId: string | null, rawQuery
   )
 }
 
+/**
+ * Items by id, owner-scoped, in ONE query.
+ *
+ * Exists for retrieval paths that arrive holding ids from somewhere
+ * else — a vector search returns chunk rows, and a chunk knows its
+ * item_id. That id is a POINTER, never a permission: the row it names
+ * is re-read here under the caller's own scope, so a chunk that
+ * somehow escaped its own filter still cannot produce an item the
+ * caller may not see. Authorization stays relational.
+ *
+ * Archived items are excluded by default, matching every other read.
+ * Order is not meaningful — callers that fused a ranking apply it
+ * themselves, because SQL cannot express "the order these ids arrived
+ * in" without a VALUES join that buys nothing here.
+ */
+export async function getItemsByIds(
+  ids: string[],
+  orgId: string,
+  userId: string | null,
+  opts: { includeArchived?: boolean } = {},
+): Promise<KnowledgeRow[]> {
+  if (ids.length === 0) return []
+  const archived = opts.includeArchived ? "" : " AND archived = FALSE"
+  return query<KnowledgeRow>(
+    `SELECT ${SELECT_COLS} FROM knowledge_items
+      WHERE id = ANY($1) AND org_id = $2 AND created_by IS NOT DISTINCT FROM $3${archived}`,
+    [ids, orgId, userId],
+  )
+}
+
 /** Advance lifecycle state. Used by the ingestion pipeline as it moves
  * saved → fetching → extracting. Owner-scoped so a stale/forged id
  * can't mutate another org's OR another user's row. */

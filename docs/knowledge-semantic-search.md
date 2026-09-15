@@ -304,6 +304,34 @@ With no `ANTHROPIC_API_KEY` the stage fails immediately and terminally
 per item — one failed job, no retries — and the backfill picks those
 items up once a key exists.
 
+### Why concepts and summary stay two calls
+
+They were assessed for merging into one and deliberately left apart.
+The two stages differ in every dimension that would have to be
+reconciled:
+
+| | concepts | summary |
+|---|---|---|
+| Provider | whatever `LLM_PROVIDER` selects | pinned to Anthropic, on purpose |
+| Input | chunk passages, each with its id | raw `content_text`, capped at 12k |
+| Output | JSON validated against a grounding contract | 2-3 sentences of prose |
+| Reads | what the index stage wrote | what ingestion wrote |
+
+Merging them means picking one provider — either the summary silently
+follows a deployment-wide switch, breaking the promise its own 503 and
+UI copy make about `ANTHROPIC_API_KEY`, or concepts lose their
+provider-agnosticism. It also means one reply carrying both a validated
+JSON payload and free prose, so a malformed half can invalidate the
+sound half: today a summary the model botched cannot cost you your
+concepts, and the reverse.
+
+One saved call is not worth coupling two contracts, two providers, two
+failure modes and two configuration surfaces. **The cost is the two
+calls, and it is the price of both halves being independently correct.**
+If that ever needs to change, the cheaper lever is which items get
+summarized at all — a policy question with no architectural blast
+radius — not fusing the prompts.
+
 ### Why `never_analyzed` is two conditions
 
 "No concepts" alone cannot tell three situations apart: nobody ever
@@ -330,6 +358,38 @@ queue. The backfill is this stage's retry, and it runs when an operator
 asks.
 
 ---
+
+## Library search is hybrid too
+
+`GET /api/knowledge/search` — the Library's own box and the ⌘K palette
+— used to run a parameterised ILIKE over item rows and nothing else,
+while the same words typed into Ask reached the semantic engine
+immediately. It now runs both retrievers and fuses them with the same
+RRF:
+
+- **item-level lexical** (`repo.searchItems`) — title, author, domain,
+  excerpt, extracted text, tags: the things a *chunk* does not carry
+- **passage-level semantic** (`searchKnowledge`, `mode: "semantic"`) —
+  what the text means, for the words the person did not use
+
+The chunk engine is asked for semantic ONLY. Its hybrid mode already
+fuses a chunk-level lexical retriever internally, and fusing that again
+with the item-level lexical list would count lexical evidence twice and
+tilt every ranking back toward verbatim matches.
+
+It fails open: with no embedding credential the semantic list is empty
+and results are the lexical ranking, exactly as before.
+
+**A vector is never authorization.** Semantic retrieval returns chunks,
+and a chunk names its item; that name is a pointer. Every id is re-read
+through `getItemsByIds` under the caller's own scope before it becomes
+a result — two independently scoped reads, and the second one decides.
+
+The response keeps its shape (`items`, `query`) and gains `total` and a
+`retrieval` block reporting how many candidates each retriever
+contributed, so a deployment with no embedding credential is visibly
+lexical-only rather than silently worse. `limit` and `offset` are
+accepted and bounded.
 
 ## What is not proven yet
 
