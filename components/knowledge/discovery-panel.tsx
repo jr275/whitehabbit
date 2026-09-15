@@ -131,27 +131,55 @@ export function DiscoveryPanel({ itemId }: { itemId: string }) {
 
 /* ── Key ideas ──────────────────────────────────────────────────── */
 
+/* The extractor has always typed what it finds — TOPIC, CONCEPT,
+ * ENTITY, TECHNOLOGY, PERSON, ORGANIZATION, PRODUCT — and the type has
+ * always been stored. Nothing ever read it, so a person and a subject
+ * arrived on screen as identical grey chips.
+ *
+ * Grouping costs one pass over rows that already exist and no new
+ * extraction: "who and what this mentions" is a different question
+ * from "what this is about", and they were being answered together. */
+const CONCEPT_GROUPS: { heading: string; types: ItemConcept["type"][] }[] = [
+  { heading: "Key ideas", types: ["TOPIC", "CONCEPT"] },
+  { heading: "People", types: ["PERSON"] },
+  { heading: "Organizations", types: ["ORGANIZATION"] },
+  { heading: "Technologies & products", types: ["TECHNOLOGY", "PRODUCT"] },
+  { heading: "Also mentioned", types: ["ENTITY"] },
+]
+
 function KeyIdeas({ concepts }: { concepts: ItemConcept[] }) {
   if (concepts.length === 0) return null
+  const groups = CONCEPT_GROUPS.map((g) => ({
+    heading: g.heading,
+    // Order within a group follows the order the server sent, which is
+    // confidence-ranked. No second sort here: re-ranking in a component
+    // is a ranking rule nothing tests.
+    items: concepts.filter((c) => g.types.includes(c.type)),
+  })).filter((g) => g.items.length > 0)
+
   return (
-    <div>
-      <p className="text-[12px] font-medium text-foreground/70">Key ideas</p>
-      <ul className="mt-2 flex flex-wrap gap-1.5">
-        {concepts.map((c) => (
-          <li key={c.id}>
-            {/* The title is the provenance: a concept is here because
-                passages of this item were cited for it, and the count
-                is the number of those passages. */}
-            <span
-              className="inline-block rounded-md bg-secondary/60 px-2 py-1 text-xs text-foreground/80"
-              title={`${c.evidenceCount} passage${c.evidenceCount === 1 ? "" : "s"} in this piece`}
-            >
-              {c.label}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <>
+      {groups.map((group) => (
+        <div key={group.heading}>
+          <p className="text-[12px] font-medium text-foreground/70">{group.heading}</p>
+          <ul className="mt-2 flex flex-wrap gap-1.5">
+            {group.items.map((c) => (
+              <li key={c.id}>
+                {/* The title is the provenance: a concept is here because
+                    passages of this item were cited for it, and the count
+                    is the number of those passages. */}
+                <span
+                  className="inline-block rounded-md bg-secondary/60 px-2 py-1 text-xs text-foreground/80"
+                  title={`${c.evidenceCount} passage${c.evidenceCount === 1 ? "" : "s"} in this piece`}
+                >
+                  {c.label}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </>
   )
 }
 

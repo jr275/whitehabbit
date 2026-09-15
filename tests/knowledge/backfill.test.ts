@@ -84,6 +84,14 @@ const scopeOf = (t: TestTenant) => ({ orgId: t.orgId, userId: t.userId })
  * Uses the real queue, because a completed concepts job is exactly the
  * fact the survey reads — see tests/knowledge/backfill-concepts.test.ts.
  */
+/** Gives the item a summary, so the summary stage has nothing left to
+ *  do with it. Needed by the same cases as markAnalyzed, and for the
+ *  same reason: "its only outstanding work is vectors" is a claim
+ *  about EVERY other stage being finished. */
+async function markSummarized(t: TestTenant, itemId: string): Promise<void> {
+  await repo.setSummary(itemId, t.orgId, t.userId, "A short summary of the piece.")
+}
+
 async function markAnalyzed(t: TestTenant, itemId: string): Promise<void> {
   const job = await repo.enqueueConceptJob(itemId, t.orgId, t.userId)
   const claimed = await repo.claimJobById(job!.id, "worker-backfill-test")
@@ -119,6 +127,7 @@ describe("backfill survey", () => {
     const id = await saveItem(alice)
     await indexItem({ itemId: id, orgId: alice.orgId, userId: alice.userId })
     await markAnalyzed(alice, id)
+    await markSummarized(alice, id)
     const [candidate] = await findBackfillCandidates(scopeOf(alice), { model: MODEL })
     assert.equal(candidate.reason, "missing_vectors")
     assert.ok(candidate.chunks > 0)
@@ -133,6 +142,7 @@ describe("backfill survey", () => {
       { embeddings: fakeProvider() },
     )
     await markAnalyzed(alice, id)
+    await markSummarized(alice, id)
     assert.deepEqual(await findBackfillCandidates(scopeOf(alice), { model: MODEL }), [])
   })
 
@@ -144,6 +154,7 @@ describe("backfill survey", () => {
     await indexItem({ itemId: id, orgId: alice.orgId, userId: alice.userId })
     await embedItemChunks({ itemId: id, orgId: alice.orgId, userId: alice.userId }, { embeddings: fakeProvider() })
     await markAnalyzed(alice, id)
+    await markSummarized(alice, id)
 
     assert.deepEqual(await findBackfillCandidates(scopeOf(alice), { model: MODEL }), [])
     const afterSwitch = await findBackfillCandidates(scopeOf(alice), { model: "a-different-model" })
@@ -186,15 +197,25 @@ describe("backfill survey", () => {
     const chunked = await saveItem(alice)
     await indexItem({ itemId: chunked, orgId: alice.orgId, userId: alice.userId })
     await markAnalyzed(alice, chunked)
+    await markSummarized(alice, chunked)
     const unanalyzed = await saveItem(alice)
     await indexItem({ itemId: unanalyzed, orgId: alice.orgId, userId: alice.userId })
     await embedItemChunks({ itemId: unanalyzed, orgId: alice.orgId, userId: alice.userId }, { embeddings: fakeProvider() })
 
+    // A fourth item that needs only its summary, so every reason the
+    // survey can report is represented by exactly one item and none of
+    // them can absorb another's count.
+    const unsummarized = await saveItem(alice)
+    await indexItem({ itemId: unsummarized, orgId: alice.orgId, userId: alice.userId })
+    await embedItemChunks({ itemId: unsummarized, orgId: alice.orgId, userId: alice.userId }, { embeddings: fakeProvider() })
+    await markAnalyzed(alice, unsummarized)
+
     const backlog = await countBacklog(scopeOf(alice), { model: MODEL })
-    assert.equal(backlog.total, 3)
+    assert.equal(backlog.total, 4)
     assert.equal(backlog.neverIndexed, 1)
     assert.equal(backlog.missingVectors, 1)
     assert.equal(backlog.neverAnalyzed, 1)
+    assert.equal(backlog.neverSummarized, 1)
     assert.equal(backlog.staleChunks, 0)
   })
 
@@ -260,6 +281,7 @@ describe("backfill enqueue", () => {
     await indexItem({ itemId: id, orgId: alice.orgId, userId: alice.userId })
     await embedItemChunks({ itemId: id, orgId: alice.orgId, userId: alice.userId }, { embeddings: fakeProvider() })
     await markAnalyzed(alice, id)
+    await markSummarized(alice, id)
 
     const result = await enqueueBackfill(scopeOf(alice), { model: MODEL })
     assert.equal(result.candidates, 0)

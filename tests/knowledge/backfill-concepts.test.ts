@@ -89,6 +89,11 @@ async function analyzableItem(t: TestTenant) {
       contentHash: hash,
     },
   ])
+  // A summary, so never_summarized can never be the reason either —
+  // these cases are about the ANALYSIS stage, and an item missing two
+  // things would be reported by whichever ranks higher rather than by
+  // the one under test.
+  await repo.setSummary(id, t.orgId, t.userId, "A short summary.")
   // A vector from MODEL, so missing_vectors can never be the reason.
   await pool.query(
     `INSERT INTO knowledge_chunk_embeddings (chunk_id, org_id, created_by, embedding, provider, model, dimensions, created_at, updated_at)

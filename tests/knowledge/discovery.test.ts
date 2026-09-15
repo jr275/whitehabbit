@@ -142,6 +142,27 @@ describe("discovery — what the panel actually shows", () => {
     assert.equal(result.concepts[0].type, "TOPIC")
   })
 
+  it("carries the concept TYPE through, so people and subjects can be told apart", async () => {
+    // The extractor has always typed what it finds and the type has
+    // always been stored; until now nothing read it, so a person and a
+    // subject arrived as identical chips. The Reader groups on this
+    // field, so it has to survive the mapping.
+    const item = await itemFor(owner, "typed")
+    await replaceItemConcepts(
+      item.id,
+      [
+        { ...extracted("Vector Search"), type: "TECHNOLOGY" as const },
+        { ...extracted("Ada Lovelace"), type: "PERSON" as const },
+      ],
+      scopeOf(owner),
+    )
+
+    const result = await discoverForItem(item.id, scopeOf(owner))
+    const byLabel = new Map(result.concepts.map((c) => [c.label, c.type]))
+    assert.equal(byLabel.get("Vector Search"), "TECHNOLOGY")
+    assert.equal(byLabel.get("Ada Lovelace"), "PERSON")
+  })
+
   it("explains each relationship with the concepts it shipped beside it", async () => {
     const a = await itemFor(owner, "why-a")
     const b = await itemFor(owner, "why-b")

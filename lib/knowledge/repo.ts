@@ -939,6 +939,34 @@ async function enqueueConceptJobInternal(
   return { job: existing, created: false }
 }
 
+/** Fourth job_type on the SAME queue, and the last link in the chain:
+ *  ingest → index → concepts → summary. Same partial-unique guard as
+ *  the others, so one queued job per item however many stages exist. */
+export async function enqueueSummaryJobDetailed(
+  itemId: string,
+  orgId: string,
+  userId: string | null,
+): Promise<EnqueuedJob> {
+  const now = Date.now()
+  const inserted = await queryOne<KnowledgeJobRow>(
+    `INSERT INTO knowledge_jobs (id, item_id, org_id, created_by, job_type, status, attempts, max_attempts, available_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 'summary', 'queued', 0, $5, $6, $6, $6)
+     ON CONFLICT (item_id) WHERE status = 'queued' DO NOTHING
+     RETURNING ${JOB_COLS}`,
+    [`knj_${randomUUID()}`, itemId, orgId, userId, DEFAULT_MAX_ATTEMPTS, now],
+  )
+  if (inserted) return { job: inserted, created: true }
+  const existing = await queryOne<KnowledgeJobRow>(
+    `SELECT ${JOB_COLS} FROM knowledge_jobs WHERE item_id = $1 AND status = 'queued' ORDER BY created_at DESC LIMIT 1`,
+    [itemId],
+  )
+  return { job: existing, created: false }
+}
+
+export async function enqueueSummaryJob(itemId: string, orgId: string, userId: string | null): Promise<KnowledgeJobRow | null> {
+  return (await enqueueSummaryJobDetailed(itemId, orgId, userId)).job
+}
+
 /* ---- chunk embeddings (Phase D) ---------------------------------- */
 
 export interface ChunkEmbeddingInput {

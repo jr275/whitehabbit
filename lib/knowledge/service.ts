@@ -16,7 +16,7 @@ import { safeFetch, SafeFetchError, type SafeFetchOptions } from "@/lib/security
 import { assertSafeUrl, UnsafeUrlError } from "@/lib/security/ssrf-guard"
 import { logger } from "@/lib/observability/logger"
 import { runIndexJob } from "./indexing"
-import { isAiSummaryConfigured, summarizeText, type AiSummaryDeps } from "./ai-summary"
+import { AiSummaryUpstreamError, isAiSummaryConfigured, summarizeText, type AiSummaryDeps } from "./ai-summary"
 import { extractConceptsForItem } from "./concepts/extract"
 import { extractFavicon, extractFromHtml } from "./extract"
 import * as repo from "./repo"
@@ -532,6 +532,42 @@ async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetch
           return
         }
       }
+    } else if (job.job_type === "summary") {
+      // The pipeline's last stage, and the only one that reads nothing
+      // the earlier ones produced except the extracted text ingestion
+      // already wrote. summarizeItem() is unchanged and still the ONLY
+      // summarizer: it refuses to regenerate an item that already has
+      // one, which is what makes re-running this free.
+      const row = await repo.getItem(job.item_id, job.org_id, job.created_by)
+      if (row) {
+        try {
+          await summarizeItem(row, job.org_id, job.created_by)
+        } catch (err) {
+          // Nothing to summarize is not a failure of ours — an item
+          // whose extraction produced no text has no summary to have,
+          // and retrying cannot change that. The job completes.
+          if (err instanceof SaveValidationError) {
+            logger.info("knowledge_summary_skipped", { itemId: job.item_id, reason: err.message })
+          } else if (err instanceof ServiceAiNotConfiguredError || err instanceof AiSummaryUpstreamError) {
+            const message = err.message
+            // Same rule as concepts, for the same reason: not `done`,
+            // because nothing was summarized and the backfill has to
+            // be able to find this item again; and not retried, because
+            // the commonest case is an absent credential, which is a
+            // deployment state rather than a transient fault.
+            logger.warn("knowledge_summary_failed", { itemId: job.item_id, message })
+            await repo.failJob(job.id, workerId, {
+              attempts: job.max_attempts,
+              error: message,
+              retryAt: null,
+            })
+            summary.failed++
+            return
+          } else {
+            throw err
+          }
+        }
+      }
     } else if (job.job_type === "index") {
       await runIndexJob(job.item_id, job.org_id, job.created_by)
     } else {
@@ -562,7 +598,20 @@ async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetch
             message: err instanceof Error ? err.message : String(err),
           })
         }
-      } else if (job.job_type !== "concepts") {
+      } else if (job.job_type === "concepts") {
+        // The chain's final link. Enqueued off CONCEPTS rather than off
+        // indexing so the stages stay serial — one open job per item is
+        // what uq_knowledge_jobs_item_open allows, and running them in
+        // parallel would mean one of the two silently never queued.
+        try {
+          await repo.enqueueSummaryJob(job.item_id, job.org_id, job.created_by)
+        } catch (err) {
+          logger.warn("knowledge_summary_enqueue_failed", {
+            itemId: job.item_id,
+            message: err instanceof Error ? err.message : String(err),
+          })
+        }
+      } else if (job.job_type !== "summary") {
         try {
           await repo.enqueueIndexJob(job.item_id, job.org_id, job.created_by)
         } catch (err) {
@@ -599,7 +648,7 @@ async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetch
         // broke when it did not, and would offer them a Retry that
         // re-fetches a page that was never the problem. The job row
         // carries the real failure, and stays queryable.
-        if (job.job_type === "index" || job.job_type === "concepts") {
+        if (job.job_type === "index" || job.job_type === "concepts" || job.job_type === "summary") {
           logger.error("knowledge_post_ingest_job_exhausted", {
             jobId: job.id,
             itemId: job.item_id,

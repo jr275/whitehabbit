@@ -272,6 +272,7 @@ there.
 | `never_indexed` | no chunks at all | `index` |
 | `stale_chunks` | chunks built from text that has since changed | `index` |
 | `never_analyzed` | chunks exist, but no concepts and no completed concepts job | `concepts` |
+| `never_summarized` | extracted text exists, but no summary and no completed summary job | `summary` |
 | `missing_vectors` | chunks are current, some have no embedding from the configured model | `index` |
 
 An item can be several of these at once and only one job may be open
@@ -284,6 +285,24 @@ a deployment with no embedding credential *every* chunked item reports
 backfill unreachable there rather than merely slower. Nothing is lost
 by an item that needs two: whichever job runs first completes, and the
 next run picks up the other.
+
+### The summary stage, and what it costs
+
+`ingest → index → concepts → summary`. Summaries used to happen only
+when someone pressed the button in the Reader; they are now the
+pipeline's last stage, so a saved item arrives with one.
+
+**This doubles the model spend per save** — one call to name the
+concepts, one to write the summary — and that is a deliberate change
+from the previous on-demand-only design. Two things bound it:
+`summarizeItem()` refuses to regenerate an item that already has a
+summary, so re-running any of this is free; and the input is capped at
+12,000 characters with a 300-token reply, so a single long article
+cannot become an outsized-cost outlier.
+
+With no `ANTHROPIC_API_KEY` the stage fails immediately and terminally
+per item — one failed job, no retries — and the backfill picks those
+items up once a key exists.
 
 ### Why `never_analyzed` is two conditions
 
@@ -298,7 +317,12 @@ concepts *and* no concepts job has ever completed for it. A job that
 could not reach a provider is recorded `failed`, never `done`, so a
 real failure comes back round while an honest empty result does not.
 
-That also means a concepts job blocked by a missing credential fails
+That is why `never_summarized` has the same shape: a missing summary
+alone cannot tell "never tried" from "tried, and the model produced
+nothing usable", and re-running the second group spends a real
+Anthropic call per item on every pass.
+
+That also means a concepts or summary job blocked by a missing credential fails
 **immediately and terminally** rather than retrying: an absent
 credential is a deployment state, not a transient fault, and retrying
 it `max_attempts` times per item across a library would starve the

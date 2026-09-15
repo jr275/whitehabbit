@@ -195,16 +195,52 @@ describe("running an index job through the shared queue", () => {
     assert.equal(item?.error, null)
   })
 
-  it("does not chain anything off a concepts job — the pipeline terminates", async () => {
-    // The other half of the same property, for the new last stage. If
-    // concepts chained anything, the queue would never drain.
+  it("chains exactly one summary job off a concepts job, and the pipeline then terminates", async () => {
+    // The chain is ingest → index → concepts → summary. Each stage
+    // schedules the NEXT one and nothing else; if any stage scheduled
+    // its own type, or two stages scheduled the same one, the queue
+    // would never drain. Asserted per stage rather than as a total, so
+    // this stays a statement about the chain's shape rather than about
+    // how many stages happen to exist.
     const itemId = await makeReadyItem(t)
-    const job = await repo.enqueueConceptJob(itemId, t.orgId, t.userId)
-    await claimAndRunJob({ jobId: job!.id })
+    const concepts = await repo.enqueueConceptJob(itemId, t.orgId, t.userId)
+    await claimAndRunJob({ jobId: concepts!.id })
 
-    const all = await jobsFor(itemId)
-    assert.equal(all.length, 1, `expected exactly one job, got ${JSON.stringify(all)}`)
-    assert.equal(all[0].job_type, "concepts")
+    const afterConcepts = await jobsFor(itemId)
+    assert.equal(afterConcepts.filter((j) => j.job_type === "concepts").length, 1, "no second concepts job")
+    assert.equal(afterConcepts.filter((j) => j.job_type === "summary").length, 1, "exactly one summary job is chained")
+
+    const { rows } = await getTestPool().query<{ id: string }>(
+      "SELECT id FROM knowledge_jobs WHERE item_id = $1 AND job_type = 'summary'",
+      [itemId],
+    )
+    await claimAndRunJob({ jobId: rows[0].id })
+
+    const afterSummary = await jobsFor(itemId)
+    assert.equal(afterSummary.length, 2, `the chain must stop here, got ${JSON.stringify(afterSummary)}`)
+  })
+
+  it("records a provider-blocked summary job as FAILED, and leaves the item readable", async () => {
+    // Same rule as concepts: no ANTHROPIC_API_KEY in the suite, so the
+    // stage genuinely cannot run. Recording it done would hide the item
+    // from the backfill forever; marking the ITEM failed would tell the
+    // user their save broke when only its summary is missing.
+    const itemId = await makeReadyItem(t)
+    const concepts = await repo.enqueueConceptJob(itemId, t.orgId, t.userId)
+    await claimAndRunJob({ jobId: concepts!.id })
+    const { rows } = await getTestPool().query<{ id: string }>(
+      "SELECT id FROM knowledge_jobs WHERE item_id = $1 AND job_type = 'summary'",
+      [itemId],
+    )
+    await claimAndRunJob({ jobId: rows[0].id })
+
+    const settled = await repo.getJob(rows[0].id)
+    assert.equal(settled?.status, "failed")
+    assert.equal(settled?.attempts, settled?.max_attempts, "terminal on the first attempt, not after five")
+
+    const item = await repo.getItem(itemId, t.orgId, t.userId)
+    assert.equal(item?.status, "ready")
+    assert.equal(item?.summary, null, "and no summary was invented in place of the one that could not be made")
   })
 
   it("leaves the item's own status untouched when indexing runs", async () => {

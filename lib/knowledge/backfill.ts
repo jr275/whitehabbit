@@ -41,9 +41,18 @@ import * as repo from "./repo"
  *                   looked at them: no concepts, and no concepts job
  *                   that ran to completion. Either the item predates
  *                   migration 0010, or its extraction failed.
+ *  never_summarized—there is extracted text but no summary, and no
+ *                   summary job that ran to completion. Either the
+ *                   item predates the summary stage, or its run could
+ *                   not reach a provider.
  *  missing_vectors— chunks are current, but some have no embedding
  *                   from the model this deployment is configured with */
-export type BackfillReason = "never_indexed" | "stale_chunks" | "never_analyzed" | "missing_vectors"
+export type BackfillReason =
+  | "never_indexed"
+  | "stale_chunks"
+  | "never_analyzed"
+  | "never_summarized"
+  | "missing_vectors"
 
 export interface BackfillCandidate {
   itemId: string
@@ -90,6 +99,31 @@ export interface BackfillScope {
  * caller's scope, and reading ownership off the row means a concept or
  * job belonging to someone else can never satisfy — or suppress — a
  * candidate here. */
+/** "No job of this type has ever completed for this item." Written once
+ *  because both understanding stages ask exactly the same question, and
+ *  two copies would drift the moment one gained a scope clause the
+ *  other did not. */
+function noCompletedJob(jobType: string): string {
+  return `NOT EXISTS (
+          SELECT 1 FROM knowledge_jobs j
+           WHERE j.item_id = i.id
+             AND j.org_id = i.org_id
+             AND j.created_by IS NOT DISTINCT FROM i.created_by
+             AND j.job_type = '${jobType}'
+             AND j.status = 'done'
+        )`
+}
+
+/* WHY SUMMARY USES THE SAME TWO-CONDITION SHAPE. A missing summary
+ * alone cannot tell "never summarized" from "summarized, and the model
+ * produced nothing usable" — and re-running would spend a real
+ * Anthropic call per item on every pass. A completed summary job is
+ * the same missing fact a completed concepts job is. */
+const UNSUMMARIZED_PREDICATE = `(
+        i.summary IS NULL
+        AND ${noCompletedJob("summary")}
+      )`
+
 const UNANALYZED_PREDICATE = `(
         NOT EXISTS (
           SELECT 1 FROM knowledge_item_concepts ic
@@ -97,14 +131,7 @@ const UNANALYZED_PREDICATE = `(
              AND ic.org_id = i.org_id
              AND ic.created_by IS NOT DISTINCT FROM i.created_by
         )
-        AND NOT EXISTS (
-          SELECT 1 FROM knowledge_jobs j
-           WHERE j.item_id = i.id
-             AND j.org_id = i.org_id
-             AND j.created_by IS NOT DISTINCT FROM i.created_by
-             AND j.job_type = 'concepts'
-             AND j.status = 'done'
-        )
+        AND ${noCompletedJob("concepts")}
       )`
 
 /* The chunk/vector conditions share one shape, so they cannot drift
@@ -126,7 +153,8 @@ const CANDIDATE_SQL = `
          COUNT(c.id)                                        AS chunk_count,
          COUNT(c.id) FILTER (WHERE c.content_hash IS DISTINCT FROM i.content_hash) AS stale_count,
          COUNT(e.chunk_id)                                  AS embedded_count,
-         ${UNANALYZED_PREDICATE}                            AS unanalyzed
+         ${UNANALYZED_PREDICATE}                            AS unanalyzed,
+         ${UNSUMMARIZED_PREDICATE}                          AS unsummarized
     FROM knowledge_items i
     LEFT JOIN knowledge_chunks c
       ON c.item_id = i.id
@@ -143,6 +171,7 @@ const CANDIDATE_SQL = `
       OR COUNT(c.id) FILTER (WHERE c.content_hash IS DISTINCT FROM i.content_hash) > 0
       OR COUNT(e.chunk_id) < COUNT(c.id)
       OR (COUNT(c.id) > 0 AND ${UNANALYZED_PREDICATE})
+      OR ${UNSUMMARIZED_PREDICATE}
    ORDER BY i.created_at ASC`
 
 interface CandidateRow {
@@ -153,6 +182,7 @@ interface CandidateRow {
   stale_count: string | number
   embedded_count: string | number
   unanalyzed: boolean
+  unsummarized: boolean
 }
 
 function toCandidate(row: CandidateRow): BackfillCandidate {
@@ -185,7 +215,9 @@ function toCandidate(row: CandidateRow): BackfillCandidate {
           ? "stale_chunks"
           : row.unanalyzed
             ? "never_analyzed"
-            : "missing_vectors",
+            : row.unsummarized
+              ? "never_summarized"
+              : "missing_vectors",
     chunks,
     embeddedChunks: embedded,
   }
@@ -214,6 +246,7 @@ export interface BacklogCounts {
   neverIndexed: number
   staleChunks: number
   neverAnalyzed: number
+  neverSummarized: number
   missingVectors: number
 }
 
@@ -229,6 +262,7 @@ export async function countBacklog(scope: BackfillScope, options: { model?: stri
     neverIndexed: candidates.filter((c) => c.reason === "never_indexed").length,
     staleChunks: candidates.filter((c) => c.reason === "stale_chunks").length,
     neverAnalyzed: candidates.filter((c) => c.reason === "never_analyzed").length,
+    neverSummarized: candidates.filter((c) => c.reason === "never_summarized").length,
     missingVectors: candidates.filter((c) => c.reason === "missing_vectors").length,
   }
 }
@@ -326,7 +360,11 @@ export async function enqueueBackfill(
     // job also has attempts 0 — and counting one as newly enqueued
     // would overstate how much work this run actually started.
     const enqueue =
-      candidate.reason === "never_analyzed" ? repo.enqueueConceptJobDetailed : repo.enqueueIndexJobDetailed
+      candidate.reason === "never_analyzed"
+        ? repo.enqueueConceptJobDetailed
+        : candidate.reason === "never_summarized"
+          ? repo.enqueueSummaryJobDetailed
+          : repo.enqueueIndexJobDetailed
     const { job, created } = await enqueue(candidate.itemId, candidate.orgId, candidate.createdBy)
     if (created) enqueued += 1
     else if (job) alreadyQueued += 1
