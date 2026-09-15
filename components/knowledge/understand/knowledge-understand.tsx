@@ -16,7 +16,7 @@
  *   → ask it → go past it
  * ================================================================== */
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   useAsk,
   useKnowledgeConcepts,
@@ -30,7 +30,12 @@ import {
   useResearch,
   useVoice,
 } from "@/lib/knowledge/understand/hooks"
-import type { KnowledgeInsight, KnowledgeOverview } from "@/lib/knowledge/understand/types"
+import type {
+  KnowledgeConcept,
+  KnowledgeInsight,
+  KnowledgeObject,
+  KnowledgeOverview,
+} from "@/lib/knowledge/understand/types"
 import { KnowledgeAsk } from "./ask/knowledge-ask"
 import { KnowledgeGraph } from "./connections/knowledge-graph"
 import { KnowledgeExplorer } from "./explorer/knowledge-explorer"
@@ -65,15 +70,69 @@ const CHAPTERS: ChapterLink[] = [
  * is why the footer says so per-section rather than for the page as a
  * whole.
  */
-export function KnowledgeUnderstand({ overview: liveOverview }: { overview?: KnowledgeOverview | null } = {}) {
+export interface UnderstandProps {
+  overview?: KnowledgeOverview | null
+  /** The viewer's own concepts and saved items, resolved on the
+   *  server. Null means there is nobody to resolve them for (a guest),
+   *  and the Explorer falls back to the labelled sample. */
+  explorer?: { concepts: KnowledgeConcept[]; objects: KnowledgeObject[]; total: number } | null
+  /** A real failure reading the library. NOT the same as an empty
+   *  library, and the Explorer renders it differently. */
+  explorerError?: boolean
+  /** Concept selected by ?concept= in the URL, so a filtered Explorer
+   *  is a link that can be sent to someone. */
+  initialConceptId?: string | null
+}
+
+export function KnowledgeUnderstand({
+  overview: liveOverview,
+  explorer,
+  explorerError = false,
+  initialConceptId = null,
+}: UnderstandProps = {}) {
   const overview = useKnowledgeOverview(liveOverview)
   const themes = useKnowledgeThemes()
-  const concepts = useKnowledgeConcepts()
+  const concepts = useKnowledgeConcepts(explorer?.concepts)
   const connections = useKnowledgeConnections()
   const timeline = useKnowledgeTimeline()
   const questions = useKnowledgeQuestions()
   const insights = useKnowledgeInsights()
-  const objects = useKnowledgeObjects()
+  const objects = useKnowledgeObjects(explorer?.objects)
+
+  /* ?concept= is kept in the URL so the filtered view is linkable, but
+   * with replaceState rather than a navigation: re-rendering the whole
+   * page (and re-running every reveal animation) to narrow a list in
+   * place would be the wrong trade. The server reads the same param on
+   * a cold load, so a pasted link arrives already filtered. */
+  const [selectedConceptId, setSelectedConceptId] = useState<string | null>(initialConceptId)
+
+  /* THE URL IS THE SOURCE OF TRUTH ON ARRIVAL, including an arrival by
+   * Back. Returning from an item restores the App Router's cached RSC
+   * payload for this route, which was rendered before replaceState put
+   * ?concept= in the address bar — so the URL said "filtered" and the
+   * list said "everything", which is worse than either alone.
+   *
+   * Reconciling here rather than switching to router.replace keeps the
+   * narrow behaviour: no server round trip and no re-run of every
+   * reveal animation just to narrow a list in place.
+   *
+   * An id that is not one of this viewer's own concepts is dropped,
+   * exactly as the server drops it — a URL is not authorization, and a
+   * phantom filter that matches nothing looks like an empty library. */
+  useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("concept")
+    const valid = fromUrl && concepts.data.some((c) => c.id === fromUrl) ? fromUrl : null
+    setSelectedConceptId((current) => (current === valid ? current : valid))
+  }, [concepts.data])
+
+  const selectConcept = useCallback((conceptId: string | null) => {
+    setSelectedConceptId(conceptId)
+    if (typeof window === "undefined") return
+    const url = new URL(window.location.href)
+    if (conceptId) url.searchParams.set("concept", conceptId)
+    else url.searchParams.delete("concept")
+    window.history.replaceState(null, "", url)
+  }, [])
 
   const ask = useAsk()
   const research = useResearch()
@@ -230,6 +289,11 @@ export function KnowledgeUnderstand({ overview: liveOverview }: { overview?: Kno
           <KnowledgeExplorer
             objects={objects.data}
             concepts={concepts.data}
+            selectedConceptId={selectedConceptId}
+            onSelectConcept={selectConcept}
+            total={explorer?.total}
+            error={explorerError}
+            live={objects.origin === "live"}
             onOpen={setOpenObjectId}
             onAsk={handleAsk}
             onExploreConnections={() => scrollTo("connections")}
@@ -271,8 +335,8 @@ export function KnowledgeUnderstand({ overview: liveOverview }: { overview?: Kno
           <p className="mt-2 max-w-[56ch] text-[12.5px] leading-relaxed text-[var(--kp-ink-faint)]">
             {overview.data.origin === "live" ? (
               <>
-                The counts at the top are read from your library. Themes, connections, the timeline, questions and
-                insights below are still a design prototype drawn from a fixed sample — not from your account.
+                The counts at the top and the Explorer are read from your library. Themes, connections, the timeline,
+                questions and insights are still a design prototype drawn from a fixed sample — not from your account.
               </>
             ) : (
               <>

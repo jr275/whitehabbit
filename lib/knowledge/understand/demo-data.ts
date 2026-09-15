@@ -136,7 +136,7 @@ const OBJECT_SEED: [string, string, string, KnowledgeObject["kind"], string, str
   ["o8", "Tool calling, one year on", "Every", "video", "2026-04-18", ["c_tool_calling", "c_memory"], 0, 0.72],
   ["o9", "Retrieval is not memory", "Chroma", "article", "2026-03-09", ["c_retrieval", "c_memory"], 1, 0.7],
   ["o10", "Agent-to-agent communication patterns", "LangChain", "article", "2026-09-04", ["c_mcp", "c_context"], 2, 0.9],
-  ["o11", "Notes: where automation actually breaks", "My notes", "note", "2026-07-19", ["c_ops", "c_tool_calling"], 6, 0.83],
+  ["o11", "Notes: where automation actually breaks", "My notes", "document", "2026-07-19", ["c_ops", "c_tool_calling"], 6, 0.83],
   ["o12", "The case against autonomous agents", "Molly White", "article", "2026-06-02", ["c_hitl", "c_governance"], 3, 0.87],
   ["o13", "Buying things with agents", "Stripe", "article", "2026-08-08", ["c_ops", "c_governance"], 1, 0.76],
   ["o14", "Context windows are a budget, not a feature", "Hazy", "article", "2026-05-27", ["c_context", "c_memory"], 2, 0.74],

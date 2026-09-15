@@ -94,8 +94,11 @@ export function useKnowledgeThemes(): Resource<KnowledgeTheme[]> {
   return useMemo(() => ready(THEMES), [])
 }
 
-export function useKnowledgeConcepts(): Resource<KnowledgeConcept[]> {
-  return useMemo(() => ready(CONCEPTS), [])
+export function useKnowledgeConcepts(initial?: KnowledgeConcept[] | null): Resource<KnowledgeConcept[]> {
+  return useMemo(
+    () => (initial ? { data: initial, status: "ready", origin: "live" } : ready(CONCEPTS)),
+    [initial],
+  )
 }
 
 export function useKnowledgeConnections(): Resource<KnowledgeConnection[]> {
@@ -114,8 +117,11 @@ export function useKnowledgeInsights(): Resource<KnowledgeInsight[]> {
   return useMemo(() => ready(INSIGHTS), [])
 }
 
-export function useKnowledgeObjects(): Resource<KnowledgeObject[]> {
-  return useMemo(() => ready(OBJECTS), [])
+export function useKnowledgeObjects(initial?: KnowledgeObject[] | null): Resource<KnowledgeObject[]> {
+  return useMemo(
+    () => (initial ? { data: initial, status: "ready", origin: "live" } : ready(OBJECTS)),
+    [initial],
+  )
 }
 
 /* ---- ask ------------------------------------------------------------ */

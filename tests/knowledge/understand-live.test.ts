@@ -221,6 +221,11 @@ describe("app/knowledge/page.tsx", () => {
   })
 
   it("passes the caller's own scope to the counts, never a widened one", () => {
-    assert.match(source, /liveOverview\(\{ orgId: organizationId, userId \}\)/)
+    // The scope is built once from the session and reused; what matters
+    // is that both halves come from requireSession() and nothing else
+    // is substituted for either.
+    assert.match(source, /const scope = \{ orgId: organizationId, userId \}/)
+    assert.match(source, /liveOverview\(scope\)/)
+    assert.match(source, /\(\{ organizationId, userId \} = await requireSession\(\)\)/)
   })
 })

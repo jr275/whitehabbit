@@ -22,6 +22,8 @@
 /** Marks a value the demo currently supplies. The UI reads this to
  *  label the surface honestly rather than presenting invented counts
  *  as though they were the viewer's real library. */
+import type { KnowledgeKind } from "@/lib/knowledge/types"
+
 export type DataOrigin = "demo" | "live"
 
 export interface KnowledgeOverview {
@@ -47,7 +49,10 @@ export interface KnowledgeConcept {
   label: string
   /** How many saved objects this concept was found in. */
   itemCount: number
-  themeId: string
+  /** Which theme it belongs to. Absent on live concepts: themes are
+   *  not derived from anything in this codebase, so a real concept
+   *  belongs to no theme rather than to an invented one. */
+  themeId?: string
 }
 
 export interface KnowledgeTheme {
@@ -137,7 +142,12 @@ export interface KnowledgeInsight {
   detail: InsightDetail
 }
 
-export type KnowledgeObjectKind = "article" | "video" | "pdf" | "note"
+/** ONE kind vocabulary for the whole product. This used to be its own
+ *  four-value union, which meant a saved podcast had no name here and
+ *  a "note" had no name in the real model — two words for the same
+ *  thing, drifting. Live objects come from knowledge_items, so this is
+ *  that type. */
+export type KnowledgeObjectKind = KnowledgeKind
 
 export interface KnowledgeObject {
   id: string
@@ -147,12 +157,30 @@ export interface KnowledgeObject {
   savedAt: string
   /** Concept ids this object was found to contain. */
   conceptIds: string[]
+
+  /* ---- real fields, present when the object came from a library ---- */
+  /** Where it can actually be opened. Absent on demo objects, which
+   *  point at nothing. */
+  url?: string
+  domain?: string
+  author?: string
+  /** Tags from the source's own metadata — publisher-supplied, not
+   *  derived. Distinct from concepts, which the extractor named. */
+  topics?: string[]
+
+  /* ---- prototype-only, and OPTIONAL for that reason --------------- */
   /** One line of what Keeply took from it. Never a summary of the
-   *  whole piece — the point is what it ADDED. */
-  insight: string
-  revisits: number
+   *  whole piece — the point is what it ADDED.
+   *
+   *  Nothing derives this from a real item, so a live object does not
+   *  carry it and the surface shows no line rather than an invented
+   *  one. Same for the two below: `revisits` would need a read COUNT
+   *  the schema does not keep (only a last-read timestamp), and
+   *  `relevance` is not a measure that exists anywhere. */
+  insight?: string
+  revisits?: number
   /** 0-1 relevance for the "Relevant" sort. */
-  relevance: number
+  relevance?: number
 }
 
 export interface KnowledgeEvidence {

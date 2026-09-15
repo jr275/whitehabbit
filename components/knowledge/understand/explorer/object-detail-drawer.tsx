@@ -1,5 +1,7 @@
 "use client"
 
+import Link from "next/link"
+
 /* ================================================================== *
  * OBJECT DRAWER — detail without losing your place.
  *
@@ -127,7 +129,8 @@ export function ObjectDetailDrawer({
             <time dateTime={object.savedAt}>
               {new Date(object.savedAt).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })}
             </time>
-            {object.revisits > 0 && ` · revisited ${object.revisits}×`}
+            {object.author && ` · ${object.author}`}
+            {object.revisits !== undefined && object.revisits > 0 && ` · revisited ${object.revisits}×`}
           </p>
 
           <section className="mt-9">
@@ -144,12 +147,42 @@ export function ObjectDetailDrawer({
             </ul>
           </section>
 
-          <section className="mt-9">
-            <Label>Why it matters</Label>
-            <p className="mt-3 border-l-2 border-[var(--kp-accent)] pl-4 font-[family-name:var(--font-fraunces)] text-[16px] leading-[1.55]">
-              {object.insight}
-            </p>
-          </section>
+          {/* Only when there is one. A live object has no such line —
+              nothing derives it — and a heading over an empty space
+              reads as something that failed to load. */}
+          {object.insight && (
+            <section className="mt-9">
+              <Label>Why it matters</Label>
+              <p className="mt-3 border-l-2 border-[var(--kp-accent)] pl-4 font-[family-name:var(--font-fraunces)] text-[16px] leading-[1.55]">
+                {object.insight}
+              </p>
+            </section>
+          )}
+
+          {/* A real saved item can actually be opened. Sample objects
+              point at nothing, so they get no link rather than a dead
+              one. */}
+          {object.url && (
+            <section className="mt-9">
+              <Label>The piece itself</Label>
+              <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
+                <Link
+                  href={`/knowledge/read/${object.id}`}
+                  className="text-[13.5px] font-medium text-[var(--kp-ink)] underline underline-offset-4 hover:text-[var(--kp-accent)]"
+                >
+                  Read it in Keeply
+                </Link>
+                <a
+                  href={object.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[13.5px] font-medium text-[var(--kp-ink-soft)] underline underline-offset-4 hover:text-[var(--kp-accent)]"
+                >
+                  Open the original
+                </a>
+              </div>
+            </section>
+          )}
 
           {related.length > 0 && (
             <section className="mt-9">

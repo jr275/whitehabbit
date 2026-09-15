@@ -13,10 +13,10 @@
  * what makes a list of fifteen scannable at all.
  * ================================================================== */
 
+import Link from "next/link"
 import { useMemo, useState } from "react"
 import type { KnowledgeConcept, KnowledgeObject, KnowledgeObjectKind } from "@/lib/knowledge/understand/types"
 import { cn } from "@/lib/utils"
-import { Label } from "../shell/section"
 
 type Filter = "all" | KnowledgeObjectKind
 type Sort = "recent" | "relevant" | "revisited"
@@ -26,20 +26,52 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "article", label: "Articles" },
   { id: "video", label: "Videos" },
   { id: "pdf", label: "PDFs" },
-  { id: "note", label: "Notes" },
-]
-
-const SORTS: { id: Sort; label: string }[] = [
-  { id: "recent", label: "Recent" },
-  { id: "relevant", label: "Relevant" },
-  { id: "revisited", label: "Most revisited" },
+  { id: "podcast", label: "Podcasts" },
+  { id: "social", label: "Posts" },
+  { id: "document", label: "Notes" },
 ]
 
 const KIND_LABEL: Record<KnowledgeObjectKind, string> = {
   article: "Article",
   video: "Video",
   pdf: "PDF",
-  note: "Note",
+  podcast: "Podcast",
+  social: "Post",
+  document: "Note",
+}
+
+/* Only offer a sort the data can actually perform. "Relevant" and
+ * "most revisited" are measures of the sample library; a real item has
+ * neither a relevance score nor a revisit COUNT (the schema keeps a
+ * last-read timestamp, which is a different thing). Offering them over
+ * live data would produce a control that reorders nothing, which reads
+ * as a bug rather than as an absence. */
+const ALL_SORTS: { id: Sort; label: string; needs: keyof KnowledgeObject | null }[] = [
+  { id: "recent", label: "Recent", needs: null },
+  { id: "relevant", label: "Relevant", needs: "relevance" },
+  { id: "revisited", label: "Most revisited", needs: "revisits" },
+]
+
+export interface ExplorerProps {
+  objects: KnowledgeObject[]
+  concepts: KnowledgeConcept[]
+  onOpen: (id: string) => void
+  onAsk: (question: string) => void
+  onExploreConnections: () => void
+  /** Concept the view opened on — from ?concept= in the URL, so a
+   *  filtered Explorer is a link someone can send. */
+  selectedConceptId?: string | null
+  onSelectConcept?: (conceptId: string | null) => void
+  /** How many items the library holds in total. Larger than
+   *  objects.length means this is a page of it, and the surface says
+   *  so instead of presenting a subset as the whole. */
+  total?: number
+  /** A real data-access failure. Rendered as a failure — never as an
+   *  empty library, which would tell someone their saves are gone. */
+  error?: boolean
+  /** Whether these rows are the viewer's own. Drives which of the
+   *  empty states can honestly be shown. */
+  live?: boolean
 }
 
 export function KnowledgeExplorer({
@@ -48,22 +80,40 @@ export function KnowledgeExplorer({
   onOpen,
   onAsk,
   onExploreConnections,
-}: {
-  objects: KnowledgeObject[]
-  concepts: KnowledgeConcept[]
-  onOpen: (id: string) => void
-  onAsk: (question: string) => void
-  onExploreConnections: () => void
-}) {
+  selectedConceptId = null,
+  onSelectConcept,
+  total,
+  error = false,
+  live = false,
+}: ExplorerProps) {
   const [filter, setFilter] = useState<Filter>("all")
   const [sort, setSort] = useState<Sort>("recent")
   const [query, setQuery] = useState("")
 
   const conceptById = useMemo(() => new Map(concepts.map((c) => [c.id, c])), [concepts])
 
+  // Concepts, strongest first, ties broken by name so the rail is the
+  // same on every render and in every process. A rail that reshuffles
+  // between visits is unusable as a way back to something.
+  const rail = useMemo(
+    () => [...concepts].sort((a, b) => b.itemCount - a.itemCount || a.label.localeCompare(b.label)),
+    [concepts],
+  )
+
+  const sorts = useMemo(
+    () => ALL_SORTS.filter((s) => s.needs === null || objects.some((o) => o[s.needs!] !== undefined)),
+    [objects],
+  )
+  const activeSort = sorts.some((s) => s.id === sort) ? sort : "recent"
+
+  const byConcept = useMemo(
+    () => (selectedConceptId ? objects.filter((o) => o.conceptIds.includes(selectedConceptId)) : objects),
+    [objects, selectedConceptId],
+  )
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const filtered = objects.filter((o) => {
+    const filtered = byConcept.filter((o) => {
       if (filter !== "all" && o.kind !== filter) return false
       if (!q) return true
       // Concept labels are searched too — a person looking for "memory"
@@ -74,11 +124,33 @@ export function KnowledgeExplorer({
       return haystack.includes(q)
     })
     return [...filtered].sort((a, b) => {
-      if (sort === "recent") return b.savedAt.localeCompare(a.savedAt)
-      if (sort === "relevant") return b.relevance - a.relevance
-      return b.revisits - a.revisits
+      if (activeSort === "relevant") return (b.relevance ?? 0) - (a.relevance ?? 0)
+      if (activeSort === "revisited") return (b.revisits ?? 0) - (a.revisits ?? 0)
+      // Recent, with the id as a tie-break: two things saved in the
+      // same second must not swap places between renders.
+      return b.savedAt.localeCompare(a.savedAt) || a.id.localeCompare(b.id)
     })
-  }, [objects, filter, sort, query, conceptById])
+  }, [byConcept, filter, activeSort, query, conceptById])
+
+  const selectedConcept = selectedConceptId ? conceptById.get(selectedConceptId) : undefined
+
+  /* ---- the states, each a different fact ------------------------- */
+
+  if (error) {
+    return (
+      <p className="py-16 text-center text-[15px] text-[var(--kp-ink-faint)]">
+        Your library could not be loaded just now. Nothing has been lost — reload to try again.
+      </p>
+    )
+  }
+
+  if (live && objects.length === 0) {
+    return (
+      <p className="py-16 text-center text-[15px] text-[var(--kp-ink-faint)]">
+        Nothing saved yet. Save a link and it will appear here.
+      </p>
+    )
+  }
 
   return (
     <div>
@@ -121,11 +193,11 @@ export function KnowledgeExplorer({
             </label>
             <select
               id="kp-explorer-sort"
-              value={sort}
+              value={activeSort}
               onChange={(e) => setSort(e.target.value as Sort)}
               className="cursor-pointer border-b border-[var(--kp-rule)] bg-transparent py-1.5 text-[13px] text-[var(--kp-ink-soft)] focus:border-[var(--kp-accent)] focus:outline-none"
             >
-              {SORTS.map((s) => (
+              {sorts.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.label}
                 </option>
@@ -135,13 +207,74 @@ export function KnowledgeExplorer({
         </div>
       </div>
 
-      <p className="mt-3 text-[12.5px] text-[var(--kp-ink-faint)]" aria-live="polite">
+      {/* THE CONCEPT RAIL — the Explorer's spine, and the thing that
+          makes this a knowledge map rather than a file list. Selecting
+          one narrows the list below to what it was found in; selecting
+          it again clears. Counts are the number of items the concept
+          appears in, not a score. */}
+      {onSelectConcept && (
+        <div className="mt-5">
+          {rail.length === 0 ? (
+            <p className="text-[12.5px] leading-relaxed text-[var(--kp-ink-faint)]">
+              {live
+                ? "Keeply hasn’t read these yet. The ideas it finds will appear here as it does."
+                : "No concepts in this sample."}
+            </p>
+          ) : (
+            <>
+              <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--kp-ink-faint)]">
+                Ideas in your library
+              </p>
+              <ul className="kp-scroll-x mt-2.5 flex flex-wrap gap-1.5" aria-label="Filter by concept">
+                {rail.map((concept) => {
+                  const active = concept.id === selectedConceptId
+                  return (
+                    <li key={concept.id}>
+                      <button
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => onSelectConcept(active ? null : concept.id)}
+                        className={cn(
+                          "whitespace-nowrap rounded-full border px-2.5 py-1 text-[12.5px] transition-colors duration-[var(--kp-fast)]",
+                          active
+                            ? "border-[var(--kp-accent)] bg-[var(--kp-accent)] text-[var(--kp-paper)]"
+                            : "border-[var(--kp-rule)] text-[var(--kp-ink-soft)] hover:border-[var(--kp-ink)] hover:text-[var(--kp-ink)]",
+                        )}
+                      >
+                        {concept.label}
+                        <span className={cn("ml-1.5 kp-tnum", active ? "opacity-70" : "text-[var(--kp-ink-faint)]")}>
+                          {concept.itemCount}
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+
+      <p className="mt-4 text-[12.5px] text-[var(--kp-ink-faint)]" aria-live="polite">
         {visible.length} of {objects.length} shown
+        {selectedConcept && <> · filtered by {selectedConcept.label}</>}
+        {typeof total === "number" && total > objects.length && (
+          <> · showing the {objects.length} most recent of {total} saved</>
+        )}
       </p>
 
       {visible.length === 0 ? (
         <p className="py-16 text-center text-[15px] text-[var(--kp-ink-faint)]">
-          Nothing matches “{query}”.
+          {query.trim() ? (
+            <>Nothing matches “{query}”.</>
+          ) : selectedConcept ? (
+            // The concept exists and is real; nothing under it matches
+            // the OTHER filters. Saying "nothing matches" without
+            // naming which filter did it leaves someone stuck.
+            <>Nothing here is both {selectedConcept.label} and {KIND_LABEL[filter as KnowledgeObjectKind] ?? filter}.</>
+          ) : (
+            <>Nothing to show with these filters.</>
+          )}
         </p>
       ) : (
         <ul className="mt-2 divide-y divide-[var(--kp-rule)] border-t border-[var(--kp-rule)]">
@@ -167,7 +300,13 @@ export function KnowledgeExplorer({
                     <time dateTime={object.savedAt}>
                       {new Date(object.savedAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}
                     </time>
-                    {object.revisits > 0 && (
+                    {object.author && (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span>{object.author}</span>
+                      </>
+                    )}
+                    {object.revisits !== undefined && object.revisits > 0 && (
                       <>
                         <span aria-hidden>·</span>
                         <span>revisited {object.revisits}×</span>
@@ -175,9 +314,14 @@ export function KnowledgeExplorer({
                     )}
                   </p>
 
-                  <p className="mt-2.5 max-w-[62ch] border-l-2 border-[var(--kp-accent-soft)] pl-3 text-[13.5px] italic leading-relaxed text-[var(--kp-ink-soft)]">
-                    {object.insight}
-                  </p>
+                  {/* Rendered only when there IS one. Nothing derives a
+                      line like this from a real item yet, so a live row
+                      simply does not have it. */}
+                  {object.insight && (
+                    <p className="mt-2.5 max-w-[62ch] border-l-2 border-[var(--kp-accent-soft)] pl-3 text-[13.5px] italic leading-relaxed text-[var(--kp-ink-soft)]">
+                      {object.insight}
+                    </p>
+                  )}
 
                   <ul className="mt-2.5 flex flex-wrap gap-1.5">
                     {object.conceptIds.map((id) => (
@@ -192,13 +336,25 @@ export function KnowledgeExplorer({
                 </div>
 
                 <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 md:flex-col md:items-end md:gap-1.5 md:opacity-0 md:transition-opacity md:duration-[var(--kp-fast)] md:group-focus-within:opacity-100 md:group-hover:opacity-100">
-                  <button
-                    type="button"
-                    onClick={() => onOpen(object.id)}
-                    className="text-[12.5px] font-medium text-[var(--kp-ink-soft)] hover:text-[var(--kp-accent)]"
-                  >
-                    Open
-                  </button>
+                  {object.url ? (
+                    // A real save opens in the reader. The drawer stays
+                    // reachable by clicking the title — it is a preview,
+                    // not the destination.
+                    <Link
+                      href={`/knowledge/read/${object.id}`}
+                      className="text-[12.5px] font-medium text-[var(--kp-ink-soft)] hover:text-[var(--kp-accent)]"
+                    >
+                      Read
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onOpen(object.id)}
+                      className="text-[12.5px] font-medium text-[var(--kp-ink-soft)] hover:text-[var(--kp-accent)]"
+                    >
+                      Open
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => onAsk(`What did I learn from “${object.title}”?`)}

@@ -91,7 +91,12 @@ export async function listConcepts(scope: ConceptScope, limit = 100): Promise<(C
              AND ic.created_by IS NOT DISTINCT FROM c.created_by
       WHERE c.org_id = $1 AND c.created_by IS NOT DISTINCT FROM $2
       GROUP BY c.id
-      ORDER BY item_count DESC, c.updated_at DESC
+      -- Name breaks the tie, not updated_at. With a LIMIT this order
+      -- decides WHICH concepts come back at all, and two concepts held
+      -- by the same number of items have no meaningful recency
+      -- difference — so ordering by it makes the cut-off wobble
+      -- between calls for no reason anyone could observe or explain.
+      ORDER BY item_count DESC, c.canonical_name ASC
       LIMIT $3`,
     [scope.orgId, scope.userId, limit],
   )
