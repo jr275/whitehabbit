@@ -194,6 +194,27 @@ describe("liveOverview — scope", () => {
  * cannot load (same constraint as tests/knowledge/tick.test.ts).
  * ================================================================== */
 
+describe("the Ask section routes a real reader to the real Ask", () => {
+  const source = readFileSync("components/knowledge/understand/knowledge-understand.tsx", "utf8")
+
+  it("hands a live question to /knowledge/ai instead of the simulation", () => {
+    // The prototype's Ask answers from a fixed sample. That is right
+    // for a visitor with no library and wrong for someone who has one,
+    // because a real grounded Ask exists one click away — answering
+    // them from the sample would be the page's only outright lie.
+    assert.match(source, /if \(isLive\) \{\s*router\.push\(askAboutHref\(question\)\)/)
+  })
+
+  it("reuses the existing href helper rather than building a second Ask", () => {
+    assert.match(source, /import \{ askAboutHref \} from "@\/lib\/knowledge\/config"/)
+    assert.doesNotMatch(source, /\/api\/knowledge\/ai/, "the page must not call the answering API itself")
+  })
+
+  it("keeps the simulation for a visitor with no library", () => {
+    assert.match(source, /ask\.submit\(question\)/)
+  })
+})
+
 describe("app/knowledge/page.tsx", () => {
   const source = readFileSync("app/knowledge/page.tsx", "utf8")
 

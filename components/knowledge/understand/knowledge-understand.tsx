@@ -16,6 +16,7 @@
  *   → ask it → go past it
  * ================================================================== */
 
+import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   useAsk,
@@ -36,6 +37,7 @@ import type {
   KnowledgeObject,
   KnowledgeOverview,
 } from "@/lib/knowledge/understand/types"
+import { askAboutHref } from "@/lib/knowledge/config"
 import { KnowledgeAsk } from "./ask/knowledge-ask"
 import { KnowledgeGraph } from "./connections/knowledge-graph"
 import { KnowledgeExplorer } from "./explorer/knowledge-explorer"
@@ -104,6 +106,12 @@ export function KnowledgeUnderstand({
    * page (and re-running every reveal animation) to narrow a list in
    * place would be the wrong trade. The server reads the same param on
    * a cold load, so a pasted link arrives already filtered. */
+  const router = useRouter()
+  /** Whether this page is showing the reader their own library. Drives
+   *  the one behavioural difference between the prototype and the real
+   *  thing: where a question goes. */
+  const isLive = overview.data.origin === "live"
+
   const [selectedConceptId, setSelectedConceptId] = useState<string | null>(initialConceptId)
 
   /* THE URL IS THE SOURCE OF TRUTH ON ARRIVAL, including an arrival by
@@ -150,14 +158,33 @@ export function KnowledgeUnderstand({
   /** Every "ask about this" on the page routes HERE — one Ask surface,
    *  reached from many places, rather than an answer rendered wherever
    *  the button happened to be. */
+  /* ONE ASK SURFACE, and for a signed-in reader it is the real one.
+   *
+   * This page's Ask section is part of the prototype: it walks a
+   * simulated thinking state and answers from the sample library. That
+   * is the right thing to show a visitor with no library — and the
+   * wrong thing to show someone who HAS one, because a real, grounded,
+   * citing Ask already exists at /knowledge/ai, one click away, and
+   * answering them from a fixed sample instead would be the page's
+   * only outright lie.
+   *
+   * So every "ask about this" on the page — a theme, a question card,
+   * an insight, the drawer, the Ask field itself — hands a live reader
+   * to the real surface with their question already in it. No second
+   * RAG, no second answer contract, no second client: askAboutHref is
+   * the same link the Reader and Topics have always used. */
   const handleAsk = useCallback(
     (question: string) => {
+      if (isLive) {
+        router.push(askAboutHref(question))
+        return
+      }
       ask.submit(question)
       setOpenObjectId(null)
       // Wait a frame so the section has its answer state before we move.
       requestAnimationFrame(() => scrollTo("ask"))
     },
-    [ask, scrollTo],
+    [ask, isLive, router, scrollTo],
   )
 
   const handleInsightAction = useCallback(
@@ -309,7 +336,13 @@ export function KnowledgeUnderstand({
             lede="Answered only from what you've saved, with the passages it drew on shown beside it."
             bleed
           >
-            <KnowledgeAsk ask={ask} objects={objects.data} concepts={concepts.data} onOpenObject={setOpenObjectId} />
+            <KnowledgeAsk
+              ask={ask}
+              objects={objects.data}
+              concepts={concepts.data}
+              onOpenObject={setOpenObjectId}
+              onAsk={isLive ? handleAsk : undefined}
+            />
           </Chapter>
         </div>
 

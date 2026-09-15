@@ -25,11 +25,17 @@ export function KnowledgeAsk({
   objects,
   concepts,
   onOpenObject,
+  onAsk,
 }: {
   ask: AskController
   objects: KnowledgeObject[]
   concepts: KnowledgeConcept[]
   onOpenObject: (id: string) => void
+  /** Supplied when the reader has a real library: the question goes to
+   *  the real, grounded Ask instead of this section's simulation. The
+   *  field and the suggestions stay exactly as they are — what changes
+   *  is where pressing them leads. */
+  onAsk?: (question: string) => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const objectById = new Map(objects.map((o) => [o.id, o]))
@@ -47,6 +53,11 @@ export function KnowledgeAsk({
       <form
         onSubmit={(e) => {
           e.preventDefault()
+          if (onAsk) {
+            const q = ask.question.trim()
+            if (q) onAsk(q)
+            return
+          }
           ask.submit()
         }}
         className="border-y border-[var(--kp-rule-strong)] py-2"
@@ -82,7 +93,7 @@ export function KnowledgeAsk({
               <li key={s}>
                 <button
                   type="button"
-                  onClick={() => ask.submit(s)}
+                  onClick={() => (onAsk ? onAsk(s) : ask.submit(s))}
                   className="rounded-full border border-[var(--kp-rule)] px-3.5 py-1.5 text-[13px] text-[var(--kp-ink-soft)] transition-colors duration-[var(--kp-fast)] hover:border-[var(--kp-accent)] hover:text-[var(--kp-accent)]"
                 >
                   {s}
