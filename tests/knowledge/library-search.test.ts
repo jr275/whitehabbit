@@ -26,7 +26,7 @@ import { randomUUID } from "node:crypto"
 import { closeTestPool, createTenant, getTestPool, prepareDatabase, type TestTenant } from "../helpers/db"
 import { EMBEDDING_DIMENSIONS, type EmbeddingProvider } from "@/lib/ai/embeddings"
 import { embedItemChunks, indexItem } from "@/lib/knowledge/indexing"
-import { EVIDENCE_MIN_SIMILARITY, searchLibrary } from "@/lib/knowledge/search/library"
+import { EVIDENCE_MIN_SIMILARITY, boundedParam, searchLibrary } from "@/lib/knowledge/search/library"
 import * as repo from "@/lib/knowledge/repo"
 
 let owner: TestTenant
@@ -376,6 +376,32 @@ describe("searchLibrary — a vector is never authorization", () => {
  * plain-Node runner cannot load.
  * ================================================================== */
 
+describe("boundedParam — absent is not zero", () => {
+  it("returns the fallback for a MISSING parameter", () => {
+    // The bug this exists to have fixed, and it was silent: Number(null)
+    // is 0, so a missing ?limit= became a limit of zero, then of one
+    // after the Math.max guard — every search returned exactly one
+    // result with a total beside it saying there were more. Caught by
+    // noticing that mismatch in a real response, not by a test failing.
+    assert.equal(boundedParam(null, 20, 50), 20)
+    assert.equal(boundedParam(undefined, 20, 50), 20)
+    assert.equal(boundedParam("", 20, 50), 20)
+    assert.equal(boundedParam("   ", 20, 50), 20)
+  })
+
+  it("returns the fallback for anything that is not a whole, non-negative number", () => {
+    for (const bad of ["abc", "1.5", "-3", "NaN", "Infinity", "1e400", "0x10"]) {
+      assert.equal(boundedParam(bad, 20, 50), 20, `accepted ${bad}`)
+    }
+  })
+
+  it("accepts a real value and clamps it to the maximum", () => {
+    assert.equal(boundedParam("7", 20, 50), 7)
+    assert.equal(boundedParam("0", 20, 50), 0, "an explicit zero is a real answer, unlike a missing one")
+    assert.equal(boundedParam("999999", 20, 50), 50)
+  })
+})
+
 describe("GET /api/knowledge/search — the evidence it returns", () => {
   const source = readFileSync("app/api/knowledge/search/route.ts", "utf8")
 
@@ -393,7 +419,8 @@ describe("GET /api/knowledge/search — the evidence it returns", () => {
 
   it("bounds limit and offset rather than trusting them", () => {
     assert.match(source, /MAX_SEARCH_LIMIT/)
-    assert.match(source, /positiveInt/)
+    assert.match(source, /boundedParam\(params\.get\("limit"\)/)
+    assert.match(source, /boundedParam\(params\.get\("offset"\)/)
   })
 })
 

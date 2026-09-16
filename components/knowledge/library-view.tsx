@@ -57,6 +57,9 @@ interface LibraryViewProps {
   title?: string
   eyebrow?: string
   subtitle?: string
+  /** Search the Library opens on, from ?q= in the URL. Empty means the
+   *  ordinary browse view. */
+  initialQuery?: string
 }
 
 export function LibraryView({
@@ -64,6 +67,7 @@ export function LibraryView({
   title = "Library",
   eyebrow,
   subtitle = "Everything you've saved.",
+  initialQuery = "",
 }: LibraryViewProps) {
   // Initialise to SSR-safe defaults so the server-rendered HTML and the
   // first client render match exactly. The persisted view mode / filter /
@@ -73,7 +77,13 @@ export function LibraryView({
   // in list view).
   const [layout, setLayout] = useState<LibraryLayout>("grid")
   const [kind, setKind] = useState<KnowledgeKind | null>(null)
-  const [query, setQuery] = useState("")
+  /* ?q= makes a filtered Library a link someone can send — and, more
+   * immediately, gives a Topic card somewhere to go. searchItems
+   * already matches an item's tags, so a topic's own name IS the query
+   * that finds its items: no tag-filter endpoint, no second code path,
+   * and the results arrive through the hybrid search everything else
+   * uses. */
+  const [query, setQuery] = useState(initialQuery)
   const [hydrated, setHydrated] = useState(false)
 
   // ── Voice search — a browser capability, not a new search engine ──

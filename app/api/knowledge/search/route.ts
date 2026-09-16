@@ -24,17 +24,10 @@ import { NextResponse } from "next/server"
 import { withApiHandler } from "@/lib/api-error"
 import { rowToItem } from "@/lib/knowledge/adapter"
 import * as repo from "@/lib/knowledge/repo"
-import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT, searchLibrary } from "@/lib/knowledge/search/library"
+import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT, MAX_SEARCH_OFFSET, boundedParam, searchLibrary } from "@/lib/knowledge/search/library"
 import type { SearchEvidence } from "@/lib/knowledge/types"
 import { requireSession } from "@/lib/session"
 
-/** Parses a bounded integer parameter, ignoring anything that is not
- *  one. A caller cannot widen its own page by asking for a million. */
-function positiveInt(raw: string | null, fallback: number, max: number): number {
-  const n = Number(raw)
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return fallback
-  return Math.min(n, max)
-}
 
 export async function GET(req: Request) {
   return withApiHandler("knowledge.search", async () => {
@@ -46,8 +39,8 @@ export async function GET(req: Request) {
     // than the whole library, so the UI can show its idle state.
     if (q.length < 2) return NextResponse.json({ items: [], query: q, total: 0 })
 
-    const limit = Math.max(1, positiveInt(params.get("limit"), DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT))
-    const offset = positiveInt(params.get("offset"), 0, 10_000)
+    const limit = Math.max(1, boundedParam(params.get("limit"), DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT))
+    const offset = boundedParam(params.get("offset"), 0, MAX_SEARCH_OFFSET)
 
     // S5: search never surfaces another user's content, in the same
     // org or not — enforced inside searchLibrary on both retrievers

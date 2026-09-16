@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Sparkles } from "lucide-react"
+import { Library, Sparkles } from "lucide-react"
 import { PageContainer, PageHeader } from "@/components/knowledge/page-header"
 import { requireSession, UnauthenticatedError } from "@/lib/session"
 import { listTagCounts } from "@/lib/knowledge/repo"
@@ -62,12 +62,26 @@ export default async function TopicsPage() {
                   style={{ width: `${(t.count / max) * 100}%` }}
                 />
               </div>
-              <Link
-                href={askAboutHref(`What have I saved about ${t.label}?`)}
-                className="inline-flex items-center gap-1.5 rounded text-[12.5px] font-medium text-[var(--kn-ai)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
-              >
-                <Sparkles className="size-3.5" /> Ask about this topic
-              </Link>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                {/* A topic card used to be a dead end: a label, a count
+                    and a bar, with no way to reach the pieces it was
+                    counting. searchItems already matches an item's
+                    tags, so the topic's own name is the query that
+                    finds them — no tag-filter endpoint and no second
+                    retrieval path. */}
+                <Link
+                  href={`/knowledge/library?q=${encodeURIComponent(t.label)}`}
+                  className="inline-flex items-center gap-1.5 rounded text-[12.5px] font-medium text-foreground transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
+                >
+                  <Library className="size-3.5" /> See the {t.count === 1 ? "piece" : "pieces"}
+                </Link>
+                <Link
+                  href={askAboutHref(`What have I saved about ${t.label}?`)}
+                  className="inline-flex items-center gap-1.5 rounded text-[12.5px] font-medium text-[var(--kn-ai)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
+                >
+                  <Sparkles className="size-3.5" /> Ask about this topic
+                </Link>
+              </div>
             </div>
           ))}
         </div>

@@ -54,6 +54,33 @@ import type { SearchEvidence } from "@/lib/knowledge/types"
 const OVERFETCH = 3
 export const DEFAULT_SEARCH_LIMIT = 20
 export const MAX_SEARCH_LIMIT = 50
+/** Far past any real library, and finite so a URL cannot ask the
+ *  database to skip a billion rows. */
+export const MAX_SEARCH_OFFSET = 10_000
+
+/**
+ * A bounded integer from a URL parameter, or the fallback.
+ *
+ * ABSENT IS NOT ZERO, and getting that wrong is quiet rather than
+ * loud: `Number(null)` is 0, so a "clamp it to something sane"
+ * implementation that starts with Number() turns a MISSING limit into
+ * a limit of zero and then into one result per query — every search
+ * returning exactly one answer, with a total beside it saying there
+ * were more. That is the bug this function exists to have fixed, which
+ * is why it is exported and tested rather than a helper inside a route
+ * no test can import.
+ */
+export function boundedParam(raw: string | null | undefined, fallback: number, max: number): number {
+  if (raw === null || raw === undefined) return fallback
+  // Plain decimal digits only. Number() would also accept "0x10" as 16
+  // and " 7 " as 7 — harmless here because the result is bounded, but a
+  // parameter that quietly means something other than it reads is how a
+  // limit ends up being a number nobody typed.
+  if (!/^\d+$/.test(raw.trim())) return fallback
+  const n = Number(raw.trim())
+  if (!Number.isSafeInteger(n)) return fallback
+  return Math.min(n, max)
+}
 
 export interface LibrarySearchOptions {
   limit?: number
