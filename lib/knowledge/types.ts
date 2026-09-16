@@ -101,6 +101,33 @@ export type PrimaryFilter =
   | "recent"
 
 /** Paginated list envelope returned by GET /api/knowledge. */
+/**
+ * Why a search result is here — the passage that matched, not a
+ * sentence about it.
+ *
+ * Only ever built from a chunk the semantic retriever actually
+ * returned. An item found by its title has no passage behind it, so it
+ * carries no evidence and the surface shows none: inventing a snippet
+ * for a lexical hit would put an explanation under a result that the
+ * explanation did not cause.
+ */
+export interface SearchEvidence {
+  /** The passage, truncated for display. The stored chunk is never
+   *  altered — this is a view of it. */
+  snippet: string
+  chunkId: string
+  /** Position of the passage within the item, 0-based, so a reader can
+   *  be told roughly where in the piece it sits. */
+  ordinal: number
+  /** Character offsets into the extracted text, when the chunker
+   *  recorded them. Null for chunks written before offsets existed. */
+  charStart: number | null
+  charEnd: number | null
+  /** Cosine similarity in [0,1], carried through so a caller can see
+   *  how strong the match was rather than trusting that it was shown. */
+  similarity: number
+}
+
 export interface KnowledgeListResult {
   items: KnowledgeItem[]
   total: number

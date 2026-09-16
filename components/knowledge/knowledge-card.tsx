@@ -14,8 +14,8 @@ import {
 import Link from "next/link"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import { KIND_META, durationLabel, savedAgo } from "@/lib/knowledge/config"
-import type { KnowledgeItem, KnowledgeState, ViewMode } from "@/lib/knowledge/types"
+import { KIND_META, askAboutHref, durationLabel, savedAgo } from "@/lib/knowledge/config"
+import type { KnowledgeItem, KnowledgeState, SearchEvidence, ViewMode } from "@/lib/knowledge/types"
 
 /** The real, backend-driven pipeline steps — no fabricated AI stages. */
 const PIPELINE: { key: KnowledgeState; label: string }[] = [
@@ -32,6 +32,11 @@ interface KnowledgeCardProps {
   view?: ViewMode
   index?: number
   selected?: boolean
+  /** Set only when this card is a SEARCH result and a real passage
+   *  matched. Absent for every browse view and for a result found by
+   *  its title — there is no passage behind a title, and a snippet
+   *  invented for one would explain a match it did not cause. */
+  evidence?: SearchEvidence
   onToggleFavorite?: (item: KnowledgeItem) => void
   onArchive?: (item: KnowledgeItem) => void
   onRetry?: (item: KnowledgeItem) => void
@@ -44,6 +49,7 @@ export function KnowledgeCard({
   view = "grid",
   index = 0,
   selected = false,
+  evidence,
   onToggleFavorite,
   onArchive,
   onRetry,
@@ -233,7 +239,9 @@ export function KnowledgeCard({
 
         {ready && !isList && (
           <>
-            {item.aiSummary ? (
+            {evidence ? (
+              <EvidenceNote evidence={evidence} title={item.title} clamp={3} />
+            ) : item.aiSummary ? (
               <p className="pointer-events-none line-clamp-3 text-pretty text-[0.82rem] leading-relaxed text-foreground/75">
                 {item.aiSummary}
               </p>
@@ -266,7 +274,9 @@ export function KnowledgeCard({
             the narrowest screens where the row has little room. */}
         {ready && isList && (
           <>
-            {item.aiSummary ? (
+            {evidence ? (
+              <EvidenceNote evidence={evidence} title={item.title} clamp={2} />
+            ) : item.aiSummary ? (
               <p className="pointer-events-none line-clamp-2 text-pretty text-[0.82rem] leading-relaxed text-foreground/75">
                 {item.aiSummary}
               </p>
@@ -441,6 +451,47 @@ function ProcessingBlock({ state }: { state: KnowledgeState }) {
           )
         })}
       </ul>
+    </div>
+  )
+}
+
+/* ── Why this result is here ─────────────────────────────────────── *
+ *
+ * Shown in place of the summary on a search result that matched a real
+ * passage. The summary says what the piece is about; the evidence says
+ * what the QUERY hit, which is the more useful of the two while
+ * scanning results — and the only one of the two that can be checked.
+ *
+ * Deliberately quiet: a label at small caps, the passage in quotes,
+ * clamped. The title is still the thing being scanned; this sits under
+ * it. Turning a result list into a reader is how search stops being
+ * search.
+ */
+function EvidenceNote({ evidence, title, clamp }: { evidence: SearchEvidence; title: string; clamp: 2 | 3 }) {
+  return (
+    <div>
+      <p className="pointer-events-none text-[10px] font-medium uppercase tracking-wide text-[var(--kn-ai)]">
+        Matched in your library
+      </p>
+      <p
+        className={cn(
+          "pointer-events-none mt-1 text-pretty border-l-2 border-[var(--kn-edge)] pl-2.5 text-[0.8rem] italic leading-relaxed text-foreground/70",
+          clamp === 3 ? "line-clamp-3" : "line-clamp-2",
+        )}
+      >
+        &ldquo;{evidence.snippet}&rdquo;
+      </p>
+      {/* From "this passage matched" to "what does my library say about
+          this" — the same Ask the Reader and Topics link to, with a
+          question built from the title. Deterministic: no model is
+          consulted to phrase a question about a search result. */}
+      <Link
+        href={askAboutHref(`What does my library say about “${title}”?`)}
+        onClick={(e) => e.stopPropagation()}
+        className="relative z-10 mt-2 inline-block text-[0.78rem] font-medium text-[var(--kn-ai)] underline underline-offset-4 hover:text-foreground"
+      >
+        Ask about this
+      </Link>
     </div>
   )
 }

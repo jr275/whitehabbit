@@ -110,7 +110,9 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
     setSearching(true)
     const t = setTimeout(async () => {
       try {
-        const items = await searchLibrary(q, ctrl.signal)
+        // The palette is a jump list, not a results page: it shows
+        // titles only, so it takes the items and leaves the evidence.
+        const { items } = await searchLibrary(q, ctrl.signal)
         if (!ctrl.signal.aborted) setResults(items)
       } catch {
         if (!ctrl.signal.aborted) setResults([])

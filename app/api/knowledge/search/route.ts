@@ -25,6 +25,7 @@ import { withApiHandler } from "@/lib/api-error"
 import { rowToItem } from "@/lib/knowledge/adapter"
 import * as repo from "@/lib/knowledge/repo"
 import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT, searchLibrary } from "@/lib/knowledge/search/library"
+import type { SearchEvidence } from "@/lib/knowledge/types"
 import { requireSession } from "@/lib/session"
 
 /** Parses a bounded integer parameter, ignoring anything that is not
@@ -51,11 +52,19 @@ export async function GET(req: Request) {
     // S5: search never surfaces another user's content, in the same
     // org or not — enforced inside searchLibrary on both retrievers
     // and again on the read that turns an id into a row.
-    const { rows, retrieval, total } = await searchLibrary(q, { orgId: organizationId, userId }, { limit, offset })
+    const { results, retrieval, total } = await searchLibrary(q, { orgId: organizationId, userId }, { limit, offset })
     // One query for every result's tags — see getTagsForItems.
-    const tags = await repo.getTagsForItems(rows.map((r) => r.id), organizationId, userId)
-    const items = rows.map((row) => rowToItem(row, tags.get(row.id) ?? []))
+    const ids = results.map((r) => r.row.id)
+    const tags = await repo.getTagsForItems(ids, organizationId, userId)
+    const items = results.map((r) => rowToItem(r.row, tags.get(r.row.id) ?? []))
 
-    return NextResponse.json({ items, query: q, total, retrieval })
+    // Evidence keyed by item, separate from the card model: a
+    // KnowledgeItem is what the Library renders everywhere, and it does
+    // not become query-dependent because one caller happened to search.
+    // Items without a matching passage simply have no key here.
+    const evidence: Record<string, SearchEvidence> = {}
+    for (const r of results) if (r.evidence) evidence[r.row.id] = r.evidence
+
+    return NextResponse.json({ items, evidence, query: q, total, retrieval })
   })
 }

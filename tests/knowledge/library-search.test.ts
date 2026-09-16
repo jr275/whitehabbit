@@ -20,12 +20,13 @@
 
 import { after, before, beforeEach, describe, it } from "node:test"
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 
 import { closeTestPool, createTenant, getTestPool, prepareDatabase, type TestTenant } from "../helpers/db"
 import { EMBEDDING_DIMENSIONS, type EmbeddingProvider } from "@/lib/ai/embeddings"
 import { embedItemChunks, indexItem } from "@/lib/knowledge/indexing"
-import { searchLibrary } from "@/lib/knowledge/search/library"
+import { EVIDENCE_MIN_SIMILARITY, searchLibrary } from "@/lib/knowledge/search/library"
 import * as repo from "@/lib/knowledge/repo"
 
 let owner: TestTenant
@@ -106,8 +107,8 @@ describe("searchLibrary — two retrievers, one ranking", () => {
     // The lexical half's job. A chunk carries text, not the title, so
     // semantic retrieval alone cannot answer this.
     const id = await indexed(owner, "Zorblatt quarterly", LONG("margins narrowed across tooling"), "margin")
-    const { rows } = await searchLibrary("Zorblatt", scopeOf(owner), { deps: { embeddings: fakeEmbeddings("margin") } })
-    assert.deepEqual(rows.map((r) => r.id), [id])
+    const { results } = await searchLibrary("Zorblatt", scopeOf(owner), { deps: { embeddings: fakeEmbeddings("margin") } })
+    assert.deepEqual(results.map((r) => r.row.id), [id])
   })
 
   it("finds an item by MEANING, for words the query does not share with it", async () => {
@@ -120,9 +121,9 @@ describe("searchLibrary — two retrievers, one ranking", () => {
     const lexicalOnly = await repo.searchItems(owner.orgId, owner.userId, "hoobastank", 20)
     assert.deepEqual(lexicalOnly, [], "precondition: lexical finds nothing for this query")
 
-    const { rows, retrieval } = await searchLibrary("hoobastank quiglefan", scopeOf(owner), { deps: { embeddings } })
+    const { results, retrieval } = await searchLibrary("hoobastank quiglefan", scopeOf(owner), { deps: { embeddings } })
     assert.ok(retrieval.semantic > 0, "semantic retrieval must have contributed")
-    assert.deepEqual(rows.map((r) => r.id), [id])
+    assert.deepEqual(results.map((r) => r.row.id), [id])
   })
 
   it("ranks an item both retrievers found above one only the lexical retriever could reach", async () => {
@@ -143,8 +144,8 @@ describe("searchLibrary — two retrievers, one ranking", () => {
     const both = await indexed(owner, "Quiglefan in practice", LONG("The quiglefan mechanism in practice"), "quiglefan")
     const lexicalOnly = await save(owner, "Quiglefan mentioned once", "Unrelated content entirely.")
 
-    const { rows } = await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })
-    const ids = rows.map((r) => r.id)
+    const { results } = await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })
+    const ids = results.map((r) => r.row.id)
     assert.ok(ids.includes(both) && ids.includes(lexicalOnly), "both are lexical matches")
     assert.equal(ids[0], both, "agreement between retrievers is the strongest signal")
   })
@@ -162,7 +163,7 @@ describe("searchLibrary — two retrievers, one ranking", () => {
     const runs = await Promise.all(
       [0, 1, 2].map(() => searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })),
     )
-    const [first, ...rest] = runs.map((r) => r.rows.map((x) => x.id))
+    const [first, ...rest] = runs.map((r) => r.results.map((x) => x.row.id))
     for (const other of rest) assert.deepEqual(other, first)
   })
 
@@ -170,7 +171,7 @@ describe("searchLibrary — two retrievers, one ranking", () => {
     // Semantic search fails open by design. The Library must degrade to
     // the lexical ranking it always had, not to nothing.
     const id = await save(owner, "Retrieval quality", "Body text about retrieval.")
-    const { rows, retrieval } = await searchLibrary("retrieval", scopeOf(owner), {
+    const { results, retrieval } = await searchLibrary("retrieval", scopeOf(owner), {
       deps: {
         embeddings: {
           id: "none",
@@ -186,15 +187,15 @@ describe("searchLibrary — two retrievers, one ranking", () => {
         },
       },
     })
-    assert.deepEqual(rows.map((r) => r.id), [id])
+    assert.deepEqual(results.map((r) => r.row.id), [id])
     assert.equal(retrieval.semantic, 0)
     assert.equal(retrieval.semanticSearch.enabled, false)
   })
 
   it("treats a one-character query as a no-op, not as the whole library", async () => {
     await save(owner, "Something", "Body.")
-    const { rows, total } = await searchLibrary("a", scopeOf(owner))
-    assert.deepEqual(rows, [])
+    const { results, total } = await searchLibrary("a", scopeOf(owner))
+    assert.deepEqual(results, [])
     assert.equal(total, 0)
   })
 
@@ -206,8 +207,79 @@ describe("searchLibrary — two retrievers, one ranking", () => {
       `${LONG("quiglefan one")} ${LONG("quiglefan two")} ${LONG("quiglefan three")}`,
       "quiglefan",
     )
-    const { rows } = await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })
-    assert.deepEqual(rows.map((r) => r.id), [id])
+    const { results } = await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })
+    assert.deepEqual(results.map((r) => r.row.id), [id])
+  })
+})
+
+/* ================================================================== *
+ * EVIDENCE
+ * ================================================================== */
+
+describe("searchLibrary — showing why a result is here", () => {
+  it("attaches the passage that earned a semantic match", async () => {
+    const embeddings = fakeEmbeddings("quiglefan")
+    const id = await indexed(owner, "Untitled", LONG("The quiglefan mechanism is described here"), "quiglefan")
+
+    const [hit] = (await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })).results
+    assert.equal(hit.row.id, id)
+    assert.ok(hit.evidence, "a semantic match must be able to show what matched")
+    assert.match(hit.evidence!.snippet, /quiglefan/i, "and the snippet must be the passage, not a description of it")
+    // The id names a chunk that really exists on this item, rather than
+    // matching a prefix the test invented.
+    const stored = await repo.getChunks(id, owner.orgId, owner.userId)
+    assert.ok(
+      stored.some((c) => c.id === hit.evidence!.chunkId),
+      "the evidence must point at a passage the item actually has",
+    )
+    assert.equal(typeof hit.evidence!.ordinal, "number")
+    assert.ok(hit.evidence!.similarity >= EVIDENCE_MIN_SIMILARITY)
+  })
+
+  it("attaches NOTHING to a lexical-only match — there is no passage behind a title", async () => {
+    // The rule that keeps this honest. An item found because its title
+    // matched has no chunk to point at, and inventing a snippet would
+    // put an explanation under a result the explanation did not cause.
+    const embeddings = fakeEmbeddings("quiglefan")
+    await save(owner, "Quiglefan in the title only", "Body about something else entirely.")
+
+    const [hit] = (await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })).results
+    assert.equal(hit.evidence, undefined)
+  })
+
+  it("attaches nothing when the nearest passage is not actually close", async () => {
+    // Semantic retrieval returns NEAREST neighbours, not good ones: in a
+    // small library the nearest passage to any query is whatever exists.
+    // Ranking can live with that; a claim cannot.
+    const embeddings = fakeEmbeddings("quiglefan")
+    await indexed(owner, "Quiglefan in the title", LONG("Entirely unrelated prose"), "nothing-matches-this")
+
+    const [hit] = (await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })).results
+    assert.ok(hit, "the item still appears — the floor gates the explanation, not the ranking")
+    assert.equal(hit.evidence, undefined)
+  })
+
+  it("truncates the snippet for display without touching the stored chunk", async () => {
+    const embeddings = fakeEmbeddings("quiglefan")
+    const id = await indexed(owner, "Long", LONG("The quiglefan mechanism is described at length here"), "quiglefan")
+
+    const [hit] = (await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })).results
+    const stored = await repo.getChunks(id, owner.orgId, owner.userId)
+    assert.ok(hit.evidence!.snippet.length <= stored[0].text.length + 1, "display text is never longer than the chunk")
+    assert.ok(stored[0].text.length > 0, "and the chunk itself is untouched")
+  })
+
+  it("never attaches a COLLEAGUE's passage to anything", async () => {
+    // Evidence is attached AFTER the scoped re-read, so a passage
+    // cannot carry an item into the results and cannot appear beside
+    // one it does not belong to.
+    const embeddings = fakeEmbeddings("quiglefan")
+    await indexed(colleague, "Theirs", LONG("The quiglefan mechanism, privately"), "quiglefan")
+    const mine = await save(owner, "Quiglefan mine", "Nothing about it in the body.")
+
+    const { results } = await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })
+    assert.deepEqual(results.map((r) => r.row.id), [mine])
+    assert.equal(results[0].evidence, undefined, "their passage is not my evidence")
   })
 })
 
@@ -224,7 +296,7 @@ describe("searchLibrary — pagination", () => {
     const second = await searchLibrary("retrieval", scopeOf(owner), { limit: 2, offset: 2 })
     const third = await searchLibrary("retrieval", scopeOf(owner), { limit: 2, offset: 4 })
 
-    const seen = [...first.rows, ...second.rows, ...third.rows].map((r) => r.id)
+    const seen = [...first.results, ...second.results, ...third.results].map((r) => r.row.id)
     assert.equal(seen.length, 5)
     assert.equal(new Set(seen).size, 5, "no result appears on two pages")
     assert.equal(first.total, 5, "total describes the whole result set, not the page")
@@ -234,7 +306,7 @@ describe("searchLibrary — pagination", () => {
     for (let i = 0; i < 4; i += 1) await save(owner, `Retrieval note ${i}`, "About retrieval.")
     const a = await searchLibrary("retrieval", scopeOf(owner))
     const b = await searchLibrary("retrieval", scopeOf(owner))
-    assert.deepEqual(a.rows.map((r) => r.id), b.rows.map((r) => r.id))
+    assert.deepEqual(a.results.map((r) => r.row.id), b.results.map((r) => r.row.id))
   })
 })
 
@@ -247,14 +319,14 @@ describe("searchLibrary — a vector is never authorization", () => {
     const embeddings = fakeEmbeddings("quiglefan")
     await indexed(colleague, "Their quiglefan memo", LONG("The quiglefan mechanism, privately"), "quiglefan")
 
-    const { rows } = await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })
-    assert.deepEqual(rows, [], "same organization is not the same library")
+    const { results } = await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })
+    assert.deepEqual(results, [], "same organization is not the same library")
   })
 
   it("never returns another ORGANIZATION's item", async () => {
     const embeddings = fakeEmbeddings("quiglefan")
     await indexed(otherOrg, "Their quiglefan memo", LONG("The quiglefan mechanism, privately"), "quiglefan")
-    assert.deepEqual((await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })).rows, [])
+    assert.deepEqual((await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })).results, [])
   })
 
   it("does not return an item whose CHUNK matched but whose row is not mine", async () => {
@@ -267,7 +339,7 @@ describe("searchLibrary — a vector is never authorization", () => {
     // Straight at the re-read, holding their real id — which is exactly
     // what an attacker who saw an id once possesses.
     assert.deepEqual(await repo.getItemsByIds([theirs], owner.orgId, owner.userId), [])
-    assert.deepEqual((await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })).rows, [])
+    assert.deepEqual((await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })).results, [])
   })
 
   it("excludes ARCHIVED items from both retrievers", async () => {
@@ -277,8 +349,8 @@ describe("searchLibrary — a vector is never authorization", () => {
       archived: true,
     })
 
-    const { rows } = await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })
-    const ids = rows.map((r) => r.id)
+    const { results } = await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })
+    const ids = results.map((r) => r.row.id)
     assert.ok(ids.includes(live))
     assert.ok(!ids.includes(gone), "archiving means it stops appearing, in search as everywhere else")
     assert.deepEqual(await repo.getItemsByIds([gone], owner.orgId, owner.userId), [], "and the re-read drops it too")
@@ -289,10 +361,58 @@ describe("searchLibrary — a vector is never authorization", () => {
     const mine = await indexed(owner, "Mine", LONG("The quiglefan mechanism"), "quiglefan")
     const theirs = await indexed(colleague, "Theirs", LONG("The quiglefan mechanism"), "quiglefan")
 
-    assert.deepEqual((await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })).rows.map((r) => r.id), [mine])
+    assert.deepEqual((await searchLibrary("quiglefan", scopeOf(owner), { deps: { embeddings } })).results.map((r) => r.row.id), [mine])
     assert.deepEqual(
-      (await searchLibrary("quiglefan", scopeOf(colleague), { deps: { embeddings } })).rows.map((r) => r.id),
+      (await searchLibrary("quiglefan", scopeOf(colleague), { deps: { embeddings } })).results.map((r) => r.row.id),
       [theirs],
     )
+  })
+})
+
+/* ================================================================== *
+ * THE ROUTE AND THE SURFACE
+ *
+ * Source-inspected: the route imports next/server, which this repo's
+ * plain-Node runner cannot load.
+ * ================================================================== */
+
+describe("GET /api/knowledge/search — the evidence it returns", () => {
+  const source = readFileSync("app/api/knowledge/search/route.ts", "utf8")
+
+  it("keys evidence by item, outside the card model", () => {
+    // A KnowledgeItem is what the Library renders in every view. It
+    // must not gain a field that only means something during a search,
+    // or every other surface inherits a shape it cannot fill.
+    assert.match(source, /const evidence: Record<string, SearchEvidence> = \{\}/)
+    assert.match(source, /if \(r\.evidence\) evidence\[r\.row\.id\] = r\.evidence/)
+  })
+
+  it("passes the caller's own scope, never a widened one", () => {
+    assert.match(source, /searchLibrary\(q, \{ orgId: organizationId, userId \}/)
+  })
+
+  it("bounds limit and offset rather than trusting them", () => {
+    assert.match(source, /MAX_SEARCH_LIMIT/)
+    assert.match(source, /positiveInt/)
+  })
+})
+
+describe("the search result card", () => {
+  const source = readFileSync("components/knowledge/knowledge-card.tsx", "utf8")
+
+  it("shows a snippet ONLY when there is real evidence", () => {
+    // The fallback order is evidence → summary → excerpt. If evidence
+    // were rendered unconditionally, a lexical result would show an
+    // empty quote under "matched in your library".
+    assert.match(source, /\{evidence \? \(\s*<EvidenceNote/)
+  })
+
+  it("reaches Ask through the existing helper, not a new endpoint", () => {
+    assert.match(source, /askAboutHref\(/)
+    assert.doesNotMatch(source, /\/api\/knowledge\/ai/, "the card must not call the answering API itself")
+  })
+
+  it("builds the question deterministically — no model is asked to phrase it", () => {
+    assert.match(source, /What does my library say about/)
   })
 })

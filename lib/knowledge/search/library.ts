@@ -39,11 +39,13 @@ import "server-only"
  * lexical ranking — which is exactly what the Library did before.
  * ================================================================== */
 
+import { buildExcerpt } from "./citations"
 import { reciprocalRankFusion } from "./fusion"
 import { searchKnowledge, type SearchDeps } from "./index"
-import type { SemanticSearchStatus } from "./types"
+import type { RetrievedChunk, SemanticSearchStatus } from "./types"
 import * as repo from "@/lib/knowledge/repo"
 import type { KnowledgeRow } from "@/lib/knowledge/repo"
+import type { SearchEvidence } from "@/lib/knowledge/types"
 
 /** Each retriever is asked for more than the page needs, so fusion has
  *  something to disagree about. Three times is enough for the top of
@@ -59,8 +61,33 @@ export interface LibrarySearchOptions {
   deps?: SearchDeps
 }
 
+/** How similar a passage must be before the surface will point at it
+ *  and say "this is why".
+ *
+ *  Semantic retrieval returns NEAREST neighbours, not GOOD ones: in a
+ *  small library the nearest passage to any query is whatever exists,
+ *  at any distance. Ranking can live with that — a weak match simply
+ *  ranks low. A claim cannot: showing an unrelated paragraph under
+ *  "matched in your library" is worse than showing nothing, because
+ *  the reader believes it.
+ *
+ *  This gates the CLAIM, never the ranking. An item below the floor
+ *  still appears exactly where fusion put it; it just arrives without
+ *  an explanation, which is the honest state. The number is a product
+ *  judgement — deliberately conservative, and one constant to change.
+ */
+export const EVIDENCE_MIN_SIMILARITY = 0.5
+
+/** One result: the row, and the passage that produced it if there was
+ *  one. Evidence is absent for an item the lexical retriever found by
+ *  its title, author or tags — there is no passage behind those. */
+export interface LibrarySearchHit {
+  row: KnowledgeRow
+  evidence?: SearchEvidence
+}
+
 export interface LibrarySearchResult {
-  rows: KnowledgeRow[]
+  results: LibrarySearchHit[]
   /** How many candidates each retriever contributed, and whether
    *  semantic ran at all. Reported so a deployment with no embedding
    *  credential is visibly lexical-only rather than silently worse. */
@@ -72,6 +99,23 @@ export interface LibrarySearchResult {
   /** Fused candidates before the page was cut, so a caller can tell
    *  "no more results" from "end of this page". */
   total: number
+}
+
+/** Turns the chunk that earned an item its semantic rank into displayable
+ *  evidence — or into nothing, when it is not similar enough to be worth
+ *  claiming. */
+function evidenceFor(chunk: RetrievedChunk | undefined): SearchEvidence | undefined {
+  if (!chunk) return undefined
+  const similarity = chunk.signals.semantic
+  if (similarity === undefined || similarity < EVIDENCE_MIN_SIMILARITY) return undefined
+  return {
+    snippet: buildExcerpt(chunk.snippet),
+    chunkId: chunk.chunkId,
+    ordinal: chunk.ordinal,
+    charStart: chunk.charStart,
+    charEnd: chunk.charEnd,
+    similarity,
+  }
 }
 
 export async function searchLibrary(
@@ -88,7 +132,7 @@ export async function searchLibrary(
   // whole library.
   if (q.length < 2) {
     return {
-      rows: [],
+      results: [],
       retrieval: { lexical: 0, semantic: 0, semanticSearch: { enabled: false, reason: "not_requested" } },
       total: 0,
     }
@@ -106,12 +150,14 @@ export async function searchLibrary(
 
   // Chunks collapse to their items, keeping the best rank each item
   // achieved: an item whose third passage also matched is not a better
-  // result than one whose first did.
+  // result than one whose first did. The chunk that earned that rank is
+  // kept alongside — it is the evidence, and it is already in hand, so
+  // producing it costs nothing extra.
   const semanticIds: { id: string }[] = []
-  const seen = new Set<string>()
+  const bestChunk = new Map<string, (typeof semantic.chunks)[number]>()
   for (const chunk of semantic.chunks) {
-    if (seen.has(chunk.knowledgeItemId)) continue
-    seen.add(chunk.knowledgeItemId)
+    if (bestChunk.has(chunk.knowledgeItemId)) continue
+    bestChunk.set(chunk.knowledgeItemId, chunk)
     semanticIds.push({ id: chunk.knowledgeItemId })
   }
 
@@ -129,8 +175,16 @@ export async function searchLibrary(
   const byId = new Map(rows.map((r) => [r.id, r]))
 
   return {
-    // Fused order, and only rows the scoped re-read returned.
-    rows: pageIds.map((id) => byId.get(id)).filter((r): r is KnowledgeRow => r !== undefined),
+    // Fused order, and only rows the scoped re-read returned. Evidence
+    // is attached AFTER that read, so a passage can never carry an item
+    // into the results — the row has to survive authorization first,
+    // and only then does its chunk get to explain it.
+    results: pageIds.flatMap<LibrarySearchHit>((id) => {
+      const row = byId.get(id)
+      if (!row) return []
+      const evidence = evidenceFor(bestChunk.get(id))
+      return [evidence ? { row, evidence } : { row }]
+    }),
     retrieval: {
       lexical: lexicalRows.length,
       semantic: semanticIds.length,

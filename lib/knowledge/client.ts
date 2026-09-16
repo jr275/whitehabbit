@@ -11,7 +11,7 @@
 import { MalformedAnswerError, parseKnowledgeAnswer, type KnowledgeAnswer } from "./ai"
 import { emptyDiscovery, type DiscoveryResult } from "./discovery-contract"
 import type { ResearchBrief } from "./research-contract"
-import type { KnowledgeDocument, KnowledgeItem, KnowledgeListResult, PrimaryFilter } from "./types"
+import type { KnowledgeDocument, KnowledgeItem, KnowledgeListResult, PrimaryFilter, SearchEvidence } from "./types"
 import {
   guestDelete,
   guestGetDocument,
@@ -94,16 +94,28 @@ export async function fetchLibrary(params: ListParams = {}, signal?: AbortSignal
 
 /** Real search over the org's saved items. Returns [] for queries
  * shorter than 2 chars (the server treats those as an idle no-op). */
-export async function searchLibrary(q: string, signal?: AbortSignal): Promise<KnowledgeItem[]> {
+export interface LibrarySearchResponse {
+  items: KnowledgeItem[]
+  /** The passage behind each result, keyed by item id. An item found by
+   *  its title has no key here — see SearchEvidence. Kept beside the
+   *  items rather than folded into them, because a KnowledgeItem is the
+   *  card model used everywhere and must not become query-dependent. */
+  evidence: Record<string, SearchEvidence>
+}
+
+export async function searchLibrary(q: string, signal?: AbortSignal): Promise<LibrarySearchResponse> {
   const trimmed = q.trim()
-  if (trimmed.length < 2) return []
+  if (trimmed.length < 2) return { items: [], evidence: {} }
   try {
     const res = await fetch(`/api/knowledge/search?q=${encodeURIComponent(trimmed)}`, { signal, cache: "no-store" })
-    return (await parse<{ items: KnowledgeItem[] }>(res)).items
+    const body = await parse<{ items: KnowledgeItem[]; evidence?: Record<string, SearchEvidence> }>(res)
+    return { items: body.items, evidence: body.evidence ?? {} }
   } catch (err) {
     if (isAuthMiss(err)) {
       markGuest()
-      return guestSearch(trimmed)
+      // A browser-local library has no chunks and no vectors, so a
+      // guest search has nothing to show evidence from.
+      return { items: guestSearch(trimmed), evidence: {} }
     }
     throw err
   }

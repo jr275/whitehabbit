@@ -7,7 +7,7 @@ import * as api from "@/lib/knowledge/client"
 import { openSaveDialog } from "@/lib/knowledge/config"
 import { useKnowledgeLibrary } from "@/lib/knowledge/use-knowledge"
 import { useVoiceSearch } from "@/lib/knowledge/use-voice-search"
-import type { KnowledgeItem, KnowledgeKind, PrimaryFilter } from "@/lib/knowledge/types"
+import type { KnowledgeItem, KnowledgeKind, PrimaryFilter, SearchEvidence } from "@/lib/knowledge/types"
 import { EmptyLibrary } from "./empty-state"
 import { KnowledgeCard } from "./knowledge-card"
 import { VoiceSearchButton } from "./voice-search-button"
@@ -134,6 +134,10 @@ export function LibraryView({
   // library, not just the loaded page. Results reuse the same cards.
   const searching = query.trim().length >= 2
   const [searchResults, setSearchResults] = useState<KnowledgeItem[]>([])
+  /** Why each search result is here, keyed by item id. Empty for a
+   *  lexical-only match, and empty for every non-search view — a card
+   *  outside a search has no query to have matched. */
+  const [searchEvidence, setSearchEvidence] = useState<Record<string, SearchEvidence>>({})
   const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "ready" | "error">("idle")
 
   useEffect(() => {
@@ -148,7 +152,8 @@ export function LibraryView({
       try {
         const res = await api.searchLibrary(query, ctrl.signal)
         if (ctrl.signal.aborted) return
-        setSearchResults(res)
+        setSearchResults(res.items)
+        setSearchEvidence(res.evidence)
         setSearchStatus("ready")
       } catch {
         if (ctrl.signal.aborted) return
@@ -296,6 +301,7 @@ export function LibraryView({
                     item={item}
                     view={layout}
                     index={i}
+                    evidence={searchEvidence[item.id]}
                     onToggleFavorite={searchFavorite}
                     onArchive={searchArchive}
                     onDelete={searchRemove}
