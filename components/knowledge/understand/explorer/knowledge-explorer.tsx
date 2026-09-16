@@ -14,6 +14,7 @@
  * ================================================================== */
 
 import Link from "next/link"
+import { askAboutConceptHref } from "@/lib/knowledge/links"
 import { useMemo, useState } from "react"
 import type { KnowledgeConcept, KnowledgeObject, KnowledgeObjectKind } from "@/lib/knowledge/understand/types"
 import { cn } from "@/lib/utils"
@@ -255,13 +256,27 @@ export function KnowledgeExplorer({
         </div>
       )}
 
-      <p className="mt-4 text-[12.5px] text-[var(--kp-ink-faint)]" aria-live="polite">
-        {visible.length} of {objects.length} shown
-        {selectedConcept && <> · filtered by {selectedConcept.label}</>}
-        {typeof total === "number" && total > objects.length && (
-          <> · showing the {objects.length} most recent of {total} saved</>
+      <div className="mt-4 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <p className="text-[12.5px] text-[var(--kp-ink-faint)]" aria-live="polite">
+          {visible.length} of {objects.length} shown
+          {selectedConcept && <> · filtered by {selectedConcept.label}</>}
+          {typeof total === "number" && total > objects.length && (
+            <> · showing the {objects.length} most recent of {total} saved</>
+          )}
+        </p>
+        {/* When a concept IS the subject, it can be asked about. Same
+            Ask, same deterministic phrasing as everywhere else — no
+            second question system, and no model consulted to write a
+            question about a concept the extractor already named. */}
+        {selectedConcept && live && (
+          <Link
+            href={askAboutConceptHref(selectedConcept.label)}
+            className="text-[12.5px] font-medium text-[var(--kp-accent)] underline underline-offset-4 hover:opacity-80"
+          >
+            Ask about this concept
+          </Link>
         )}
-      </p>
+      </div>
 
       {visible.length === 0 ? (
         <p className="py-16 text-center text-[15px] text-[var(--kp-ink-faint)]">
@@ -325,14 +340,43 @@ export function KnowledgeExplorer({
 
                   {object.conceptIds.length > 0 && (
                     <ul className="mt-2.5 flex flex-wrap gap-1.5">
-                      {object.conceptIds.map((id) => (
-                        <li
-                          key={id}
-                          className="rounded-full border border-[var(--kp-rule)] px-2 py-0.5 text-[11px] text-[var(--kp-ink-faint)]"
-                        >
-                          {conceptById.get(id)?.label ?? id}
-                        </li>
-                      ))}
+                      {object.conceptIds.map((id) => {
+                        const label = conceptById.get(id)?.label
+                        // INSIDE the Explorer a concept filters in
+                        // place; it does not navigate to the Explorer
+                        // we are already standing in. The Reader's
+                        // chips are links for the same reason: each
+                        // goes to wherever the concept is NOT.
+                        //
+                        // A chip whose concept is not in the rail —
+                        // which happens when the rail is capped — has
+                        // nothing to select, so it stays a label rather
+                        // than becoming a control that does nothing.
+                        const selectable = onSelectConcept && label !== undefined
+                        return (
+                          <li key={id}>
+                            {selectable ? (
+                              <button
+                                type="button"
+                                onClick={() => onSelectConcept(id === selectedConceptId ? null : id)}
+                                aria-pressed={id === selectedConceptId}
+                                className={cn(
+                                  "rounded-full border px-2 py-0.5 text-[11px] transition-colors duration-[var(--kp-fast)]",
+                                  id === selectedConceptId
+                                    ? "border-[var(--kp-accent)] text-[var(--kp-accent)]"
+                                    : "border-[var(--kp-rule)] text-[var(--kp-ink-faint)] hover:border-[var(--kp-ink)] hover:text-[var(--kp-ink)]",
+                                )}
+                              >
+                                {label}
+                              </button>
+                            ) : (
+                              <span className="rounded-full border border-[var(--kp-rule)] px-2 py-0.5 text-[11px] text-[var(--kp-ink-faint)]">
+                                {label ?? id}
+                              </span>
+                            )}
+                          </li>
+                        )
+                      })}
                     </ul>
                   )}
 

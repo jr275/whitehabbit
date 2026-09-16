@@ -389,6 +389,7 @@ export function KnowledgeUnderstand({
         onOpenObject={setOpenObjectId}
         onAsk={handleAsk}
         onExploreConnections={() => scrollTo("connections")}
+        onSelectConcept={selectConcept}
       />
 
       {voiceOpen && (

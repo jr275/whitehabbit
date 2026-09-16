@@ -4,7 +4,7 @@ import { PageContainer, PageHeader } from "@/components/knowledge/page-header"
 import { requireSession, UnauthenticatedError } from "@/lib/session"
 import { listTagCounts } from "@/lib/knowledge/repo"
 import { tagsToTopics } from "@/lib/knowledge/adapter"
-import { askAboutHref } from "@/lib/knowledge/config"
+import { askAboutHref, topicItemsHref } from "@/lib/knowledge/config"
 import { GuestTopics } from "@/components/knowledge/guest-topics"
 
 export const metadata = {
@@ -70,7 +70,7 @@ export default async function TopicsPage() {
                     finds them — no tag-filter endpoint and no second
                     retrieval path. */}
                 <Link
-                  href={`/knowledge/library?q=${encodeURIComponent(t.label)}`}
+                  href={topicItemsHref(t.label)}
                   className="inline-flex items-center gap-1.5 rounded text-[12.5px] font-medium text-foreground transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
                 >
                   <Library className="size-3.5" /> See the {t.count === 1 ? "piece" : "pieces"}

@@ -77,9 +77,10 @@ export function openCommandPalette(): void {
  *  invented: the question text itself carries the intent, and the Ask
  *  surface still shows its real state (including "unavailable") on submit.
  *  The question is never auto-run, so nothing is simulated. */
-export function askAboutHref(question: string): string {
-  return `/knowledge/ai?q=${encodeURIComponent(question)}`
-}
+/* The URL builders live in ./links.ts — no imports, so they can be
+ * unit-tested; re-exported here because callers have always reached
+ * them through config. */
+export { askAboutConceptHref, askAboutHref, conceptHref, topicItemsHref } from "./links"
 
 export function isNavActive(pathname: string, href: string): boolean {
   if (href === "/knowledge") return pathname === "/knowledge"

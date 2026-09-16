@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { Loader2 } from "lucide-react"
+import { conceptHref } from "@/lib/knowledge/links"
 import { fetchRelatedKnowledge } from "@/lib/knowledge/client"
 import type { DiscoveryResult, ItemConcept, RelatedKnowledgeItem } from "@/lib/knowledge/discovery-contract"
 
@@ -165,15 +166,21 @@ function KeyIdeas({ concepts }: { concepts: ItemConcept[] }) {
           <ul className="mt-2 flex flex-wrap gap-1.5">
             {group.items.map((c) => (
               <li key={c.id}>
-                {/* The title is the provenance: a concept is here because
-                    passages of this item were cited for it, and the count
-                    is the number of those passages. */}
-                <span
-                  className="inline-block rounded-md bg-secondary/60 px-2 py-1 text-xs text-foreground/80"
-                  title={`${c.evidenceCount} passage${c.evidenceCount === 1 ? "" : "s"} in this piece`}
+                {/* A CONCEPT IS A DESTINATION, not a label. These chips
+                    were text for as long as the concepts existed, which
+                    made the one real relationship in the product —
+                    item → idea → other items — a dead end at the exact
+                    point a reader would follow it.
+                    The title is the provenance: a concept is here
+                    because passages of this item were cited for it, and
+                    the count is the number of those passages. */}
+                <Link
+                  href={conceptHref(c.id)}
+                  className="inline-block rounded-md bg-secondary/60 px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
+                  title={`${c.evidenceCount} passage${c.evidenceCount === 1 ? "" : "s"} in this piece — see everything about it`}
                 >
                   {c.label}
-                </span>
+                </Link>
               </li>
             ))}
           </ul>

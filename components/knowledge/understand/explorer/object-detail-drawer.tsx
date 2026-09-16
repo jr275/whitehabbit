@@ -32,6 +32,7 @@ export function ObjectDetailDrawer({
   onOpenObject,
   onAsk,
   onExploreConnections,
+  onSelectConcept,
 }: {
   object: KnowledgeObject | null
   concepts: KnowledgeConcept[]
@@ -40,6 +41,11 @@ export function ObjectDetailDrawer({
   onOpenObject: (id: string) => void
   onAsk: (question: string) => void
   onExploreConnections: () => void
+  /** Selecting a concept here filters the Explorer behind the drawer
+   *  and closes it — the drawer IS the Explorer's detail view, so a
+   *  concept narrows the list you came from rather than navigating to
+   *  a page you are already on. */
+  onSelectConcept?: (conceptId: string | null) => void
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
   const restoreTo = useRef<HTMLElement | null>(null)
@@ -136,14 +142,29 @@ export function ObjectDetailDrawer({
           <section className="mt-9">
             <Label>What Keeply understood</Label>
             <ul className="mt-3 flex flex-wrap gap-1.5">
-              {object.conceptIds.map((id) => (
-                <li
-                  key={id}
-                  className="rounded-full bg-[var(--kp-wash)] px-2.5 py-1 text-[12.5px] text-[var(--kp-ink-soft)]"
-                >
-                  {conceptById.get(id)?.label ?? id}
-                </li>
-              ))}
+              {object.conceptIds.map((id) => {
+                const label = conceptById.get(id)?.label
+                return (
+                  <li key={id}>
+                    {onSelectConcept && label !== undefined ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSelectConcept(id)
+                          onClose()
+                        }}
+                        className="rounded-full bg-[var(--kp-wash)] px-2.5 py-1 text-[12.5px] text-[var(--kp-ink-soft)] transition-colors duration-[var(--kp-fast)] hover:bg-[var(--kp-accent)] hover:text-[var(--kp-paper)]"
+                      >
+                        {label}
+                      </button>
+                    ) : (
+                      <span className="rounded-full bg-[var(--kp-wash)] px-2.5 py-1 text-[12.5px] text-[var(--kp-ink-soft)]">
+                        {label ?? id}
+                      </span>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           </section>
 
