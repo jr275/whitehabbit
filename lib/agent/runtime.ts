@@ -262,11 +262,33 @@ export async function* executeTask(run: RunTaskInput): AsyncGenerator<WorkerEven
   await driver
 }
 
-function titleFor(outputType: string, input: Record<string, string>): string {
-  const query = input.query?.trim()
+/** A title is a row in the Outputs Hub, not a paragraph — an operator
+ *  scanning twenty of them needs the subject, not the whole objective.
+ *  Cut at a word boundary where there is one, so the title stays a
+ *  real phrase rather than a hard-severed fragment. */
+const TITLE_SUBJECT_MAX = 60
+
+function subject(raw: string | undefined): string | undefined {
+  const text = raw?.trim().replace(/\s+/g, " ")
+  if (!text) return undefined
+  if (text.length <= TITLE_SUBJECT_MAX) return text
+  const cut = text.slice(0, TITLE_SUBJECT_MAX)
+  const lastSpace = cut.lastIndexOf(" ")
+  return `${(lastSpace > TITLE_SUBJECT_MAX * 0.5 ? cut.slice(0, lastSpace) : cut).trim()}…`
+}
+
+export function titleFor(outputType: string, input: Record<string, string>): string {
   switch (outputType) {
-    case "trend_report":
+    case "trend_report": {
+      const query = subject(input.query)
       return query ? `Trend report — ${query}` : "Trend report"
+    }
+    case "research_result": {
+      // Reads `objective`, which is this skill's own input key — the
+      // reason each case names its key rather than sharing one guess.
+      const objective = subject(input.objective)
+      return objective ? `Research — ${objective}` : "Research result"
+    }
     case "content_analysis":
       return "Content performance analysis"
     case "engagement_analysis":

@@ -27,7 +27,7 @@ export interface NavItem {
  *  palette. Collections, Audio and Research are intentionally omitted
  *  while they are Coming Soon, so the menu only advertises what works. */
 export const KNOWLEDGE_NAV: NavItem[] = [
-  { href: "/knowledge", label: "Home", icon: Home },
+  { href: "/knowledge/home", label: "Home", icon: Home },
   { href: "/knowledge/library", label: "Library", icon: Library },
   { href: "/knowledge/topics", label: "Topics", icon: Tag },
   { href: "/knowledge/ai", label: "Ask", icon: Sparkles },
@@ -42,7 +42,7 @@ export const KNOWLEDGE_SECONDARY_NAV: NavItem[] = [
 /** Compact set surfaced in the mobile bottom bar (Search lives in the
  *  persistent top-bar field, reachable on every screen). */
 export const MOBILE_NAV: NavItem[] = [
-  { href: "/knowledge", label: "Home", icon: Home },
+  { href: "/knowledge/home", label: "Home", icon: Home },
   { href: "/knowledge/library", label: "Library", icon: Library },
   { href: "/knowledge/ai", label: "Ask", icon: Sparkles },
 ]
@@ -77,9 +77,10 @@ export function openCommandPalette(): void {
  *  invented: the question text itself carries the intent, and the Ask
  *  surface still shows its real state (including "unavailable") on submit.
  *  The question is never auto-run, so nothing is simulated. */
-export function askAboutHref(question: string): string {
-  return `/knowledge/ai?q=${encodeURIComponent(question)}`
-}
+/* The URL builders live in ./links.ts — no imports, so they can be
+ * unit-tested; re-exported here because callers have always reached
+ * them through config. */
+export { askAboutConceptHref, askAboutHref, conceptHref, topicItemsHref } from "./links"
 
 export function isNavActive(pathname: string, href: string): boolean {
   if (href === "/knowledge") return pathname === "/knowledge"

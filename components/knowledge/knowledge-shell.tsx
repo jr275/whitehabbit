@@ -1,5 +1,6 @@
 "use client"
 
+import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import { CommandPalette } from "./command-palette"
 import { KnowledgeSidebar } from "./knowledge-sidebar"
@@ -7,7 +8,10 @@ import { KnowledgeTopbar } from "./knowledge-topbar"
 import { MobileNav } from "./mobile-nav"
 import { SaveDialog } from "./save-dialog"
 
+const UNCHROMED_ROUTE = "/knowledge"
+
 export function KnowledgeShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [saveOpen, setSaveOpen] = useState(false)
 
@@ -40,6 +44,17 @@ export function KnowledgeShell({ children }: { children: React.ReactNode }) {
       window.removeEventListener("knowledge:command", openPalette)
     }
   }, [])
+
+  // The Understand surface brings its own header, navigation, main
+  // landmark and (light) theme — it is a full-page editorial reading
+  // experience rather than a pane inside the app chrome. Rendering it
+  // inside this shell would nest a second <main>, stack two headers,
+  // and frame a light page in the dark sidebar.
+  //
+  // A child route cannot remove a parent layout in the App Router, so
+  // this single explicit exception is the escape hatch. It matches one
+  // path and leaves every other Knowledge route untouched.
+  if (pathname === UNCHROMED_ROUTE) return <>{children}</>
 
   return (
     <div className="knowledge-surface min-h-dvh bg-background text-foreground">

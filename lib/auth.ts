@@ -22,11 +22,17 @@ import Google from "next-auth/providers/google"
 import { authConfig } from "@/lib/auth.config"
 import { findOrCreateOAuthUser, getPrimaryOrgForUser, getUserByEmail } from "@/lib/db/repo"
 import { verifyPassword } from "@/lib/auth-password"
+import { googleAuthConfigured, isVerifiedOAuthEmail } from "@/lib/auth-features"
 
-/** True when real Google OAuth credentials are configured. The login/
- * signup pages read this (via lib/auth-features) so the Google button
- * only appears when it will actually work. */
-export const isGoogleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+/** Whether to register the Google provider on THIS process's Auth.js
+ * config. Evaluated once, which is correct here and only here: the
+ * provider list is built when this module loads and Auth.js keeps it
+ * for the life of the process.
+ *
+ * Pages must NOT use this. They need lib/auth-features'
+ * googleAuthConfigured(), which reads fresh — see that module for what
+ * the difference costs. */
+const registerGoogleProvider = googleAuthConfigured()
 
 const providers: NextAuthConfig["providers"] = [
   Credentials({
@@ -48,12 +54,20 @@ const providers: NextAuthConfig["providers"] = [
       const org = await getPrimaryOrgForUser(user.id)
       if (!org) return null // a real account with no organization is a data-integrity problem, not something to paper over
 
-      return { id: user.id, email: user.email, organizationId: org.id, organizationName: org.name }
+      // sessionVersion travels with the identity so the edge-safe jwt
+      // callback can stamp it without importing the database.
+      return {
+        id: user.id,
+        email: user.email,
+        organizationId: org.id,
+        organizationName: org.name,
+        sessionVersion: user.sessionVersion,
+      }
     },
   }),
 ]
 
-if (isGoogleConfigured) {
+if (registerGoogleProvider) {
   providers.push(
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
@@ -74,6 +88,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      * from authorize(), so it falls through to the base jwt callback. */
     async jwt({ token, user, account, profile }) {
       if (account?.provider === "google") {
+        // The email is the ONLY thing that links this Google identity
+        // to a Whitehabbit account (allowDangerousEmailAccountLinking
+        // above), so it has to be an address Google says it verified.
+        // Refuse rather than degrade: returning a token without ids
+        // would produce a half-signed-in state that looks authenticated
+        // to middleware and fails at every API call. See
+        // isVerifiedOAuthEmail for what this is defending against.
+        if (!isVerifiedOAuthEmail(profile)) {
+          throw new Error("Google did not confirm this email address is verified.")
+        }
         const email = (profile?.email as string | undefined) ?? user?.email ?? undefined
         if (email) {
           const { user: dbUser, org } = await findOrCreateOAuthUser({
@@ -84,6 +108,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           token.userId = dbUser.id
           token.organizationId = org.id
           token.organizationName = org.name
+          // Google sign-in mints a token the same way credentials does,
+          // so it has to carry the same version claim — otherwise an
+          // OAuth session would read as version 0 and survive a reset
+          // that was supposed to end it.
+          token.sessionVersion = dbUser.sessionVersion
         }
         return token
       }

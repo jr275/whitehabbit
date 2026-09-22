@@ -1,0 +1,102 @@
+/* ================================================================== *
+ * RETRIEVAL CONTRACT — what every mode returns, and what nothing
+ * outside this directory is allowed to see.
+ *
+ * No provider shapes cross this boundary. A caller receives ranked
+ * chunks with the metadata needed to cite them, and cannot tell
+ * whether they came from a GIN index, a vector index, or both.
+ * ================================================================== */
+
+import type { SemanticSearchStatus } from "@/lib/ai/embeddings"
+
+export type { SemanticDisabledReason, SemanticSearchStatus } from "@/lib/ai/embeddings"
+
+/** lexical  — exact word matching, no stemming (see migration 0009)
+ *  semantic — nearest neighbours in embedding space
+ *  hybrid   — both, fused. The default: each covers the other's
+ *             blind spot, exact terms and paraphrase respectively. */
+export type RetrievalMode = "lexical" | "semantic" | "hybrid"
+
+/** Tenancy, always taken from the verified session and never from a
+ *  request body. Both fields are required — the type is what stops a
+ *  future caller from "temporarily" omitting the user. */
+export interface AccessScope {
+  orgId: string
+  userId: string | null
+}
+
+export interface SearchInput {
+  query: string
+  scope: AccessScope
+  mode?: RetrievalMode
+  limit?: number
+  filters?: SearchFilters
+  /** Diversify the ranking with MMR before truncating to `limit`.
+   *
+   *  Off by default, and deliberately so. A results LIST showing five
+   *  strong passages from one strong article is a good results list.
+   *  A generated ANSWER built from those same five passages cites one
+   *  source and claims to have read a library — so the answering
+   *  pipeline turns this on and the browse UI leaves it off. */
+  rerank?: boolean
+}
+
+export interface SearchFilters {
+  /** Restrict to specific saved items. */
+  itemIds?: string[]
+  /** Archived content is excluded unless asked for explicitly. */
+  includeArchived?: boolean
+}
+
+/** One retrieved passage, with everything a citation needs. */
+export interface RetrievedChunk {
+  knowledgeItemId: string
+  chunkId: string
+  /** Fused, comparable within one result set. Not a probability, and
+   *  not comparable across queries — see fusion.ts. */
+  score: number
+  title: string | null
+  source: string | null
+  snippet: string
+  ordinal: number
+  charStart: number | null
+  charEnd: number | null
+  /** What each retriever contributed, kept alongside the fused score
+   *  rather than replaced by it. Fusion answers "how highly should
+   *  this rank"; these answer "on what basis", and a caller deciding
+   *  whether a passage is admissible as EVIDENCE needs the second
+   *  question. Absent for a retriever that did not return this chunk. */
+  signals: {
+    /** ts_rank. Present means every query term matched — plainto_tsquery
+     *  ANDs them — which is strong evidence on its own. */
+    lexical?: number
+    /** Cosine similarity in [0,1]. Present means only "nearest
+     *  neighbour", which in a small library is satisfied by anything. */
+    semantic?: number
+  }
+  metadata: {
+    domain: string | null
+    url: string
+    lang: string | null
+    publishedAt: number | null
+  }
+}
+
+export interface SearchResult {
+  chunks: RetrievedChunk[]
+  mode: RetrievalMode
+  /** What actually ran. Semantic silently degrades to lexical when no
+   *  embedding provider is configured, and the caller has to be able
+   *  to tell — a result set that looks the same but was produced a
+   *  different way is how a broken provider goes unnoticed. */
+  executed: { lexical: boolean; semantic: boolean }
+  /** WHY semantic did or did not run. `executed.semantic` says
+   *  whether it ran; this says why not, which is the difference
+   *  between "this deployment has no embedding credential" and "the
+   *  provider is down right now" — one is a configuration task and
+   *  the other is an incident. Carries no provider detail: the
+   *  message is logged server-side and never travels here. */
+  semanticSearch: SemanticSearchStatus
+  timings: { lexicalMs?: number; semanticMs?: number; embedMs?: number; totalMs: number }
+  candidates: { lexical: number; semantic: number }
+}

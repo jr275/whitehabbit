@@ -1,7 +1,8 @@
 "use client"
 
 /* Real Google OAuth trigger. Only rendered when the server confirms
- * GOOGLE_CLIENT_ID/SECRET are configured (see lib/auth.isGoogleConfigured),
+ * GOOGLE_CLIENT_ID/SECRET are configured (see lib/auth-features'
+ * googleAuthConfigured, read per request),
  * so it is never a dead/fake button. Routes through /launch, which
  * decides onboarding-vs-product after the session exists. */
 

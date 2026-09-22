@@ -4,6 +4,7 @@ import { contentIntelligenceSkill } from "./content-intelligence"
 import { customerConversationSkill } from "./customer-conversation"
 import { engagementAnalysisSkill } from "./engagement-analysis"
 import { leadQualificationSkill } from "./lead-qualification"
+import { objectiveResearchSkill } from "./objective-research"
 import { seoOpportunitySkill } from "./seo-opportunity"
 import { trendResearchSkill } from "./trend-research"
 import type { SkillDefinition } from "@/lib/agent/types"
@@ -17,6 +18,7 @@ import type { SkillDefinition } from "@/lib/agent/types"
  * change. */
 export const SKILL_REGISTRY: SkillDefinition[] = [
   trendResearchSkill,
+  objectiveResearchSkill,
   contentIntelligenceSkill,
   engagementAnalysisSkill,
   leadQualificationSkill,

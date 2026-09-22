@@ -15,7 +15,9 @@ import { randomUUID } from "node:crypto"
 import { safeFetch, SafeFetchError, type SafeFetchOptions } from "@/lib/security/safe-fetch"
 import { assertSafeUrl, UnsafeUrlError } from "@/lib/security/ssrf-guard"
 import { logger } from "@/lib/observability/logger"
-import { isAiSummaryConfigured, summarizeText, type AiSummaryDeps } from "./ai-summary"
+import { runIndexJob } from "./indexing"
+import { AiSummaryUpstreamError, isAiSummaryConfigured, summarizeText, type AiSummaryDeps } from "./ai-summary"
+import { extractConceptsForItem } from "./concepts/extract"
 import { extractFavicon, extractFromHtml } from "./extract"
 import * as repo from "./repo"
 import type { KnowledgeJobRow, KnowledgeRow } from "./repo"
@@ -474,10 +476,151 @@ export async function claimAndRunJob(opts: ClaimAndRunOptions = {}, workerId: st
  * repo.ts's completeJob/failJob). */
 async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetchDeps: FetchDeps, workerId: string): Promise<void> {
   try {
-    await runIngestJob(job.item_id, job.org_id, job.created_by, fetchDeps)
+    // Dispatch on job_type. 0006 left this column here precisely so a
+    // second kind of work could share the queue's lease, backoff and
+    // reaping rather than grow a parallel one; this is the first
+    // caller to use it. An unknown type is treated as ingest, which
+    // is what every row written before indexing existed means.
+    if (job.job_type === "concepts") {
+      // Concept extraction is the LAST stage: it reads chunks the index
+      // job produced. A failure here leaves the item fully readable and
+      // searchable — only its concepts are missing — so it must never
+      // fail the ITEM. It may, and now does, fail the JOB.
+      //
+      // This used to complete the job whatever happened, which made a
+      // provider outage indistinguishable from "this document has no
+      // concepts": both left zero rows and a `done` job, so nothing
+      // downstream could tell that we had not actually looked, and the
+      // item was never revisited.
+      //
+      // A CONTENT failure still completes. Re-asking the same question
+      // about the same text produces the same unusable answer, so
+      // spending more calls on it learns nothing — the reasoning in
+      // concepts/extract.ts's header, kept, now that the outcome says
+      // which kind of failure it was.
+      const outcome = await extractConceptsForItem(job.item_id, { orgId: job.org_id, userId: job.created_by })
+      if (outcome.status === "failed") {
+        logger.warn("knowledge_concepts_failed", {
+          itemId: job.item_id,
+          reason: outcome.reason,
+          failure: outcome.failure,
+        })
+        if (outcome.failure === "provider") {
+          // FAILED IMMEDIATELY AND TERMINALLY, not retried, and above
+          // all not `done`.
+          //
+          // Not `done`, because it was not: nothing looked at this
+          // item, and recording success would hide that from the
+          // backfill's survey forever — the item would be
+          // indistinguishable from one the model read and found
+          // nothing nameable in.
+          //
+          // Not retried either, because the commonest provider failure
+          // by far is "no credential in this deployment", which is a
+          // deployment state rather than a transient fault. Handing it
+          // to the backoff loop would burn max_attempts claims per
+          // item across an entire library, starving the queue of real
+          // work to re-learn the same answer. The retry for this stage
+          // is the backfill, which finds exactly the items in this
+          // state and re-queues them once — after a credential exists.
+          await repo.failJob(job.id, workerId, {
+            attempts: job.max_attempts,
+            error: outcome.reason ?? "Concept extraction could not reach a model provider.",
+            retryAt: null,
+          })
+          summary.failed++
+          return
+        }
+      }
+    } else if (job.job_type === "summary") {
+      // The pipeline's last stage, and the only one that reads nothing
+      // the earlier ones produced except the extracted text ingestion
+      // already wrote. summarizeItem() is unchanged and still the ONLY
+      // summarizer: it refuses to regenerate an item that already has
+      // one, which is what makes re-running this free.
+      const row = await repo.getItem(job.item_id, job.org_id, job.created_by)
+      if (row) {
+        try {
+          await summarizeItem(row, job.org_id, job.created_by)
+        } catch (err) {
+          // Nothing to summarize is not a failure of ours — an item
+          // whose extraction produced no text has no summary to have,
+          // and retrying cannot change that. The job completes.
+          if (err instanceof SaveValidationError) {
+            logger.info("knowledge_summary_skipped", { itemId: job.item_id, reason: err.message })
+          } else if (err instanceof ServiceAiNotConfiguredError || err instanceof AiSummaryUpstreamError) {
+            const message = err.message
+            // Same rule as concepts, for the same reason: not `done`,
+            // because nothing was summarized and the backfill has to
+            // be able to find this item again; and not retried, because
+            // the commonest case is an absent credential, which is a
+            // deployment state rather than a transient fault.
+            logger.warn("knowledge_summary_failed", { itemId: job.item_id, message })
+            await repo.failJob(job.id, workerId, {
+              attempts: job.max_attempts,
+              error: message,
+              retryAt: null,
+            })
+            summary.failed++
+            return
+          } else {
+            throw err
+          }
+        }
+      }
+    } else if (job.job_type === "index") {
+      await runIndexJob(job.item_id, job.org_id, job.created_by)
+    } else {
+      await runIngestJob(job.item_id, job.org_id, job.created_by, fetchDeps)
+    }
     const landed = await repo.completeJob(job.id, workerId)
     if (landed) {
       summary.succeeded++
+      // Ingestion is what produces content_text, so the moment it
+      // lands is the moment there is something to chunk. Enqueued
+      // here rather than inside runIngestJob because
+      // uq_knowledge_jobs_item_open allows only ONE queued job per
+      // item: the ingest job has to leave the queue first, and
+      // completeJob above is exactly when it does.
+      //
+      // Best effort on purpose. A failure to enqueue must not undo a
+      // successful ingestion — the item is saved and readable either
+      // way, and an unindexed item is a gap in search, not lost data.
+      if (job.job_type === "index") {
+        // The pipeline's last link. Chunks exist now, so the concepts
+        // pass has something to read; enqueued the same best-effort way
+        // indexing itself is, so a queue hiccup never fails the item.
+        try {
+          await repo.enqueueConceptJob(job.item_id, job.org_id, job.created_by)
+        } catch (err) {
+          logger.warn("knowledge_concepts_enqueue_failed", {
+            itemId: job.item_id,
+            message: err instanceof Error ? err.message : String(err),
+          })
+        }
+      } else if (job.job_type === "concepts") {
+        // The chain's final link. Enqueued off CONCEPTS rather than off
+        // indexing so the stages stay serial — one open job per item is
+        // what uq_knowledge_jobs_item_open allows, and running them in
+        // parallel would mean one of the two silently never queued.
+        try {
+          await repo.enqueueSummaryJob(job.item_id, job.org_id, job.created_by)
+        } catch (err) {
+          logger.warn("knowledge_summary_enqueue_failed", {
+            itemId: job.item_id,
+            message: err instanceof Error ? err.message : String(err),
+          })
+        }
+      } else if (job.job_type !== "summary") {
+        try {
+          await repo.enqueueIndexJob(job.item_id, job.org_id, job.created_by)
+        } catch (err) {
+          logger.warn("knowledge_index_enqueue_failed", {
+            itemId: job.item_id,
+            message: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
     } else {
       // Our lease was already reclaimed by someone else by the time we
       // finished — whoever holds the job now owns its outcome, not us.
@@ -497,7 +640,25 @@ async function runClaimedJob(job: KnowledgeJobRow, summary: JobRunSummary, fetch
         // on the UI-facing row — knowledge_items.status stays exactly
         // what it always meant, only reached through a durable retry
         // loop instead of a single best-effort attempt.
-        await repo.setStatus(job.item_id, job.org_id, job.created_by, "failed", message)
+        //
+        // ONLY for ingestion. A failed INDEX or CONCEPTS job must not
+        // mark the item failed: the piece was fetched, extracted and
+        // is readable — it is simply missing from search, or missing
+        // its concepts. Saying "failed" would tell the user their save
+        // broke when it did not, and would offer them a Retry that
+        // re-fetches a page that was never the problem. The job row
+        // carries the real failure, and stays queryable.
+        if (job.job_type === "index" || job.job_type === "concepts" || job.job_type === "summary") {
+          logger.error("knowledge_post_ingest_job_exhausted", {
+            jobId: job.id,
+            itemId: job.item_id,
+            jobType: job.job_type,
+            attempts,
+            message,
+          })
+        } else {
+          await repo.setStatus(job.item_id, job.org_id, job.created_by, "failed", message)
+        }
         summary.failed++
       } else {
         logger.warn("knowledge_job_stale_fail", { jobId: job.id, itemId: job.item_id, workerId, terminal: true })

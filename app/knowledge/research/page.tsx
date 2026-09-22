@@ -1,23 +1,10 @@
-import { Compass } from "lucide-react"
-import { ComingSoon } from "@/components/knowledge/coming-soon"
+import { ResearchView } from "@/components/knowledge/research/research-view"
 
 export const metadata = {
   title: "Research · Knowledge",
-  description: "Group your saves into research projects and synthesize across sources.",
+  description: "Give Keeply an objective and get an evidence-grounded brief from your own sources.",
 }
 
 export default function ResearchPage() {
-  return (
-    <ComingSoon
-      eyebrow="Deep work"
-      title="Research across your sources."
-      description="Pull related saves into a project and synthesize a point of view across them."
-      icon={Compass}
-      bullets={[
-        "Group saved pieces into a focused research thread",
-        "Cross-source synthesis grounded in the extracted text",
-        "Export notes and citations from a project",
-      ]}
-    />
-  )
+  return <ResearchView />
 }

@@ -1,10 +1,10 @@
-import { KnowledgeAiView } from "@/components/knowledge/ai/knowledge-ai-view"
+import { AskPage } from "@/components/knowledge/ai/ask-page"
 
 export const metadata = {
   title: "Ask · Knowledge",
-  description: "Ask your own knowledge and get answers grounded in everything you've saved, with citations.",
+  description: "Ask your own library and surface the connections in what you save.",
 }
 
 export default function AiPage() {
-  return <KnowledgeAiView />
+  return <AskPage />
 }

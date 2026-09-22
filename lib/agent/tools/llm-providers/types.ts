@@ -1,48 +1,21 @@
 import "server-only"
 
 /* ================================================================== *
- * LLM PROVIDER — the abstraction seam.
+ * The LlmProvider abstraction moved to lib/ai/llm (shared platform)
+ * when Knowledge also needed to call a model — see that module's
+ * header for why duplicating it was the worse option.
  *
- * lib/agent/tools/llm.ts dispatches to whichever LlmProvider is active
- * (selected server-side via LLM_PROVIDER). Every provider implements
- * this exact same shape, so callLlm()/isLlmConnected()/llmTool in
- * llm.ts — and everything that consumes them (trend-research.ts,
- * runtime.ts) — never change no matter which provider is behind them.
+ * This file stays as the re-export Workforce code already imports, so
+ * the move touched no skill and no runtime. What did NOT move is in
+ * ./development.ts: its fixtures encode Workforce skill JSON shapes and
+ * belong to this product, not to the platform.
  * ================================================================== */
 
-import type { ToolActionResult } from "@/lib/agent/types"
-
-export interface LlmCallInput {
-  system: string
-  prompt: string
-  maxTokens?: number
-}
-
-export interface LlmCallOutput {
-  text: string
-  model: string
-  inputTokens: number
-  outputTokens: number
-  /** which provider actually produced this — real token accounting and
-   * cost lookup both key off this, never assumed. */
-  provider: string
-  /** set ONLY by the development provider (lib/agent/tools/llm-providers/
-   * development.ts) when LLM_DEV_MODE=true. Absent/undefined means a real
-   * external provider call happened — this is the one field every layer
-   * downstream (SkillExecutionResult, WorkerExecution, the UI) checks to
-   * know whether tokens/cost/model are real or a local dev fixture. */
-  executionMode?: "development"
-}
-
-export interface LlmProvider {
-  /** stable id, e.g. "anthropic" | "gemini" — also the cost/env-var key */
-  id: string
-  /** what the UI shows, e.g. "Anthropic API key required" */
-  displayName: string
-  /** a REAL check — credential (and, where required, model) presence. Never hardcoded true. */
-  isConfigured: () => boolean
-  /** why isConfigured() is currently false — read fresh, never cached */
-  notConfiguredReason: () => string
-  /** the real call. Never fabricates a completion, never estimates tokens. */
-  call: (input: LlmCallInput) => Promise<ToolActionResult<LlmCallOutput>>
-}
+export type {
+  LlmCallDeps,
+  LlmCallInput,
+  LlmCallOutput,
+  LlmFailureReason,
+  LlmProvider,
+  LlmResult,
+} from "@/lib/ai/llm/types"

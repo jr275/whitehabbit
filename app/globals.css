@@ -437,3 +437,98 @@
 .animate-output-in {
   animation: wh-output-in 0.28s ease-out;
 }
+
+/* ================================================================== *
+ * UNDERSTAND — the light editorial Knowledge surface.
+ *
+ * Scoped entirely to `.kp-understand`. The rest of Keeply is a
+ * deliberately dark reading surface (see --kn-paper above); this one
+ * route is light because it is a different act — reading ABOUT your
+ * library rather than reading IN it. Scoping rather than switching the
+ * global theme is what keeps both true at once.
+ *
+ * Neutrals are warm-biased (a trace of the ink hue), not pure grey —
+ * a flat #888 is the tell of an unconsidered palette.
+ * ================================================================== */
+.kp-understand {
+  /* ground + ink */
+  --kp-paper: oklch(0.985 0.003 95);      /* warm near-white */
+  --kp-paper-raised: oklch(1 0 0);
+  --kp-ink: oklch(0.19 0.012 260);        /* near-black, faintly blue */
+  --kp-ink-soft: oklch(0.44 0.014 260);
+  --kp-ink-faint: oklch(0.62 0.012 260);
+
+  /* structure */
+  --kp-rule: oklch(0.19 0.012 260 / 12%);
+  --kp-rule-strong: oklch(0.19 0.012 260 / 26%);
+  --kp-wash: oklch(0.19 0.012 260 / 4%);
+
+  /* the single accent — spent in one place at a time */
+  --kp-accent: oklch(0.52 0.17 28);       /* deep vermilion */
+  --kp-accent-soft: oklch(0.52 0.17 28 / 12%);
+  --kp-signal: oklch(0.48 0.09 200);      /* secondary, for graph edges */
+
+  /* scale */
+  --kp-measure: 68ch;
+  --kp-page: 1280px;
+  --kp-gutter: clamp(1.25rem, 4vw, 4rem);
+
+  /* motion */
+  --kp-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --kp-fast: 240ms;
+  --kp-slow: 620ms;
+
+  background: var(--kp-paper);
+  color: var(--kp-ink);
+  color-scheme: light;
+  font-feature-settings: "kern" 1, "liga" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numerals that line up in columns and do not jitter while counting. */
+.kp-understand .kp-tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The one reveal primitive. Elements start displaced and settle. */
+.kp-understand [data-reveal] {
+  opacity: 0;
+  transform: translateY(14px);
+  transition:
+    opacity var(--kp-slow) var(--kp-ease),
+    transform var(--kp-slow) var(--kp-ease);
+  transition-delay: var(--kp-delay, 0ms);
+}
+.kp-understand [data-reveal="in"] {
+  opacity: 1;
+  transform: none;
+}
+
+/* A reduced-motion viewer gets the finished state with no transition —
+ * never a disabled animation stuck at its initial opacity. */
+@media (prefers-reduced-motion: reduce) {
+  .kp-understand [data-reveal],
+  .kp-understand [data-reveal="in"] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .kp-understand * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Focus is visible on the light ground without a browser-blue ring. */
+.kp-understand :focus-visible {
+  outline: 2px solid var(--kp-accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* Wide content scrolls inside its own box; the page never does. */
+.kp-understand .kp-scroll-x {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  overscroll-behavior-x: contain;
+}

@@ -10,12 +10,23 @@ import "server-only"
  * ================================================================== */
 
 import { auth } from "@/lib/auth"
-import { userBelongsToOrg } from "@/lib/db/repo"
+import { resolveSessionSubject } from "@/lib/db/repo"
 
 export class UnauthenticatedError extends Error {
   constructor() {
     super("Sign in required.")
     this.name = "UnauthenticatedError"
+  }
+}
+
+/** The token is validly signed but was minted before the account's
+ *  session version was bumped — a password reset happened after this
+ *  cookie was issued. Distinct from UnauthorizedOrgError so the reason
+ *  is visible in logs; both map to the same response. */
+export class StaleSessionError extends Error {
+  constructor() {
+    super("This session ended when the password was changed.")
+    this.name = "StaleSessionError"
   }
 }
 
@@ -44,8 +55,16 @@ export async function requireSession(): Promise<RequestSession> {
   const userId = (session?.user as { id?: string } | undefined)?.id
   if (!session || !userId || !orgId) throw new UnauthenticatedError()
 
-  const belongs = await userBelongsToOrg(userId, orgId)
-  if (!belongs) throw new UnauthorizedOrgError()
+  // Membership and session version in one query — see
+  // resolveSessionSubject. Both are re-read on EVERY request: a JWT is
+  // valid because it is signed, so the only place staleness can be
+  // caught is here.
+  const subject = await resolveSessionSubject(userId, orgId)
+  if (!subject.belongs) throw new UnauthorizedOrgError()
+
+  const claimed = (session as { sessionVersion?: unknown }).sessionVersion
+  const tokenVersion = typeof claimed === "number" ? claimed : 0
+  if (tokenVersion < subject.sessionVersion) throw new StaleSessionError()
 
   return {
     userId,

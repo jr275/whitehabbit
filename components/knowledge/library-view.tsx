@@ -7,7 +7,7 @@ import * as api from "@/lib/knowledge/client"
 import { openSaveDialog } from "@/lib/knowledge/config"
 import { useKnowledgeLibrary } from "@/lib/knowledge/use-knowledge"
 import { useVoiceSearch } from "@/lib/knowledge/use-voice-search"
-import type { KnowledgeItem, KnowledgeKind, PrimaryFilter } from "@/lib/knowledge/types"
+import type { KnowledgeItem, KnowledgeKind, PrimaryFilter, SearchEvidence } from "@/lib/knowledge/types"
 import { EmptyLibrary } from "./empty-state"
 import { KnowledgeCard } from "./knowledge-card"
 import { VoiceSearchButton } from "./voice-search-button"
@@ -57,6 +57,9 @@ interface LibraryViewProps {
   title?: string
   eyebrow?: string
   subtitle?: string
+  /** Search the Library opens on, from ?q= in the URL. Empty means the
+   *  ordinary browse view. */
+  initialQuery?: string
 }
 
 export function LibraryView({
@@ -64,6 +67,7 @@ export function LibraryView({
   title = "Library",
   eyebrow,
   subtitle = "Everything you've saved.",
+  initialQuery = "",
 }: LibraryViewProps) {
   // Initialise to SSR-safe defaults so the server-rendered HTML and the
   // first client render match exactly. The persisted view mode / filter /
@@ -73,7 +77,13 @@ export function LibraryView({
   // in list view).
   const [layout, setLayout] = useState<LibraryLayout>("grid")
   const [kind, setKind] = useState<KnowledgeKind | null>(null)
-  const [query, setQuery] = useState("")
+  /* ?q= makes a filtered Library a link someone can send — and, more
+   * immediately, gives a Topic card somewhere to go. searchItems
+   * already matches an item's tags, so a topic's own name IS the query
+   * that finds its items: no tag-filter endpoint, no second code path,
+   * and the results arrive through the hybrid search everything else
+   * uses. */
+  const [query, setQuery] = useState(initialQuery)
   const [hydrated, setHydrated] = useState(false)
 
   // ── Voice search — a browser capability, not a new search engine ──
@@ -134,6 +144,10 @@ export function LibraryView({
   // library, not just the loaded page. Results reuse the same cards.
   const searching = query.trim().length >= 2
   const [searchResults, setSearchResults] = useState<KnowledgeItem[]>([])
+  /** Why each search result is here, keyed by item id. Empty for a
+   *  lexical-only match, and empty for every non-search view — a card
+   *  outside a search has no query to have matched. */
+  const [searchEvidence, setSearchEvidence] = useState<Record<string, SearchEvidence>>({})
   const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "ready" | "error">("idle")
 
   useEffect(() => {
@@ -148,7 +162,8 @@ export function LibraryView({
       try {
         const res = await api.searchLibrary(query, ctrl.signal)
         if (ctrl.signal.aborted) return
-        setSearchResults(res)
+        setSearchResults(res.items)
+        setSearchEvidence(res.evidence)
         setSearchStatus("ready")
       } catch {
         if (ctrl.signal.aborted) return
@@ -296,6 +311,7 @@ export function LibraryView({
                     item={item}
                     view={layout}
                     index={i}
+                    evidence={searchEvidence[item.id]}
                     onToggleFavorite={searchFavorite}
                     onArchive={searchArchive}
                     onDelete={searchRemove}

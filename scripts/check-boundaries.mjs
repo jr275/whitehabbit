@@ -62,8 +62,22 @@ const WORKFORCE_ONLY = [
 /**
  * Shared platform, allowed in both products for now. See the header:
  * this list is expected to shrink, not grow.
+ *
+ * RULE 4 makes this list load-bearing rather than documentation: a
+ * module listed here may not import EITHER product. Until that rule
+ * existed the list was only a comment, and a shared module was free to
+ * import lib/agent — which would have put Workforce in Knowledge's
+ * bundle through the shared import and defeated rules 1 and 3 without
+ * tripping either. That is not hypothetical: promoting the LLM
+ * providers into lib/ai/llm is exactly the change that would have done
+ * it, since the providers they replaced imported lib/agent/cost.
  */
 const SHARED_PLATFORM = [
+  // Embeddings are infrastructure, not a Knowledge feature: Workers
+  // will need the same abstraction. Knowledge may import it; lib/agent
+  // (Workforce's generation providers) stays off-limits, which is why
+  // this exists instead of a cross-boundary import.
+  "lib/ai",
   "lib/db",
   "lib/session",
   "lib/api-error",
@@ -105,11 +119,30 @@ function walk(dir, out = []) {
 
 const IMPORT_RE = /(?:from\s+|import\s*\(|require\s*\()\s*["']([^"']+)["']/g
 
+/** Is the statement containing this specifier `import type` /
+ * `export type`? Scans back to the nearest import/export keyword,
+ * which is all that is needed because a specifier only ever appears at
+ * the end of one such statement.
+ *
+ * Only RULE 4 cares. A type import is erased by the compiler and
+ * reaches no bundle, so it cannot launder a product across the shared
+ * layer — which is the only thing rule 4 forbids. Rules 1 and 3 stay
+ * strict on purpose: they forbid the products from KNOWING about each
+ * other, and a shared type is knowledge whether or not it ships. */
+function isTypeOnly(src, index) {
+  const before = src.slice(0, index)
+  const start = Math.max(before.lastIndexOf("import"), before.lastIndexOf("export"))
+  if (start === -1) return false
+  return /^(?:import|export)\s+type\b/.test(before.slice(start))
+}
+
 function importsOf(file) {
   const src = readFileSync(file, "utf8")
   const specifiers = []
   let m
-  while ((m = IMPORT_RE.exec(src)) !== null) specifiers.push(m[1])
+  while ((m = IMPORT_RE.exec(src)) !== null) {
+    specifiers.push({ specifier: m[1], typeOnly: isTypeOnly(src, m.index) })
+  }
   return specifiers
 }
 
@@ -139,7 +172,7 @@ for (const sourceRoot of SOURCE_ROOTS) {
   for (const file of walk(path.join(root, sourceRoot))) {
     const rel = path.relative(root, file)
 
-    for (const specifier of importsOf(file)) {
+    for (const { specifier, typeOnly } of importsOf(file)) {
       const target = toRepoPath(specifier, file)
       if (!target) continue
 
@@ -166,6 +199,21 @@ for (const sourceRoot of SOURCE_ROOTS) {
       if (isWorkforceFile(rel) && startsWithAny(target, KNOWLEDGE_ONLY)) {
         violations.push(
           `${rel}\n    imports "${specifier}"\n    → Workforce must not depend on Knowledge.`,
+        )
+      }
+
+      // RULE 4 — Shared platform depends on neither product. Both
+      // products import these modules, so anything a shared module
+      // pulls in lands in BOTH bundles. A platform module that reached
+      // into a product would launder that product across the boundary
+      // while rules 1 and 3 reported success.
+      if (
+        !typeOnly &&
+        startsWithAny(rel, SHARED_PLATFORM) &&
+        startsWithAny(target, [...WORKFORCE_ONLY, ...KNOWLEDGE_ONLY])
+      ) {
+        violations.push(
+          `${rel}\n    imports "${specifier}"\n    → Shared platform must not depend on a product. Both products import ${rel}, so this would put "${specifier}" in both bundles.`,
         )
       }
     }

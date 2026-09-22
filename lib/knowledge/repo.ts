@@ -56,6 +56,9 @@ export interface KnowledgeRow {
   lang: string | null
   content_text: string | null
   summary: string | null
+  /** sha256 of content_text at the time it was chunked — see
+   *  lib/knowledge/indexing.ts. NULL until first indexed. */
+  content_hash: string | null
   favorite: boolean
   archived: boolean
   read_at: string | null
@@ -74,7 +77,7 @@ export interface ListOptions {
 
 const SELECT_COLS = `id, org_id, created_by, url, normalized_url, canonical_url, domain, status, kind, error, attempts,
   title, author, site_name, excerpt, image_url, favicon, published_at, word_count, reading_min, lang,
-  content_text, summary, favorite, archived, read_at, created_at, updated_at`
+  content_text, summary, content_hash, favorite, archived, read_at, created_at, updated_at`
 
 /** Insert a freshly-saved item in the `saved` state. Content columns
  * stay NULL until the ingestion pipeline fills them from real markup.
@@ -196,6 +199,36 @@ export async function searchItems(orgId: string, userId: string | null, rawQuery
   )
 }
 
+/**
+ * Items by id, owner-scoped, in ONE query.
+ *
+ * Exists for retrieval paths that arrive holding ids from somewhere
+ * else — a vector search returns chunk rows, and a chunk knows its
+ * item_id. That id is a POINTER, never a permission: the row it names
+ * is re-read here under the caller's own scope, so a chunk that
+ * somehow escaped its own filter still cannot produce an item the
+ * caller may not see. Authorization stays relational.
+ *
+ * Archived items are excluded by default, matching every other read.
+ * Order is not meaningful — callers that fused a ranking apply it
+ * themselves, because SQL cannot express "the order these ids arrived
+ * in" without a VALUES join that buys nothing here.
+ */
+export async function getItemsByIds(
+  ids: string[],
+  orgId: string,
+  userId: string | null,
+  opts: { includeArchived?: boolean } = {},
+): Promise<KnowledgeRow[]> {
+  if (ids.length === 0) return []
+  const archived = opts.includeArchived ? "" : " AND archived = FALSE"
+  return query<KnowledgeRow>(
+    `SELECT ${SELECT_COLS} FROM knowledge_items
+      WHERE id = ANY($1) AND org_id = $2 AND created_by IS NOT DISTINCT FROM $3${archived}`,
+    [ids, orgId, userId],
+  )
+}
+
 /** Advance lifecycle state. Used by the ingestion pipeline as it moves
  * saved → fetching → extracting. Owner-scoped so a stale/forged id
  * can't mutate another org's OR another user's row. */
@@ -293,6 +326,41 @@ export async function saveExtraction(id: string, orgId: string, userId: string |
  * that fact is enforced for every tag read (S5: tags are a lateral path
  * to another user's item and must be closed the same as the item
  * itself). */
+/**
+ * Tags for many items in ONE query.
+ *
+ * getTags below answers for a single item, which is right when a
+ * route has one item and wrong when it has a page of them: rendering
+ * a 24-item library issued 24 extra round-trips (measured), and on a
+ * serverless Postgres the round-trip, not the query, is the cost.
+ *
+ * The scope predicate is character-for-character the same as
+ * getTags's — this is a batching change, not a security change, and
+ * an item outside the caller's scope contributes no tags here for
+ * exactly the same reason it contributes none there.
+ *
+ * Every requested id gets an entry, so a caller never has to
+ * distinguish "no tags" from "not in the map".
+ */
+export async function getTagsForItems(
+  ids: string[],
+  orgId: string,
+  userId: string | null,
+): Promise<Map<string, string[]>> {
+  const byItem = new Map<string, string[]>(ids.map((id) => [id, []]))
+  if (ids.length === 0) return byItem
+
+  const rows = await query<{ item_id: string; tag: string }>(
+    `SELECT t.item_id, t.tag FROM knowledge_item_tags t
+     JOIN knowledge_items i ON i.id = t.item_id
+     WHERE t.item_id = ANY($1) AND t.org_id = $2 AND i.created_by IS NOT DISTINCT FROM $3
+     ORDER BY t.item_id, t.tag`,
+    [ids, orgId, userId],
+  )
+  for (const row of rows) byItem.get(row.item_id)?.push(row.tag)
+  return byItem
+}
+
 export async function getTags(id: string, orgId: string, userId: string | null): Promise<string[]> {
   const rows = await query<{ tag: string }>(
     `SELECT t.tag FROM knowledge_item_tags t
@@ -674,4 +742,330 @@ export async function failJob(
  * state without reaching into SQL directly. */
 export async function getJob(jobId: string): Promise<KnowledgeJobRow | null> {
   return queryOne<KnowledgeJobRow>(`SELECT ${JOB_COLS} FROM knowledge_jobs WHERE id = $1`, [jobId])
+}
+
+/* ================================================================== *
+ * CHUNKS — the retrieval substrate (Phase C).
+ *
+ * Every function here is owner-scoped the same way the item reads
+ * are: (org_id, created_by), taken from the session and never from a
+ * request body. Chunks mirror their parent's ownership onto their own
+ * rows (see 0007), so these filters sit on the row being touched
+ * rather than on a join that a later refactor could drop.
+ * ================================================================== */
+
+export interface KnowledgeChunkRow {
+  id: string
+  item_id: string
+  org_id: string
+  created_by: string | null
+  ordinal: number
+  text: string
+  char_start: number | null
+  char_end: number | null
+  token_estimate: number | null
+  content_hash: string
+  created_at: number
+  updated_at: number
+}
+
+const CHUNK_COLS = `id, item_id, org_id, created_by, ordinal, text, char_start, char_end,
+  token_estimate, content_hash, created_at, updated_at`
+
+/** A document's chunks in reading order. Served by
+ *  uq_knowledge_chunks_item_ordinal as a prefix scan. */
+export async function getChunks(itemId: string, orgId: string, userId: string | null): Promise<KnowledgeChunkRow[]> {
+  return query<KnowledgeChunkRow>(
+    `SELECT ${CHUNK_COLS} FROM knowledge_chunks
+      WHERE item_id = $1 AND org_id = $2 AND created_by IS NOT DISTINCT FROM $3
+      ORDER BY ordinal ASC`,
+    [itemId, orgId, userId],
+  )
+}
+
+export interface ChunkInput {
+  id: string
+  ordinal: number
+  text: string
+  charStart: number
+  charEnd: number
+  tokenEstimate: number
+  contentHash: string
+}
+
+export type ReplaceChunksOutcome =
+  | { status: "replaced"; chunks: number }
+  | { status: "unchanged"; chunks: number }
+  | { status: "not_found" }
+
+/**
+ * Writes a document's chunks and stamps the item's content_hash, all
+ * in one transaction.
+ *
+ * CONCURRENCY. Two indexers racing on the same item would otherwise
+ * both DELETE and both INSERT, and the loser would violate
+ * uq_knowledge_chunks_item_ordinal — a crash where the correct
+ * outcome is "the other one already did it". The first statement
+ * takes a row lock on the parent item, so the second waits, then
+ * re-reads the hash inside the lock and finds its work already done.
+ * That double-check is what makes this idempotent under concurrency
+ * rather than merely idempotent when run twice in sequence.
+ *
+ * The same lock is the ownership check: the SELECT filters on
+ * (org_id, created_by), so an item the caller does not own is simply
+ * not found and nothing is written — there is no path here that
+ * creates a chunk under an owner the caller could not already read.
+ */
+export async function replaceChunks(
+  itemId: string,
+  orgId: string,
+  userId: string | null,
+  contentHash: string,
+  chunks: ChunkInput[],
+): Promise<ReplaceChunksOutcome> {
+  const now = Date.now()
+  return withTransaction(async (client) => {
+    const locked = await client.query<{ content_hash: string | null }>(
+      `SELECT content_hash FROM knowledge_items
+        WHERE id = $1 AND org_id = $2 AND created_by IS NOT DISTINCT FROM $3
+        FOR UPDATE`,
+      [itemId, orgId, userId],
+    )
+    if (locked.rowCount === 0) return { status: "not_found" }
+
+    // Re-checked under the lock, not before it: between our caller's
+    // read and this transaction, another indexer may have finished
+    // the identical work. Rewriting identical rows would churn the
+    // table and, once embeddings exist, throw away vectors we would
+    // immediately pay to recompute.
+    if (locked.rows[0].content_hash === contentHash) {
+      const existing = await client.query<{ n: string }>(
+        `SELECT COUNT(*)::text AS n FROM knowledge_chunks WHERE item_id = $1`,
+        [itemId],
+      )
+      const n = Number(existing.rows[0].n)
+      if (n === chunks.length) return { status: "unchanged", chunks: n }
+      // Hash matches but the chunk rows do not: a previous run was
+      // interrupted between writing chunks and stamping the hash, or
+      // rows were removed underneath us. Fall through and rebuild.
+    }
+
+    // Stale chunks must not survive a content change. DELETE-then-
+    // INSERT rather than upsert-and-prune: the chunk count can shrink,
+    // and a leftover high-ordinal chunk from longer content would stay
+    // retrievable forever, citing text the document no longer has.
+    await client.query(`DELETE FROM knowledge_chunks WHERE item_id = $1`, [itemId])
+
+    for (const chunk of chunks) {
+      await client.query(
+        `INSERT INTO knowledge_chunks
+           (id, item_id, org_id, created_by, ordinal, text, char_start, char_end,
+            token_estimate, content_hash, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)`,
+        [
+          chunk.id, itemId, orgId, userId, chunk.ordinal, chunk.text,
+          chunk.charStart, chunk.charEnd, chunk.tokenEstimate, chunk.contentHash, now,
+        ],
+      )
+    }
+
+    await client.query(
+      `UPDATE knowledge_items SET content_hash = $1, updated_at = $2 WHERE id = $3`,
+      [contentHash, now, itemId],
+    )
+
+    return { status: "replaced", chunks: chunks.length }
+  })
+}
+
+/** Enqueues an indexing job for an item whose content is ready.
+ *
+ * Shares knowledge_jobs with ingestion rather than opening a second
+ * queue: the lease, backoff, attempt cap and stale-claim reaping are
+ * already solved there, and a parallel queue would need all of it
+ * again. See the job_type dispatch in service.ts.
+ *
+ * uq_knowledge_jobs_item_open permits only ONE queued job per item,
+ * whatever its type — so this is called after the ingest job leaves
+ * the queue, never alongside it. ON CONFLICT DO NOTHING makes a
+ * double-enqueue resolve to the existing job instead of an error. */
+/** `created` distinguishes an INSERT from a row that was already
+ *  queued. Both return a job, and from the row alone they are
+ *  indistinguishable — a freshly re-observed queued job also has
+ *  attempts 0 — so a caller that needs to report how much work it
+ *  actually started has to be told here rather than guess. */
+export interface EnqueuedJob {
+  job: KnowledgeJobRow | null
+  created: boolean
+}
+
+export async function enqueueIndexJobDetailed(
+  itemId: string,
+  orgId: string,
+  userId: string | null,
+): Promise<EnqueuedJob> {
+  const now = Date.now()
+  const inserted = await queryOne<KnowledgeJobRow>(
+    `INSERT INTO knowledge_jobs (id, item_id, org_id, created_by, job_type, status, attempts, max_attempts, available_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 'index', 'queued', 0, $5, $6, $6, $6)
+     ON CONFLICT (item_id) WHERE status = 'queued' DO NOTHING
+     RETURNING ${JOB_COLS}`,
+    [`knj_${randomUUID()}`, itemId, orgId, userId, DEFAULT_MAX_ATTEMPTS, now],
+  )
+  if (inserted) return { job: inserted, created: true }
+  const existing = await queryOne<KnowledgeJobRow>(
+    `SELECT ${JOB_COLS} FROM knowledge_jobs WHERE item_id = $1 AND status = 'queued' ORDER BY created_at DESC LIMIT 1`,
+    [itemId],
+  )
+  return { job: existing, created: false }
+}
+
+export async function enqueueIndexJob(itemId: string, orgId: string, userId: string | null): Promise<KnowledgeJobRow | null> {
+  return (await enqueueIndexJobDetailed(itemId, orgId, userId)).job
+}
+
+/** Third job_type on the SAME queue. 0006 put job_type here so another
+ *  kind of work could share the lease, backoff and reaping rather than
+ *  grow a parallel one; index was the first to use it and concepts are
+ *  the second. No new table, no second worker.
+ *
+ *  Same partial-unique guard as the others: one queued job per item, so
+ *  a save followed by a retry cannot stack duplicate work. */
+export async function enqueueConceptJobDetailed(
+  itemId: string,
+  orgId: string,
+  userId: string | null,
+): Promise<EnqueuedJob> {
+  return enqueueConceptJobInternal(itemId, orgId, userId)
+}
+
+export async function enqueueConceptJob(itemId: string, orgId: string, userId: string | null): Promise<KnowledgeJobRow | null> {
+  return (await enqueueConceptJobInternal(itemId, orgId, userId)).job
+}
+
+/** Shared body. `created` distinguishes an INSERT that landed from a
+ *  conflict that found an existing queued job — the backfill needs
+ *  that difference to report how much work it actually started, and a
+ *  re-observed queued job looks identical to a fresh one otherwise
+ *  (both carry attempts 0). Same lesson as enqueueIndexJobDetailed. */
+async function enqueueConceptJobInternal(
+  itemId: string,
+  orgId: string,
+  userId: string | null,
+): Promise<EnqueuedJob> {
+  const now = Date.now()
+  const inserted = await queryOne<KnowledgeJobRow>(
+    `INSERT INTO knowledge_jobs (id, item_id, org_id, created_by, job_type, status, attempts, max_attempts, available_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 'concepts', 'queued', 0, $5, $6, $6, $6)
+     ON CONFLICT (item_id) WHERE status = 'queued' DO NOTHING
+     RETURNING ${JOB_COLS}`,
+    [`knj_${randomUUID()}`, itemId, orgId, userId, DEFAULT_MAX_ATTEMPTS, now],
+  )
+  if (inserted) return { job: inserted, created: true }
+  const existing = await queryOne<KnowledgeJobRow>(
+    `SELECT ${JOB_COLS} FROM knowledge_jobs WHERE item_id = $1 AND status = 'queued' ORDER BY created_at DESC LIMIT 1`,
+    [itemId],
+  )
+  return { job: existing, created: false }
+}
+
+/** Fourth job_type on the SAME queue, and the last link in the chain:
+ *  ingest → index → concepts → summary. Same partial-unique guard as
+ *  the others, so one queued job per item however many stages exist. */
+export async function enqueueSummaryJobDetailed(
+  itemId: string,
+  orgId: string,
+  userId: string | null,
+): Promise<EnqueuedJob> {
+  const now = Date.now()
+  const inserted = await queryOne<KnowledgeJobRow>(
+    `INSERT INTO knowledge_jobs (id, item_id, org_id, created_by, job_type, status, attempts, max_attempts, available_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 'summary', 'queued', 0, $5, $6, $6, $6)
+     ON CONFLICT (item_id) WHERE status = 'queued' DO NOTHING
+     RETURNING ${JOB_COLS}`,
+    [`knj_${randomUUID()}`, itemId, orgId, userId, DEFAULT_MAX_ATTEMPTS, now],
+  )
+  if (inserted) return { job: inserted, created: true }
+  const existing = await queryOne<KnowledgeJobRow>(
+    `SELECT ${JOB_COLS} FROM knowledge_jobs WHERE item_id = $1 AND status = 'queued' ORDER BY created_at DESC LIMIT 1`,
+    [itemId],
+  )
+  return { job: existing, created: false }
+}
+
+export async function enqueueSummaryJob(itemId: string, orgId: string, userId: string | null): Promise<KnowledgeJobRow | null> {
+  return (await enqueueSummaryJobDetailed(itemId, orgId, userId)).job
+}
+
+/* ---- chunk embeddings (Phase D) ---------------------------------- */
+
+export interface ChunkEmbeddingInput {
+  chunkId: string
+  values: number[]
+  provider: string
+  model: string
+}
+
+/**
+ * Stores vectors for chunks that already exist.
+ *
+ * Ownership is not re-derived from the caller: org_id and created_by
+ * are copied from the CHUNK row inside the same statement, so an
+ * embedding can only ever land under the owner its chunk already has.
+ * A caller that passes a chunk id it does not own inserts nothing —
+ * the SELECT that feeds the INSERT finds no row.
+ *
+ * ON CONFLICT updates in place: re-embedding is expected (a model
+ * change, a re-index) and must not accumulate rows for one chunk,
+ * which the primary key on chunk_id would refuse anyway.
+ */
+export async function upsertChunkEmbeddings(
+  orgId: string,
+  userId: string | null,
+  embeddings: ChunkEmbeddingInput[],
+): Promise<number> {
+  if (embeddings.length === 0) return 0
+  const now = Date.now()
+  let written = 0
+  await withTransaction(async (client) => {
+    for (const e of embeddings) {
+      const res = await client.query(
+        `INSERT INTO knowledge_chunk_embeddings
+           (chunk_id, org_id, created_by, embedding, provider, model, dimensions, created_at, updated_at)
+         SELECT c.id, c.org_id, c.created_by, $2::vector, $3, $4, $5, $6, $6
+           FROM knowledge_chunks c
+          WHERE c.id = $1 AND c.org_id = $7 AND c.created_by IS NOT DISTINCT FROM $8
+         ON CONFLICT (chunk_id) DO UPDATE SET
+           embedding = EXCLUDED.embedding,
+           provider  = EXCLUDED.provider,
+           model     = EXCLUDED.model,
+           dimensions = EXCLUDED.dimensions,
+           updated_at = EXCLUDED.updated_at`,
+        [e.chunkId, `[${e.values.join(",")}]`, e.provider, e.model, e.values.length, now, orgId, userId],
+      )
+      written += res.rowCount ?? 0
+    }
+  })
+  return written
+}
+
+/** Chunks of an item that have no vector yet, or whose vector was
+ *  produced by a different model — the query that drives re-embedding
+ *  without rebuilding the whole library. */
+export async function chunksNeedingEmbedding(
+  itemId: string,
+  orgId: string,
+  userId: string | null,
+  model: string,
+): Promise<KnowledgeChunkRow[]> {
+  return query<KnowledgeChunkRow>(
+    `SELECT ${CHUNK_COLS} FROM knowledge_chunks c
+      WHERE c.item_id = $1 AND c.org_id = $2 AND c.created_by IS NOT DISTINCT FROM $3
+        AND NOT EXISTS (
+          SELECT 1 FROM knowledge_chunk_embeddings e
+           WHERE e.chunk_id = c.id AND e.model = $4
+        )
+      ORDER BY c.ordinal ASC`,
+    [itemId, orgId, userId, model],
+  )
 }
