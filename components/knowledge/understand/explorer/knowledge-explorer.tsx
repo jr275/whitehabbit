@@ -313,7 +313,7 @@ export function KnowledgeExplorer({
                     <span>{KIND_LABEL[object.kind]}</span>
                     <span aria-hidden>·</span>
                     <time dateTime={object.savedAt}>
-                      {new Date(object.savedAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}
+                      {new Date(object.savedAt).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}
                     </time>
                     {object.author && (
                       <>
