@@ -46,7 +46,7 @@ function ContradictionDetail({ detail }: { detail: Extract<KnowledgeInsight["det
           </p>
           <p className="mt-3 text-[12.5px] text-[color-mix(in_oklab,var(--kp-paper)_60%,transparent)]">
             {claim.source} · saved{" "}
-            {new Date(claim.savedAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+                {new Date(claim.savedAt).toLocaleDateString("en-US", { day: "numeric", month: "short", timeZone: "UTC" })}
           </p>
         </div>
       ))}

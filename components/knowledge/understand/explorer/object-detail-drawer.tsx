@@ -133,7 +133,7 @@ export function ObjectDetailDrawer({
           <p className="mt-2.5 text-[13px] text-[var(--kp-ink-faint)]">
             {object.source} · saved{" "}
             <time dateTime={object.savedAt}>
-              {new Date(object.savedAt).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })}
+                {new Date(object.savedAt).toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })}
             </time>
             {object.author && ` · ${object.author}`}
             {object.revisits !== undefined && object.revisits > 0 && ` · revisited ${object.revisits}×`}
