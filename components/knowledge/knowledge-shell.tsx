@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
+import { type KnowledgeTheme, persistKnowledgeTheme } from "@/lib/knowledge/theme"
 import { CommandPalette } from "./command-palette"
 import { KnowledgeSidebar } from "./knowledge-sidebar"
 import { KnowledgeTopbar } from "./knowledge-topbar"
@@ -10,8 +11,21 @@ import { SaveDialog } from "./save-dialog"
 
 const UNCHROMED_ROUTE = "/knowledge"
 
-export function KnowledgeShell({ children }: { children: React.ReactNode }) {
+export function KnowledgeShell({
+  children,
+  initialTheme,
+}: {
+  children: React.ReactNode
+  initialTheme: KnowledgeTheme
+}) {
   const pathname = usePathname()
+  const [theme, setTheme] = useState<KnowledgeTheme>(initialTheme)
+
+  function toggleTheme() {
+    const next: KnowledgeTheme = theme === "black" ? "clean" : "black"
+    setTheme(next)
+    persistKnowledgeTheme(next)
+  }
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [saveOpen, setSaveOpen] = useState(false)
 
@@ -57,7 +71,7 @@ export function KnowledgeShell({ children }: { children: React.ReactNode }) {
   if (pathname === UNCHROMED_ROUTE) return <>{children}</>
 
   return (
-    <div className="knowledge-surface min-h-dvh bg-background text-foreground">
+    <div data-kn-theme={theme} className="knowledge-surface min-h-dvh bg-background text-foreground">
       <a
         href="#kn-main"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-50 focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-primary-foreground"
@@ -72,6 +86,8 @@ export function KnowledgeShell({ children }: { children: React.ReactNode }) {
           <KnowledgeTopbar
             onOpenPalette={() => setPaletteOpen(true)}
             onOpenSave={() => setSaveOpen(true)}
+            theme={theme}
+            onToggleTheme={toggleTheme}
           />
           <main id="kn-main" className="flex-1 pb-24 lg:pb-0">
             {children}
