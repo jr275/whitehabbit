@@ -1,11 +1,12 @@
 "use client"
 
-import { LibraryBig, LogIn, LogOut, Search, Settings } from "lucide-react"
+import { LogIn, LogOut, Search, Settings } from "lucide-react"
 import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
+import { KeeplyWordmark } from "./keeply-wordmark"
 import { KNOWLEDGE_NAV, KNOWLEDGE_SECONDARY_NAV, isNavActive, openCommandPalette } from "@/lib/knowledge/config"
 
 export function KnowledgeSidebar() {
@@ -22,13 +23,8 @@ export function KnowledgeSidebar() {
     <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col bg-sidebar lg:flex">
       {/* brand — Knowledge stands on its own, no product switcher */}
       <div className="px-5 pt-6">
-        <Link href="/knowledge" className="flex items-center gap-2.5 py-1" aria-label="Knowledge home">
-          <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <LibraryBig className="size-4" />
-          </span>
-          <span className="text-xl font-semibold leading-none tracking-tight text-foreground">
-            Keeply
-          </span>
+        <Link href="/knowledge" className="flex items-center py-1" aria-label="Keeply home">
+          <KeeplyWordmark />
         </Link>
       </div>
 

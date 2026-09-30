@@ -260,16 +260,62 @@
   }
 }
 
-/* ── Keeply (black + Apple-blue surface) ───────────────────────
- * A completely independent product identity from Workforce: a pure
- * black canvas with a single Apple-blue accent and tight bold sans
- * headlines — a calm, high-contrast reading gallery. Every semantic
- * token is re-declared here so the scope owns its own look; Workforce
- * (outside this class) keeps its dark blue-cast system untouched.
- *
- * One load-bearing accent only: Apple blue. No purple, no neon, no
- * gradients. Restraint is the point. */
+/* ── Keeply · Clean (default) ──────────────────────────────────
+ * The same editorial identity as the Understand surface (.kp-understand):
+ * warm paper, near-black ink, one vermilion accent, serif headlines.
+ * Every semantic token is re-declared so the whole Keeply app reads as
+ * one product; Workforce (outside this class) is untouched. */
 .knowledge-surface {
+  color-scheme: light;
+
+  --background: oklch(0.985 0.003 95);
+  --foreground: oklch(0.19 0.012 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.19 0.012 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.19 0.012 260);
+
+  --primary: oklch(0.52 0.17 28);
+  --primary-foreground: oklch(0.985 0.003 95);
+
+  --secondary: oklch(0.955 0.004 95);
+  --secondary-foreground: oklch(0.19 0.012 260);
+  --muted: oklch(0.955 0.004 95);
+  --muted-foreground: oklch(0.44 0.014 260);
+  --accent: oklch(0.94 0.005 95);
+  --accent-foreground: oklch(0.19 0.012 260);
+
+  --destructive: oklch(0.55 0.2 25);
+  --border: oklch(0.19 0.012 260 / 12%);
+  --input: oklch(0.19 0.012 260 / 16%);
+  --ring: oklch(0.52 0.17 28);
+
+  --grow: oklch(0.52 0.12 152);
+  --warn: oklch(0.62 0.14 70);
+
+  --sidebar: oklch(0.97 0.004 95);
+  --sidebar-foreground: oklch(0.19 0.012 260);
+  --sidebar-primary: oklch(0.52 0.17 28);
+  --sidebar-primary-foreground: oklch(0.985 0.003 95);
+  --sidebar-accent: oklch(0.94 0.005 95);
+  --sidebar-accent-foreground: oklch(0.19 0.012 260);
+  --sidebar-border: oklch(0.19 0.012 260 / 10%);
+  --sidebar-ring: oklch(0.52 0.17 28);
+
+  --kn-paper: oklch(1 0 0);
+  --kn-well: oklch(0.94 0.004 95);
+  --kn-edge: oklch(0.19 0.012 260 / 12%);
+  --kn-ai: oklch(0.52 0.17 28);
+}
+
+.knowledge-surface .thin-scroll::-webkit-scrollbar-thumb {
+  background: oklch(0.19 0.012 260 / 18%);
+}
+
+/* ── Keeply · Black (opt-in) ────────────────────────────────────
+ * The original pure-black canvas with a single Apple-blue accent and
+ * tight bold sans headlines, selected with data-kn-theme="black". */
+.knowledge-surface[data-kn-theme="black"] {
   color-scheme: dark;
 
   /* headlines are tight bold SANS here. The `font-serif` utility is
@@ -326,7 +372,7 @@
 }
 
 /* thin light scrollbars inside the black reading surface */
-.knowledge-surface .thin-scroll::-webkit-scrollbar-thumb {
+.knowledge-surface[data-kn-theme="black"] .thin-scroll::-webkit-scrollbar-thumb {
   background: oklch(1 0 0 / 18%);
 }
 
