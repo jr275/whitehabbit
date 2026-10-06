@@ -14,15 +14,18 @@
  * be somewhere: brand, search, save, on one line.
  * ================================================================== */
 
-import { Plus, Search } from "lucide-react"
+import { Moon, Plus, Search, Sun } from "lucide-react"
 import Link from "next/link"
+import type { KnowledgeTheme } from "@/lib/knowledge/theme"
 
 interface KnowledgeTopbarProps {
   onOpenPalette: () => void
   onOpenSave: () => void
+  theme: KnowledgeTheme
+  onToggleTheme: () => void
 }
 
-export function KnowledgeTopbar({ onOpenPalette, onOpenSave }: KnowledgeTopbarProps) {
+export function KnowledgeTopbar({ onOpenPalette, onOpenSave, theme, onToggleTheme }: KnowledgeTopbarProps) {
   return (
     <header className="sticky top-0 z-30 border-b border-[var(--pk-rule)] bg-[var(--pk-ground)]/88 backdrop-blur-xl lg:hidden">
       <div className="flex h-14 items-center gap-2 px-4">
@@ -35,6 +38,13 @@ export function KnowledgeTopbar({ onOpenPalette, onOpenSave }: KnowledgeTopbarPr
         </Link>
 
         <div className="flex flex-1 items-center justify-end gap-1">
+          <button
+            onClick={onToggleTheme}
+            aria-label={theme === "black" ? "Switch to the light surface" : "Switch to the dark surface"}
+            className="flex size-9 items-center justify-center rounded-full text-[var(--pk-ink-2)] transition-colors active:bg-[var(--pk-sunken)]"
+          >
+            {theme === "black" ? <Sun className="size-[18px]" strokeWidth={1.9} /> : <Moon className="size-[18px]" strokeWidth={1.9} />}
+          </button>
           <button
             onClick={onOpenPalette}
             aria-label="Search your knowledge"

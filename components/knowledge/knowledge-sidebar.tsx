@@ -23,11 +23,12 @@
  * own shell (components/studio/top-nav.tsx) in its own identity.
  * ================================================================== */
 
-import { LogIn, LogOut, Plus, Search, Settings } from "lucide-react"
+import { LogIn, LogOut, Moon, Plus, Search, Settings, Sun } from "lucide-react"
 import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
+import type { KnowledgeTheme } from "@/lib/knowledge/theme"
 import { cn } from "@/lib/utils"
 import {
   KNOWLEDGE_ASK,
@@ -38,7 +39,13 @@ import {
   openSaveDialog,
 } from "@/lib/knowledge/config"
 
-export function KnowledgeSidebar() {
+export function KnowledgeSidebar({
+  theme,
+  onToggleTheme,
+}: {
+  theme: KnowledgeTheme
+  onToggleTheme: () => void
+}) {
   const pathname = usePathname()
   const { data: session, status } = useSession()
   const [accountOpen, setAccountOpen] = useState(false)
@@ -107,6 +114,20 @@ export function KnowledgeSidebar() {
       >
         <Plus className="size-4" strokeWidth={2.4} />
         Save a link
+      </button>
+
+      {/* ── Appearance ─────────────────────────────────────────────
+          The toggle used to live in the desktop top bar, which no
+          longer exists. It belongs here anyway: this is the part of
+          the rail that is about the reader rather than the library. */}
+      <button
+        type="button"
+        onClick={onToggleTheme}
+        aria-label={theme === "black" ? "Switch to the light surface" : "Switch to the dark surface"}
+        className="-mx-2 mb-1 flex w-[calc(100%+1rem)] items-center gap-2.5 rounded-[var(--pk-r)] px-2 py-1.5 text-left text-[13px] text-[var(--pk-ink-3)] transition-colors hover:bg-[var(--pk-sunken)] hover:text-[var(--pk-ink)]"
+      >
+        {theme === "black" ? <Sun className="size-[15px]" strokeWidth={1.8} /> : <Moon className="size-[15px]" strokeWidth={1.8} />}
+        {theme === "black" ? "Light" : "Dark"}
       </button>
 
       {/* ── Account ───────────────────────────────────────────── */}

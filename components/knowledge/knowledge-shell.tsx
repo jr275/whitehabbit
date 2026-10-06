@@ -1,13 +1,31 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { type KnowledgeTheme, persistKnowledgeTheme } from "@/lib/knowledge/theme"
 import { CommandPalette } from "./command-palette"
 import { KnowledgeSidebar } from "./knowledge-sidebar"
 import { KnowledgeTopbar } from "./knowledge-topbar"
 import { MobileNav } from "./mobile-nav"
 import { SaveDialog } from "./save-dialog"
 
-export function KnowledgeShell({ children }: { children: React.ReactNode }) {
+export function KnowledgeShell({
+  children,
+  initialTheme,
+}: {
+  children: React.ReactNode
+  /* Read from a cookie on the server so the first paint is already the
+   * reader's choice — a theme resolved on the client flashes the other
+   * one first, which is worse than not offering the choice. */
+  initialTheme: KnowledgeTheme
+}) {
+  const [theme, setTheme] = useState<KnowledgeTheme>(initialTheme)
+
+  function toggleTheme() {
+    const next: KnowledgeTheme = theme === "black" ? "clean" : "black"
+    setTheme(next)
+    persistKnowledgeTheme(next)
+  }
+
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [saveOpen, setSaveOpen] = useState(false)
 
@@ -42,7 +60,7 @@ export function KnowledgeShell({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <div className="knowledge-surface min-h-dvh bg-background text-foreground">
+    <div data-kn-theme={theme} className="knowledge-surface min-h-dvh bg-background text-foreground">
       <a
         href="#kn-main"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-50 focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-primary-foreground"
@@ -51,12 +69,14 @@ export function KnowledgeShell({ children }: { children: React.ReactNode }) {
       </a>
 
       <div className="flex">
-        <KnowledgeSidebar />
+        <KnowledgeSidebar theme={theme} onToggleTheme={toggleTheme} />
 
         <div className="flex min-w-0 flex-1 flex-col">
           <KnowledgeTopbar
             onOpenPalette={() => setPaletteOpen(true)}
             onOpenSave={() => setSaveOpen(true)}
+            theme={theme}
+            onToggleTheme={toggleTheme}
           />
           <main id="kn-main" className="flex-1 pb-24 lg:pb-0">
             {children}

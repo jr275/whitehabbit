@@ -372,6 +372,8 @@
   --pk-danger: oklch(0.55 0.2 27);
   --pk-good: oklch(0.52 0.13 158);
 
+  --pk-thumb: oklch(0.185 0.022 268 / 20%);
+
   /* ── SCALE ──────────────────────────────────────────────────── */
   --pk-measure: 66ch;          /* reading column */
   --pk-page: 1120px;           /* index pages */
@@ -389,6 +391,63 @@
 
   font-feature-settings: "kern" 1, "liga" 1;
   -webkit-font-smoothing: antialiased;
+}
+
+/* ══════════════════════════════════════════════════════════════════ *
+ * THE DARK SURFACE.
+ *
+ * main shipped a Clean/Black theme split while this branch was being
+ * written. The split's PALETTE is not kept — its warm paper, vermilion
+ * accent and serif headlines are the identity this redesign replaced,
+ * and the reasons are in the banner above. Its CAPABILITY is: a reader
+ * who prefers a dark surface is a real preference, persisted in a
+ * cookie and resolved on the server so the first paint is already
+ * theirs.
+ *
+ * So dark is not a second identity. It is the SAME one inverted, and
+ * only the ground/ink tokens move: the three signals keep their jobs
+ * and their hues, lifted just enough to hold contrast on a dark
+ * ground. The scale, the radii, the type roles and every component are
+ * untouched, which is the whole point of having one token set.
+ * ══════════════════════════════════════════════════════════════════ */
+/* The base block above declares --pk-* on BOTH .knowledge-surface and
+ * .kp-understand, so the dark override has to reach just as far: a
+ * .kp-understand nested inside the shell would otherwise re-declare the
+ * light ground on itself and win over the inherited dark one. */
+[data-kn-theme="black"],
+[data-kn-theme="black"] .kp-understand {
+  color-scheme: dark;
+
+  /* Ground and ink swap roles. Not pure black: the same trace of
+   * indigo the light surface carries in its ink, which is what makes
+   * the two read as one product rather than as a filter applied to
+   * one of them. */
+  --pk-ground: oklch(0.165 0.014 268);
+  --pk-raised: oklch(0.205 0.015 268);
+  --pk-sunken: oklch(0.235 0.015 268);
+
+  --pk-ink: oklch(0.965 0.004 265);
+  --pk-ink-2: oklch(0.79 0.012 266);
+  --pk-ink-3: oklch(0.655 0.014 267);
+  --pk-ink-4: oklch(0.525 0.014 268);
+
+  --pk-rule: oklch(0.965 0.004 265 / 11%);
+  --pk-rule-2: oklch(0.965 0.004 265 / 19%);
+
+  /* Same hues, lifted for a dark ground. A signal that changed colour
+   * between themes would stop being a signal. */
+  --pk-accent: oklch(0.68 0.165 263);
+  --pk-accent-ink: oklch(0.15 0.02 268);
+  --pk-accent-wash: oklch(0.68 0.165 263 / 14%);
+  --pk-signal: oklch(0.71 0.095 216);
+  --pk-signal-wash: oklch(0.71 0.095 216 / 15%);
+  --pk-evidence: oklch(0.76 0.115 68);
+  --pk-evidence-wash: oklch(0.76 0.115 68 / 16%);
+
+  --pk-danger: oklch(0.7 0.18 25);
+  --pk-good: oklch(0.72 0.14 160);
+
+  --pk-thumb: oklch(0.965 0.004 265 / 20%);
 }
 
 /* ── The Keeply app surface ─────────────────────────────────────────
@@ -458,8 +517,12 @@
   background: var(--pk-ground);
   color: var(--pk-ink);
 }
-.knowledge-surface .thin-scroll::-webkit-scrollbar-thumb {
-  background: oklch(1 0 0 / 18%);
+/* The scrollbar thumb is the one mark the browser draws itself, against
+ * whichever ground is current, so it is the one that has to be a token
+ * rather than inherit a colour. */
+.knowledge-surface .thin-scroll::-webkit-scrollbar-thumb,
+.kp-understand .thin-scroll::-webkit-scrollbar-thumb {
+  background: var(--pk-thumb);
 }
 
 /* hide scrollbars on horizontal carousels while keeping them scrollable */
