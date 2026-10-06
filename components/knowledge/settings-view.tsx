@@ -3,6 +3,7 @@
 import { LogIn, LogOut } from "lucide-react"
 import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
+import { IndexingPanel } from "./indexing-panel"
 import { PageContainer, PageHeader } from "./page-header"
 
 /** Settings for the standalone Knowledge product. The account section is
@@ -54,6 +55,11 @@ export function SettingsView() {
             </button>
           )}
         </section>
+
+        {/* The one operational answer the product owes a signed-in
+            reader: has their library been read, and if not, why not.
+            Guests have no server-side library to report on. */}
+        {!isGuest && <IndexingPanel />}
 
         {/* Everything else — honest, not yet wired. Rows, not a bordered
             card of icon tiles with a "Soon" pill on each: four pills in

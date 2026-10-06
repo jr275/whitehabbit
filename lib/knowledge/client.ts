@@ -348,3 +348,53 @@ export async function researchObjective(objective: string, signal?: AbortSignal)
 export function isProcessing(state: KnowledgeItem["state"]): boolean {
   return state === "saved" || state === "fetching" || state === "extracting"
 }
+
+/* ---- indexing status ------------------------------------------------ *
+ *
+ * The one operational question a Keeply user can ask about their own
+ * library: has it been read yet, and if not, why not. Both verbs
+ * already existed on /api/knowledge/indexing with no caller — which is
+ * why an empty Connections page could not tell "nothing saved" from
+ * "not read yet" from "this deployment has no model configured".
+ *
+ * Scoped to the caller by the route itself. There is no admin mode. */
+
+export interface IndexingStatus {
+  /** Whether meaning-based search is available, and why not when it
+   *  is not. `provider_not_configured` is a deployment fact, not a
+   *  fault in the person's library. */
+  semanticSearch: { enabled: boolean; reason?: string }
+  embedding: { provider: string; model: string; dimensions: number }
+  /** Work outstanding, by why it is outstanding. */
+  backlog: {
+    total: number
+    neverIndexed: number
+    staleChunks: number
+    neverAnalyzed: number
+    neverSummarized: number
+    missingVectors: number
+  }
+  /** Queue depth by real state. `leased` is work in flight — a flat
+   *  `queued` with nothing leased means nothing is draining it. */
+  jobs: { queued: number; leased: number; failed: number; done: number }
+}
+
+export interface BackfillResult {
+  candidates: number
+  enqueued: number
+  alreadyQueued: number
+}
+
+export async function fetchIndexingStatus(signal?: AbortSignal): Promise<IndexingStatus> {
+  const res = await fetch("/api/knowledge/indexing", { signal, cache: "no-store" })
+  return parse<IndexingStatus>(res)
+}
+
+/** Queues the outstanding work. Does NOT run it — the existing tick
+ *  drains the queue, which is why this creates no second worker. Safe
+ *  to call twice: a library that already has queued jobs reports them
+ *  as `alreadyQueued` rather than doubling them. */
+export async function startBackfill(): Promise<BackfillResult> {
+  const res = await fetch("/api/knowledge/indexing", { method: "POST" })
+  return parse<BackfillResult>(res)
+}
