@@ -24,7 +24,7 @@
 
 import { Loader2 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
-import { fetchIndexingStatus, startBackfill, type IndexingStatus } from "@/lib/knowledge/client"
+import { fetchIndexingStatus, startBackfill, type IndexingStatus, type ReadinessCheck } from "@/lib/knowledge/client"
 
 type Phase = "loading" | "ready" | "error"
 
@@ -100,21 +100,28 @@ export function IndexingPanel() {
     )
   }
 
-  const { backlog, jobs, semanticSearch, embedding } = status
+  const { backlog, jobs, embedding } = status
   const pending = backlog.total
   const working = jobs.queued + jobs.leased
 
   return (
     <Section>
-      {/* THE DEPLOYMENT FACT FIRST. When meaning-based search is not
-          configured, nothing below it will ever finish, and saying so
-          after a backlog number would read as a detail rather than the
-          reason. */}
-      {!semanticSearch.enabled && (
-        <p className="pk-evidence mb-6 max-w-[54ch] text-[13.5px] leading-[1.6]">
-          Meaning-based search isn&rsquo;t configured on this deployment, so saved pieces can&rsquo;t be read or
-          connected. Until it is, search matches exact words only.
-        </p>
+      {/* THE DEPLOYMENT FIRST. When a piece of configuration is
+          missing, nothing below it will ever finish, and a backlog
+          number shown first reads as the problem when it is only the
+          symptom. */}
+      {!status.deployment.ready && (
+        <div className="mb-7">
+          <p className="pk-label mb-3 text-[var(--pk-evidence)]">This deployment isn&rsquo;t finished</p>
+          <ul className="flex flex-col">
+            {status.deployment.checks.map((check) => (
+              <Check key={check.id} check={check} />
+            ))}
+          </ul>
+          <p className="pk-meta mt-3 max-w-[54ch]">
+            Set these on the server and redeploy. This page is how you confirm it worked.
+          </p>
+        </div>
       )}
 
       <dl className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
@@ -183,6 +190,36 @@ function Section({ children }: { children: React.ReactNode }) {
       <p className="pk-label mb-5">What Keeply has read</p>
       {children}
     </section>
+  )
+}
+
+/** One configuration line. A satisfied check still renders — a list
+ *  that only shows failures cannot tell "this is fine" from "this was
+ *  never checked", and the point of the screen is to answer that. */
+function Check({ check }: { check: ReadinessCheck }) {
+  return (
+    <li className="flex items-baseline gap-3 border-b border-[var(--pk-rule)] py-2.5 last:border-b-0">
+      <span
+        aria-hidden
+        className={`shrink-0 text-[13px] ${check.ok ? "text-[var(--pk-good)]" : "text-[var(--pk-evidence)]"}`}
+      >
+        {check.ok ? "✓" : "✗"}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="text-[14px] text-[var(--pk-ink)]">{check.label}</span>
+        {!check.ok && (
+          <>
+            {/* The variable NAMES, which is the whole deliverable of
+                this screen. Never a value — see lib/deployment-readiness. */}
+            <span className="pk-meta mt-1 block">
+              set {check.missing.join(" · ")}
+            </span>
+            <span className="mt-1 block text-[13px] leading-[1.55] text-[var(--pk-ink-3)]">{check.consequence}</span>
+          </>
+        )}
+      </span>
+      <span className="sr-only">{check.ok ? "configured" : "not configured"}</span>
+    </li>
   )
 }
 

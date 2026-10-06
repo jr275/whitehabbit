@@ -91,6 +91,10 @@ const SHARED_PLATFORM = [
   // Shared because /login and /signup are shared: one route, one
   // session, three presentations.
   "lib/auth-context",
+  // Composes the auth, embedding and LLM configuration checks into one
+  // list. Shared because the configuration it reports is the
+  // platform's, not either product's.
+  "lib/deployment-readiness",
   "lib/auth-password",
   "lib/auth.config",
   "lib/utils",

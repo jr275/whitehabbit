@@ -39,14 +39,27 @@ describe("the indexing panel reads the real route", () => {
 })
 
 describe("it reports, never estimates", () => {
-  it("shows the deployment fault before any backlog number", () => {
-    // When the provider is not configured nothing below will ever
-    // finish, so a backlog count shown first would read as the problem
-    // when it is only the symptom.
-    const notice = panel.indexOf("isn&rsquo;t configured on this deployment")
+  it("shows the deployment checklist before any backlog number", () => {
+    // When configuration is missing nothing below will ever finish, so
+    // a backlog count shown first reads as the problem when it is only
+    // the symptom. The single semantic-search notice this replaces
+    // covered one of the five checks; the ordering guarantee is the
+    // same and now applies to all of them.
+    const checklist = panel.indexOf("status.deployment.ready")
     const facts = panel.indexOf("<Fact label=")
-    assert.ok(notice > 0 && facts > 0, "both the notice and the facts should render")
-    assert.ok(notice < facts, "the deployment fault must come first")
+    assert.ok(checklist > 0 && facts > 0, "both the checklist and the facts should render")
+    assert.ok(checklist < facts, "the deployment checklist must come first")
+  })
+
+  it("prints the missing variable NAMES, which is the point of the screen", () => {
+    assert.match(panel, /check\.missing\.join/)
+    assert.match(panel, /check\.consequence/)
+  })
+
+  it("renders satisfied checks too", () => {
+    // A list that only shows failures cannot tell "this is fine" from
+    // "this was never checked", which is the question being asked.
+    assert.match(panel, /check\.ok \? "✓" : "✗"/)
   })
 
   it("repeats the server's own outcome rather than a cheerful paraphrase", () => {

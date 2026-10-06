@@ -359,7 +359,19 @@ export function isProcessing(state: KnowledgeItem["state"]): boolean {
  *
  * Scoped to the caller by the route itself. There is no admin mode. */
 
+/** One line per piece of deployment configuration, each naming the
+ *  exact environment variables that are missing. Never their values. */
+export interface ReadinessCheck {
+  id: string
+  label: string
+  ok: boolean
+  missing: string[]
+  consequence: string
+}
+
 export interface IndexingStatus {
+  /** Whether this deployment is finished, and what is missing if not. */
+  deployment: { ready: boolean; checks: ReadinessCheck[] }
   /** Whether meaning-based search is available, and why not when it
    *  is not. `provider_not_configured` is a deployment fact, not a
    *  fault in the person's library. */
