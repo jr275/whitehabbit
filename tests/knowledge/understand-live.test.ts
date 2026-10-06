@@ -194,24 +194,53 @@ describe("liveOverview — scope", () => {
  * cannot load (same constraint as tests/knowledge/tick.test.ts).
  * ================================================================== */
 
-describe("the Ask section routes a real reader to the real Ask", () => {
-  const source = readFileSync("components/knowledge/understand/knowledge-understand.tsx", "utf8")
+describe("there is exactly one Ask, and it is the real one", () => {
+  const page = readFileSync("components/knowledge/understand/knowledge-understand.tsx", "utf8")
+  const hooks = readFileSync("lib/knowledge/understand/hooks.ts", "utf8")
 
-  it("hands a live question to /knowledge/ai instead of the simulation", () => {
-    // The prototype's Ask answers from a fixed sample. That is right
-    // for a visitor with no library and wrong for someone who has one,
-    // because a real grounded Ask exists one click away — answering
-    // them from the sample would be the page's only outright lie.
-    assert.match(source, /if \(isLive\) \{\s*router\.push\(askAboutHref\(question\)\)/)
+  // This used to allow a simulated Ask for visitors with no library and
+  // route only LIVE readers to the real surface. The simulation is gone
+  // for everyone, so the guarantee asserted here is strictly stronger:
+  // nothing on this page answers a question.
+
+  it("sends EVERY question to /knowledge/ai, with no live/guest branch", () => {
+    assert.match(page, /router\.push\(askAboutHref\(question\)\)/)
+    assert.doesNotMatch(
+      page,
+      /if \(isLive\)[\s\S]{0,120}askAboutHref/,
+      "routing must not depend on whether the reader has a library",
+    )
   })
 
   it("reuses the existing href helper rather than building a second Ask", () => {
-    assert.match(source, /import \{ askAboutHref \} from "@\/lib\/knowledge\/config"/)
-    assert.doesNotMatch(source, /\/api\/knowledge\/ai/, "the page must not call the answering API itself")
+    assert.match(page, /import \{ askAboutHref \} from "@\/lib\/knowledge\/config"/)
+    assert.doesNotMatch(page, /\/api\/knowledge\/ai/, "the page must not call the answering API itself")
   })
 
-  it("keeps the simulation for a visitor with no library", () => {
-    assert.match(source, /ask\.submit\(question\)/)
+  it("contains no simulated answering at all", () => {
+    // A product whose promise is "answers drawn only from what you
+    // saved" cannot ship a screen that performs that promise with
+    // canned text one click from the surface that keeps it.
+    for (const tell of ["ask.submit", "askResultFor", "THINKING_MS", "useAsk"]) {
+      assert.ok(!page.includes(tell), `the page still references ${tell}`)
+      assert.ok(!hooks.includes(tell), `hooks.ts still references ${tell}`)
+    }
+  })
+
+  it("renders no chapter built from the sample library", () => {
+    // Themes, timeline, questions and insights were drawn from a fixed
+    // fixture and shown beside the reader's real counts, which made a
+    // small library look fuller than it was.
+    for (const fixture of ["THEMES", "TIMELINE", "QUESTIONS", "INSIGHTS", "useResearch", "useVoice"]) {
+      assert.ok(!page.includes(fixture), `the page still renders ${fixture}`)
+      assert.ok(!hooks.includes(fixture), `hooks.ts still exposes ${fixture}`)
+    }
+  })
+
+  it("keeps the three chapters that read the viewer's own library", () => {
+    for (const real of ["KnowledgeSignals", "KnowledgeGraph", "KnowledgeExplorer"]) {
+      assert.ok(page.includes(real), `${real} should still be rendered`)
+    }
   })
 })
 
