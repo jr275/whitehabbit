@@ -252,7 +252,7 @@ function ErrorState({ failure, onRetry }: { failure: AskFailure; onRetry: () => 
         </button>
       ) : failure.kind === "unauthorized" ? (
         <Link
-          href="/login"
+          href="/login?callbackUrl=/knowledge/home"
           className="flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground"
         >
           Sign in <ArrowRight className="size-4" />

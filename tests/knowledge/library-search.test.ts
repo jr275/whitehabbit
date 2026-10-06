@@ -424,22 +424,46 @@ describe("GET /api/knowledge/search — the evidence it returns", () => {
   })
 })
 
-describe("the search result card", () => {
-  const source = readFileSync("components/knowledge/knowledge-card.tsx", "utf8")
+describe("the search result row", () => {
+  // These guarantees were asserted against knowledge-card.tsx, which the
+  // redesign replaced with item-row.tsx. Deleting the file did not fail
+  // this suite — readFileSync threw at load and the runner reported the
+  // file as an error while still exiting 0, so the assertions simply
+  // stopped running. They are re-anchored at the components that now
+  // hold the behaviour, not relaxed.
+  const row = readFileSync("components/knowledge/item-row.tsx", "utf8")
+  const list = readFileSync("components/knowledge/library-view.tsx", "utf8")
+  const reader = readFileSync("components/knowledge/reader-view.tsx", "utf8")
 
   it("shows a snippet ONLY when there is real evidence", () => {
-    // The fallback order is evidence → summary → excerpt. If evidence
-    // were rendered unconditionally, a lexical result would show an
-    // empty quote under "matched in your library".
-    assert.match(source, /\{evidence \? \(\s*<EvidenceNote/)
+    // The fallback order is evidence → excerpt. If evidence were
+    // rendered unconditionally, a lexical result would show an empty
+    // quote under "Matched passage".
+    assert.match(row, /\{evidence \? \(/)
+    assert.match(row, /\) : item\.excerpt \? \(/)
+  })
+
+  it("passes evidence only for the item it belongs to", () => {
+    // Keyed by item id, and absent rather than empty when the match was
+    // lexical — a row must never be handed a passage from elsewhere.
+    assert.match(
+      list,
+      /evidence=\{searchEvidence\[item\.id\] \? <Evidence evidence=\{searchEvidence\[item\.id\]\} \/> : undefined\}/,
+    )
+  })
+
+  it("never renders a passage outside a search", () => {
+    // The browse list passes no evidence at all, so an item outside a
+    // search has no query it could have matched.
+    assert.match(list, /<ItemRow key=\{item\.id\} item=\{item\} onToggleFavorite=\{toggleFavorite\} onRetry=\{retry\} \/>/)
   })
 
   it("reaches Ask through the existing helper, not a new endpoint", () => {
-    assert.match(source, /askAboutHref\(/)
-    assert.doesNotMatch(source, /\/api\/knowledge\/ai/, "the card must not call the answering API itself")
+    assert.match(reader, /askAboutHref\(/)
+    assert.doesNotMatch(reader, /\/api\/knowledge\/ai/, "the reader must not call the answering API itself")
   })
 
   it("builds the question deterministically — no model is asked to phrase it", () => {
-    assert.match(source, /What does my library say about/)
+    assert.match(reader, /What are the main ideas in/)
   })
 })

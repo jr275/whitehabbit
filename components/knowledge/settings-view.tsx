@@ -1,6 +1,6 @@
 "use client"
 
-import { Database, LogIn, LogOut, type LucideIcon, Palette, ShieldCheck, User } from "lucide-react"
+import { LogIn, LogOut } from "lucide-react"
 import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { PageContainer, PageHeader } from "./page-header"
@@ -19,93 +19,65 @@ export function SettingsView() {
 
   return (
     <PageContainer>
-      <PageHeader eyebrow="Settings" title="Your account" subtitle="Manage how Knowledge works for you." />
+      <PageHeader eyebrow="Settings" title="Your account" subtitle="Manage how Keeply works for you." />
 
-      <div className="mt-10 max-w-2xl space-y-6">
+      <div className="mt-12 max-w-[34rem]">
         {/* Account — real (reflects guest vs. signed-in honestly) */}
-        <section className="overflow-hidden rounded-2xl border border-[var(--kn-edge)] bg-card">
-          <div className="flex items-center gap-4 px-6 py-5">
-            <span className="flex size-12 items-center justify-center rounded-full bg-primary/12 font-serif text-lg font-medium text-primary">
+        <section className="border-t border-[var(--pk-rule)] py-6">
+          <p className="pk-label mb-4">Signed in as</p>
+          <div className="flex items-center gap-3.5">
+            <span className="flex size-9 items-center justify-center rounded-full bg-[var(--pk-sunken)] text-[13px] font-medium text-[var(--pk-ink-2)]">
               {initial}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-base font-medium text-foreground">{name}</p>
-              <p className="truncate text-sm text-muted-foreground">
+              <p className="truncate text-[15px] font-medium text-[var(--pk-ink)]">{name}</p>
+              <p className="pk-meta truncate">
                 {isGuest ? "Not signed in — your library is saved on this device" : email || "Signed in"}
               </p>
             </div>
           </div>
-          <div className="border-t border-[var(--kn-edge)] px-6 py-4">
-            {isGuest ? (
-              <Link
-                href="/login?callbackUrl=/knowledge"
-                className="inline-flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-              >
-                <LogIn className="size-4" />
-                Sign in to save permanently
-              </Link>
-            ) : (
-              <button
-                onClick={() => signOut({ callbackUrl: "/login" })}
-                className="flex h-10 items-center gap-2 rounded-xl border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
-              >
-                <LogOut className="size-4" />
-                Sign out
-              </button>
-            )}
-          </div>
+          {isGuest ? (
+            <Link
+              href="/login?callbackUrl=/knowledge/home"
+              className="mt-5 inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--pk-accent)] px-5 text-[13.5px] font-medium text-[var(--pk-accent-ink)] transition-opacity hover:opacity-90"
+            >
+              <LogIn className="size-4" />
+              Sign in to save permanently
+            </Link>
+          ) : (
+            <button
+              onClick={() => signOut({ callbackUrl: "/login?callbackUrl=/knowledge/home" })}
+              className="mt-5 inline-flex items-center gap-1.5 text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
+            >
+              <LogOut className="size-3.5" />
+              Sign out
+            </button>
+          )}
         </section>
 
-        {/* Everything else — honest, not yet wired */}
-        <section className="space-y-3">
-          <p className="text-sm font-medium text-primary">Coming soon</p>
-          <div className="divide-y divide-[var(--kn-edge)] overflow-hidden rounded-2xl border border-[var(--kn-edge)] bg-card">
-            <SettingRow
-              icon={User}
-              title="Profile"
-              description="Your display name, avatar and reading preferences."
-            />
-            <SettingRow
-              icon={Palette}
-              title="Appearance"
-              description="Reading themes, typography and layout density."
-            />
-            <SettingRow
-              icon={ShieldCheck}
-              title="Privacy"
-              description="Control what Knowledge remembers and how it is used."
-            />
-            <SettingRow
-              icon={Database}
-              title="Your data"
-              description="Export or permanently delete everything you've saved."
-            />
-          </div>
+        {/* Everything else — honest, not yet wired. Rows, not a bordered
+            card of icon tiles with a "Soon" pill on each: four pills in
+            a column is four times the announcement one line makes, and
+            the icons were decoration for labels that already read. */}
+        <section className="mt-6">
+          <p className="pk-label mb-1">Not built yet</p>
+          <ul className="pk-rows">
+            <SettingRow title="Profile" description="Your display name, avatar and reading preferences." />
+            <SettingRow title="Appearance" description="Reading themes, typography and layout density." />
+            <SettingRow title="Privacy" description="Control what Keeply remembers and how it is used." />
+            <SettingRow title="Your data" description="Export or permanently delete everything you've saved." />
+          </ul>
         </section>
       </div>
     </PageContainer>
   )
 }
 
-function SettingRow({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: LucideIcon
-  title: string
-  description: string
-}) {
+function SettingRow({ title, description }: { title: string; description: string }) {
   return (
-    <div className="flex items-center gap-4 px-6 py-4">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-muted-foreground">
-        <Icon className="size-[18px]" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-foreground">{title}</p>
-        <p className="truncate text-[13px] text-muted-foreground">{description}</p>
-      </div>
-      <span className="shrink-0 rounded-full bg-secondary px-2.5 py-0.5 text-[11px] text-muted-foreground">Soon</span>
-    </div>
+    <li className="border-b border-[var(--pk-rule)] py-4">
+      <p className="text-[15px] text-[var(--pk-ink-3)]">{title}</p>
+      <p className="pk-meta mt-1">{description}</p>
+    </li>
   )
 }

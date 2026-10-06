@@ -1,23 +1,35 @@
 "use client"
 
-import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react"
+/* ================================================================== *
+ * HOME — a composition, not a dashboard.
+ *
+ * What was here: three stat tiles, two horizontal carousels, a topics
+ * strip, a favourites carousel and a "Coming soon" panel. With four
+ * saved items the two carousels showed the same four items twice, the
+ * tiles read 4 / 4 / 0, and the largest element on the page was an
+ * announcement that a feature did not exist yet. Eight blocks
+ * competing at one volume is what makes a product read as an admin
+ * panel — none of them is allowed to matter more than the others.
+ *
+ * What is here now is a sequence with one thing at the top:
+ *   greeting → the two doors (search, ask) → what you saved recently
+ *   → the themes across it → where it connects
+ *
+ * Every number and every row is real. The counts come from the same
+ * library totals as before; nothing was invented to fill the page, and
+ * the sections that have nothing to show say so in one line instead of
+ * in a panel.
+ * ================================================================== */
+
 import Link from "next/link"
 import { useSession } from "next-auth/react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ArrowRight, Search } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
 import { fetchLibrary } from "@/lib/knowledge/client"
 import { openCommandPalette, openSaveDialog } from "@/lib/knowledge/config"
 import { useKnowledgeLibrary } from "@/lib/knowledge/use-knowledge"
-import type { KnowledgeItem } from "@/lib/knowledge/types"
-import { cn } from "@/lib/utils"
 import { EmptyLibrary } from "./empty-state"
-import { KnowledgeCard } from "./knowledge-card"
-import {
-  DiscoverTeaser,
-  KnowledgeSignals,
-  TopicsPreview,
-  type KnowledgeSignal,
-  type TopicGlimpse,
-} from "./home-sections"
+import { ItemRow, ItemRows } from "./item-row"
 
 function greeting(now = new Date()): string {
   const h = now.getHours()
@@ -46,24 +58,21 @@ function firstName(email?: string | null): string | null {
 }
 
 export function KnowledgeHome() {
-  const { items, status, total, toggleFavorite, archive, remove, retry } = useKnowledgeLibrary({ filter: "all" })
+  const { items, status, total, toggleFavorite, retry } = useKnowledgeLibrary({ filter: "all" })
   const { data: session } = useSession()
   const name = firstName(session?.user?.email)
   const hello = useGreeting()
 
   const ready = items.filter((i) => i.state === "ready")
-  const unread = ready.filter((i) => i.readState === "unread").slice(0, 8)
-  const favorites = ready.filter((i) => i.favorite).slice(0, 8)
-  const recent = items.slice(0, 10)
+  const recent = items.slice(0, 6)
 
-  const actions = { onToggleFavorite: toggleFavorite, onArchive: archive, onDelete: remove, onRetry: retry }
-
-  // ── Real aggregate signals ──────────────────────────────────────
-  // Saved is the true global total from the library hook. Unread and
-  // Favorites are their real global totals, fetched with a 1-row list
-  // request purely for the count — never derived from the loaded page
-  // (which would under-report) and never invented. They refresh whenever
-  // the total changes (e.g. after a new save).
+  /* The three totals the old stat tiles spent a bordered, three-column
+   * grid on. They are worth one line of mono, not a third of the
+   * viewport: they answer "how big is this", which is context, not the
+   * reason anyone opened the page. Unread and Favorites are still the
+   * real global totals, fetched with a 1-row request purely for the
+   * count — never derived from the loaded page, which would
+   * under-report, and never guessed. */
   const [unreadTotal, setUnreadTotal] = useState<number | null>(null)
   const [favoritesTotal, setFavoritesTotal] = useState<number | null>(null)
 
@@ -79,237 +88,168 @@ export function KnowledgeHome() {
     return () => ac.abort()
   }, [status, total])
 
-  const signals: KnowledgeSignal[] = [
-    { label: "Saved", value: status === "ready" ? total : null, href: "/knowledge/library" },
-    { label: "Unread", value: unreadTotal, href: "/knowledge/library" },
-    { label: "Favorites", value: favoritesTotal, href: "/knowledge/favorites" },
-  ]
-
-  // ── Topics surfacing across the loaded library ──────────────────
-  // A live, honest glimpse: distinct topics from the ready items on the
-  // page, ranked by real frequency. Never fabricated; the authoritative
-  // full set lives on the Topics page (linked from the section).
-  const topicGlimpse: TopicGlimpse[] = useMemo(() => {
+  const topics = useMemo(() => {
     const freq = new Map<string, number>()
     for (const it of ready) for (const t of it.topics) freq.set(t, (freq.get(t) ?? 0) + 1)
     return [...freq.entries()]
       .map(([label, count]) => ({ label, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 12)
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+      .slice(0, 10)
   }, [ready])
 
   return (
-    <div>
-      {/* ── Hero + save bar (pure black, tight bold sans) ─────── */}
-      <section className="border-b border-[var(--kn-edge)]">
-        <div className="mx-auto max-w-[1500px] px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-          <p className="text-sm font-semibold text-primary">
-            {hello}
-            {name ? `, ${name}` : ""}
-          </p>
-          <h1 className="mt-3 max-w-3xl text-balance text-4xl font-semibold leading-[1.03] tracking-[-0.02em] text-foreground sm:text-6xl">
-            Everything worth remembering, in one calm place.
-          </h1>
-          <p className="mt-5 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
-            {status === "ready" && total > 0
-              ? `You have ${total} ${total === 1 ? "piece" : "pieces"} in your library. Save something new, or pick up where you left off.`
-              : "Save an article, a video or a paper — Keeply fetches it, understands it and keeps it beautifully readable for you."}
-          </p>
+    <div className="pk-page pb-24">
+      {/* ── The masthead ───────────────────────────────────────────
+          Greeting, then the two doors. Nothing between them: on a
+          knowledge product the first question is always "what am I
+          looking for", and anything placed above that answer is
+          furniture. */}
+      <header className="pt-14 sm:pt-20">
+        <p className="pk-label">
+          {hello}
+          {name ? ` · ${name}` : ""}
+        </p>
+        <h1 className="pk-display mt-4 max-w-[13ch] text-[var(--pk-ink)]">Your knowledge.</h1>
 
-          {/* prominent, effortless save */}
-          <div className="mt-8 flex max-w-xl flex-col gap-2.5 sm:flex-row">
+        <div className="mt-9 max-w-[38rem]">
+          <button type="button" onClick={openCommandPalette} className="pk-field text-left">
+            <Search className="size-[18px] shrink-0 text-[var(--pk-ink-4)]" strokeWidth={1.8} />
+            <span className="flex-1 truncate text-[15px] text-[var(--pk-ink-4)]">
+              Search everything you saved
+            </span>
+            <kbd className="pk-label shrink-0">⌘K</kbd>
+          </button>
+
+          <div className="mt-3.5 flex flex-wrap items-center gap-x-5 gap-y-2">
+            <Link
+              href="/knowledge/ai"
+              className="group inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--pk-ink)]"
+            >
+              Ask your knowledge
+              <ArrowRight
+                className="size-3.5 transition-transform duration-[var(--pk-fast)] group-hover:translate-x-0.5"
+                strokeWidth={2}
+              />
+            </Link>
             <button
               onClick={openSaveDialog}
-              className="group flex h-12 flex-1 items-center gap-3 rounded-full bg-primary px-5 text-left text-primary-foreground transition-transform hover:scale-[1.01] active:scale-[0.99]"
+              className="text-[14px] text-[var(--pk-ink-3)] underline decoration-[var(--pk-rule-2)] underline-offset-4 transition-colors hover:text-[var(--pk-ink)]"
             >
-              <Plus className="size-5" strokeWidth={2.5} />
-              <span className="flex-1 text-[15px] font-medium">Save a link…</span>
-              <span className="rounded-full bg-primary-foreground/15 px-2 py-0.5 font-mono text-[11px]">⌘S</span>
-            </button>
-            <button
-              onClick={openCommandPalette}
-              className="flex h-12 items-center justify-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-5 text-[15px] font-medium text-foreground transition-colors hover:border-foreground/30"
-            >
-              <Search className="size-4.5" /> Search
+              Save something new
             </button>
           </div>
+
+          {status === "ready" && total > 0 && (
+            <p className="pk-meta mt-7">
+              {total.toLocaleString()} saved
+              {unreadTotal !== null && ` · ${unreadTotal.toLocaleString()} unread`}
+              {favoritesTotal !== null &&
+                ` · ${favoritesTotal.toLocaleString()} favourite${favoritesTotal === 1 ? "" : "s"}`}
+            </p>
+          )}
         </div>
-      </section>
+      </header>
 
-      <div className="mx-auto max-w-[1500px] px-4 py-12 sm:px-6 lg:px-8">
-        {status === "loading" ? (
-          <HomeSkeleton />
-        ) : total === 0 ? (
+      {status === "loading" ? (
+        <HomeSkeleton />
+      ) : total === 0 ? (
+        <div className="pt-16">
           <EmptyLibrary onSave={openSaveDialog} />
-        ) : (
-          <div className="flex flex-col gap-14">
-            <KnowledgeSignals signals={signals} />
+        </div>
+      ) : (
+        <>
+          <Section label="Recently saved" href="/knowledge/library" hrefLabel="Browse library">
+            <ItemRows>
+              {recent.map((item) => (
+                <ItemRow key={item.id} item={item} onToggleFavorite={toggleFavorite} onRetry={retry} />
+              ))}
+            </ItemRows>
+          </Section>
 
-            {unread.length > 0 && (
-              <CarouselSection
-                title="Jump back in"
-                subtitle="Unread saves waiting for you"
-                href="/knowledge/library"
-                items={unread}
-                actions={actions}
-              />
+          <Section label="Your knowledge" href="/knowledge/topics" hrefLabel="All topics">
+            {topics.length > 0 ? (
+              /* A topic is a word and a count. It used to be a card with
+                 a progress bar that was always full — a bar whose only
+                 possible value is 100% encodes nothing and still costs
+                 a card. */
+              <ul className="flex flex-col">
+                {topics.map((t) => (
+                  <li key={t.label}>
+                    <Link
+                      href={`/knowledge/library?q=${encodeURIComponent(t.label)}`}
+                      className="flex items-baseline gap-4 border-b border-[var(--pk-rule)] py-3 transition-colors hover:bg-[var(--pk-sunken)]"
+                    >
+                      <span className="flex-1 truncate text-[15px] text-[var(--pk-ink)]">{t.label}</span>
+                      <span className="pk-meta pk-num">
+                        {t.count} {t.count === 1 ? "piece" : "pieces"}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <Quiet>Topics will appear here as Keeply reads what you save.</Quiet>
             )}
+          </Section>
 
-            <CarouselSection
-              title="Recently saved"
-              subtitle="The latest additions to your library"
-              href="/knowledge/library"
-              items={recent}
-              actions={actions}
-            />
-
-            <TopicsPreview topics={topicGlimpse} />
-
-            {favorites.length > 0 && (
-              <CarouselSection
-                title="Favorites"
-                subtitle="The ones you starred"
-                href="/knowledge/favorites"
-                items={favorites}
-                actions={actions}
-              />
-            )}
-
-            <DiscoverTeaser />
-          </div>
-        )}
-      </div>
+          {/* Discover used to be the biggest block on the page and it
+              was an announcement that the feature did not exist. The
+              feature does exist — on /knowledge, built from real
+              co-occurrence — so this is a door to it, one line tall. */}
+          <Section label="Discover" href="/knowledge" hrefLabel="Open connections">
+            <Quiet>
+              The links between what you&rsquo;ve saved — concepts that keep turning up together, and the pieces they
+              turn up in.
+            </Quiet>
+          </Section>
+        </>
+      )}
     </div>
   )
 }
 
-type RowActions = {
-  onToggleFavorite: (i: KnowledgeItem) => void
-  onArchive: (i: KnowledgeItem) => void
-  onDelete: (i: KnowledgeItem) => void
-  onRetry: (i: KnowledgeItem) => void
-}
-
-/** A section title + a horizontally-scrolling carousel of cards with
- * circular ‹/› nav — the Apple-style motif. Nav buttons only appear
- * when the row actually overflows, and disable at each end. */
-function CarouselSection({
-  title,
-  subtitle,
+/** A section is announced by a mono label and a rule. No card, no
+ *  heading-plus-subtitle pair, no chevron button group. */
+function Section({
+  label,
   href,
-  items,
-  actions,
+  hrefLabel,
+  children,
 }: {
-  title: string
-  subtitle: string
+  label: string
   href: string
-  items: KnowledgeItem[]
-  actions: RowActions
+  hrefLabel: string
+  children: React.ReactNode
 }) {
-  const scrollerRef = useRef<HTMLDivElement>(null)
-  const [canLeft, setCanLeft] = useState(false)
-  const [canRight, setCanRight] = useState(false)
-
-  const update = useCallback(() => {
-    const el = scrollerRef.current
-    if (!el) return
-    setCanLeft(el.scrollLeft > 4)
-    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4)
-  }, [])
-
-  useEffect(() => {
-    update()
-    const el = scrollerRef.current
-    if (!el) return
-    el.addEventListener("scroll", update, { passive: true })
-    window.addEventListener("resize", update)
-    return () => {
-      el.removeEventListener("scroll", update)
-      window.removeEventListener("resize", update)
-    }
-  }, [update, items.length])
-
-  const scroll = (dir: 1 | -1) => {
-    const el = scrollerRef.current
-    if (!el) return
-    el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: "smooth" })
-  }
-
-  const hasNav = canLeft || canRight
-
   return (
-    <section>
-      <div className="mb-6 flex items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-[-0.01em] text-foreground sm:text-[1.75rem]">{title}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <Link
-            href={href}
-            className="flex items-center gap-1 text-sm font-medium text-primary transition-opacity hover:opacity-70"
-          >
-            Browse all <ChevronRight className="size-4" />
-          </Link>
-          {hasNav && (
-            <div className="hidden items-center gap-2 sm:flex">
-              <CarouselButton dir="left" disabled={!canLeft} onClick={() => scroll(-1)} />
-              <CarouselButton dir="right" disabled={!canRight} onClick={() => scroll(1)} />
-            </div>
-          )}
-        </div>
+    <section className="pk-section">
+      <div className="mb-5 flex items-baseline justify-between gap-4">
+        <h2 className="pk-label">{label}</h2>
+        <Link href={href} className="pk-meta shrink-0 transition-colors hover:text-[var(--pk-ink)]">
+          {hrefLabel} →
+        </Link>
       </div>
-
-      <div ref={scrollerRef} className="kn-scroll-x -mx-4 flex snap-x snap-mandatory gap-5 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0">
-        {items.map((item, i) => (
-          <div key={item.id} className="w-[290px] shrink-0 snap-start sm:w-[330px]">
-            <KnowledgeCard
-              item={item}
-              view="grid"
-              index={i}
-              onToggleFavorite={actions.onToggleFavorite}
-              onArchive={actions.onArchive}
-              onDelete={actions.onDelete}
-              onRetry={actions.onRetry}
-            />
-          </div>
-        ))}
-      </div>
+      {children}
     </section>
   )
 }
 
-function CarouselButton({ dir, disabled, onClick }: { dir: "left" | "right"; disabled: boolean; onClick: () => void }) {
-  const Icon = dir === "left" ? ChevronLeft : ChevronRight
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={dir === "left" ? "Scroll left" : "Scroll right"}
-      className={cn(
-        "flex size-9 items-center justify-center rounded-full border border-[var(--kn-edge)] bg-card text-foreground transition-all",
-        "hover:border-foreground/30 hover:bg-secondary",
-        disabled && "cursor-default opacity-30 hover:border-[var(--kn-edge)] hover:bg-card",
-      )}
-    >
-      <Icon className="size-4.5" />
-    </button>
-  )
+function Quiet({ children }: { children: React.ReactNode }) {
+  return <p className="max-w-[54ch] text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">{children}</p>
 }
 
 function HomeSkeleton() {
   return (
-    <div className="flex gap-5 overflow-hidden">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div
-          key={i}
-          className="w-[290px] shrink-0 overflow-hidden rounded-2xl border border-[var(--kn-edge)] bg-card sm:w-[330px]"
-          style={{ height: 300 }}
-        >
-          <div className="kn-shimmer h-full w-full" />
-        </div>
-      ))}
+    <div className="pk-section" aria-hidden>
+      <div className="pk-rows">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="border-b border-[var(--pk-rule)] py-[1.125rem]">
+            <div className="h-2.5 w-24 rounded-full bg-[var(--pk-sunken)]" />
+            <div className="mt-3 h-4 w-2/3 rounded-full bg-[var(--pk-sunken)]" />
+            <div className="mt-2.5 h-3 w-1/3 rounded-full bg-[var(--pk-sunken)]" />
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

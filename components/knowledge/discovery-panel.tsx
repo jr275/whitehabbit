@@ -78,8 +78,8 @@ export function DiscoveryPanel({ itemId }: { itemId: string }) {
   if (phase === "loading") {
     return (
       <Block label="Key ideas">
-        <p className="flex items-center gap-2 text-[12px] text-muted-foreground">
-          <Loader2 className="size-3.5 animate-spin" aria-hidden /> Reading what this is about…
+        <p className="flex items-center gap-2">
+          <Loader2 className="size-3.5 animate-spin text-[var(--pk-signal)]" aria-hidden /> Reading what this is about…
         </p>
       </Block>
     )
@@ -88,13 +88,11 @@ export function DiscoveryPanel({ itemId }: { itemId: string }) {
   if (phase === "error" || !result) {
     return (
       <Block label="Key ideas">
-        <p className="text-[12px] leading-relaxed text-muted-foreground">
-          Couldn&apos;t load what we know about this piece.
-        </p>
+        <p>Couldn&apos;t load what we know about this piece.</p>
         <button
           type="button"
           onClick={retry}
-          className="mt-1.5 rounded-md text-[12px] font-medium text-foreground underline underline-offset-2 hover:text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)]"
+          className="mt-2 text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
         >
           Try again
         </button>
@@ -105,9 +103,7 @@ export function DiscoveryPanel({ itemId }: { itemId: string }) {
   if (result.status === "unavailable") {
     return (
       <Block label="Key ideas">
-        <p className="text-[12px] leading-relaxed text-muted-foreground">
-          Saves kept only in this browser aren&apos;t analyzed. Sign in to have Keeply read them.
-        </p>
+        <p>Saves kept only in this browser aren&apos;t analyzed. Sign in to have Keeply read them.</p>
       </Block>
     )
   }
@@ -115,9 +111,7 @@ export function DiscoveryPanel({ itemId }: { itemId: string }) {
   if (result.status === "not_analyzed") {
     return (
       <Block label="Key ideas">
-        <p className="text-[12px] leading-relaxed text-muted-foreground">
-          Keeply hasn&apos;t read this one yet. Its ideas and anything related will appear here once it has.
-        </p>
+        <p>Key ideas will appear here after Keeply reads this one.</p>
       </Block>
     )
   }
@@ -161,9 +155,9 @@ function KeyIdeas({ concepts }: { concepts: ItemConcept[] }) {
   return (
     <>
       {groups.map((group) => (
-        <div key={group.heading}>
-          <p className="text-[12px] font-medium text-foreground/70">{group.heading}</p>
-          <ul className="mt-2 flex flex-wrap gap-1.5">
+        <div key={group.heading} className="mb-7">
+          <p className="pk-label mb-2.5">{group.heading}</p>
+          <ul className="flex flex-wrap gap-x-4 gap-y-2">
             {group.items.map((c) => (
               <li key={c.id}>
                 {/* A CONCEPT IS A DESTINATION, not a label. These chips
@@ -176,7 +170,7 @@ function KeyIdeas({ concepts }: { concepts: ItemConcept[] }) {
                     the count is the number of those passages. */}
                 <Link
                   href={conceptHref(c.id)}
-                  className="inline-block rounded-md bg-secondary/60 px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
+                  className="text-[14px] text-[var(--pk-ink-2)] underline decoration-[var(--pk-rule-2)] underline-offset-4 transition-colors hover:text-[var(--pk-ink)]"
                   title={`${c.evidenceCount} passage${c.evidenceCount === 1 ? "" : "s"} in this piece — see everything about it`}
                 >
                   {c.label}
@@ -196,30 +190,28 @@ function RelatedKnowledge({ related }: { related: RelatedKnowledgeItem[] }) {
   if (related.length === 0) {
     return (
       <Block label="Related knowledge">
-        <p className="text-[12px] leading-relaxed text-muted-foreground">
-          Nothing else you&apos;ve saved shares these ideas yet.
-        </p>
+        <p>Nothing else you&apos;ve saved shares these ideas yet.</p>
       </Block>
     )
   }
 
   return (
     <div>
-      <p className="text-[12px] font-medium text-foreground/70">Related knowledge</p>
-      <ul className="mt-2 space-y-2">
+      <p className="pk-label mb-2.5">Related knowledge</p>
+      <ul className="pk-rows">
         {related.map((r) => {
           const host = hostOf(r.url)
           return (
-            <li key={r.id}>
-              <Link
-                href={`/knowledge/read/${r.id}`}
-                className="block rounded-xl border border-[var(--kn-edge)] bg-card px-3.5 py-3 transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
-              >
-                <p className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground">
+            <li key={r.id} className="pk-row">
+              <Link href={`/knowledge/read/${r.id}`} className="block">
+                {host && r.title ? <p className="pk-label">{host}</p> : null}
+                <p className="mt-1.5 text-pretty text-[15px] font-medium leading-snug text-[var(--pk-ink)]">
                   {r.title ?? host ?? "Untitled"}
                 </p>
-                {host && r.title ? <p className="mt-0.5 text-[11px] text-muted-foreground">{host}</p> : null}
-                <p className="mt-1.5 text-pretty text-[12px] leading-relaxed text-muted-foreground">{r.why}</p>
+                {/* The reason is assembled from stored facts, so it is
+                    checkable — it wears the evidence signal, not the
+                    generated-content one. */}
+                <p className="pk-evidence mt-2 text-pretty text-[13px] leading-[1.6]">{r.why}</p>
               </Link>
             </li>
           )
@@ -231,13 +223,16 @@ function RelatedKnowledge({ related }: { related: RelatedKnowledgeItem[] }) {
 
 /* ── Shared frame ───────────────────────────────────────────────── */
 
-/** The same quiet card the slots used, minus the "Soon" badge — these
- *  states are outcomes now, not promises. */
+/** An outcome, stated. These were dashed, tinted boxes — the shape a
+ *  UI uses to announce that something is missing, which made three
+ *  perfectly ordinary answers ("not read yet", "nothing shares these
+ *  ideas") look like defects. A label and a sentence say the same
+ *  thing without the alarm. */
 function Block({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed border-[var(--kn-edge)] bg-[var(--kn-well)]/40 px-3.5 py-3">
-      <p className="text-[12px] font-medium text-foreground/70">{label}</p>
-      <div className="mt-1">{children}</div>
+    <div className="mb-7">
+      <p className="pk-label mb-2.5">{label}</p>
+      <div className="max-w-[54ch] text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">{children}</div>
     </div>
   )
 }

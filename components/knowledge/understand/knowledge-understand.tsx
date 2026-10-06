@@ -95,7 +95,7 @@ export function KnowledgeUnderstand({
   const overview = useKnowledgeOverview(liveOverview)
   const themes = useKnowledgeThemes()
   const concepts = useKnowledgeConcepts(explorer?.concepts)
-  const connections = useKnowledgeConnections()
+  const connections = useKnowledgeConnections(explorer?.objects, explorer?.concepts)
   const timeline = useKnowledgeTimeline()
   const questions = useKnowledgeQuestions()
   const insights = useKnowledgeInsights()
@@ -222,22 +222,15 @@ export function KnowledgeUnderstand({
   }, [openObject, objects.data])
 
   return (
-    <div className="kp-understand min-h-dvh">
-      <a
-        href="#signals"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-50 focus:rounded-md focus:bg-[var(--kp-ink)] focus:px-3 focus:py-2 focus:text-[var(--kp-paper)]"
-      >
-        Skip to content
-      </a>
+    /* No <main> and no skip link of its own any more: this route now
+       renders inside the app shell, which supplies both. Two <main>
+       landmarks on one page is a real accessibility fault, not a
+       cosmetic one — a screen reader is told the page has two
+       primary regions and neither is wrong. */
+    <div className="kp-understand">
+      <KnowledgeHeader chapters={CHAPTERS} />
 
-      <KnowledgeHeader
-        chapters={CHAPTERS}
-        onAsk={handleAsk}
-        onVoice={() => setVoiceOpen((v) => !v)}
-        voiceActive={voiceOpen}
-      />
-
-      <main>
+      <div>
         <KnowledgeIntro overview={overview.data} onExplore={() => scrollTo("signals")} />
 
         <KnowledgeSignals overview={overview.data} />
@@ -358,7 +351,7 @@ export function KnowledgeUnderstand({
             <KnowledgeResearch research={research} />
           </Chapter>
         </div>
-      </main>
+      </div>
 
       <footer className="border-t border-[var(--kp-rule)] py-12">
         <div className="mx-auto w-full max-w-[var(--kp-page)] px-[var(--kp-gutter)]">

@@ -17,15 +17,14 @@
  * different facts and are shown as different things.
  * ================================================================== */
 
-import { AlertTriangle, ArrowUp, BookOpen, Clock, Info, Loader2, Search, ShieldAlert, Sparkles, WifiOff } from "lucide-react"
+import { AlertTriangle, ArrowUp, Info, Loader2, Search } from "lucide-react"
 import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
-import { PageContainer, PageHeader } from "../page-header"
 import { openSaveDialog } from "@/lib/knowledge/config"
 import { useKnowledgeAsk, type AskFailure } from "@/lib/knowledge/use-knowledge-ai"
 import { isFullyGrounded, MAX_QUESTION_CHARS, MIN_QUESTION_CHARS, type KnowledgeAnswer } from "@/lib/knowledge/ai"
 import { AnswerBody } from "./answer-body"
-import { CitationList } from "./citation-list"
+import { CitationList, EvidenceList } from "./citation-list"
 
 /* ---- recent questions -------------------------------------------- *
  *
@@ -80,67 +79,79 @@ export function AskView({ libraryIsEmpty, scopeCount = null }: { libraryIsEmpty:
   )
 
   return (
-    <PageContainer>
-      <PageHeader
-        eyebrow="Ask"
-        title="Ask your library."
-        subtitle="Answers drawn only from what you've saved, with the passages they came from."
-      />
+    <div className="pk-page pb-24">
+      {/* ── Masthead ──────────────────────────────────────────────
+          One question field, at the size of the thing it is for. No
+          transcript above it and no history beside it: this is a
+          research tool, and the previous answer is not context for the
+          next one — it is a different piece of work. */}
+      <header className="pt-14 sm:pt-20">
+        <p className="pk-label">Ask</p>
+        <h1 className="pk-display mt-4 max-w-[16ch] text-[var(--pk-ink)]">Ask your knowledge.</h1>
+        <p className="mt-5 max-w-[52ch] text-[15px] leading-[1.65] text-[var(--pk-ink-3)]">
+          Answers are built only from what you&rsquo;ve saved, and every claim carries the passage it came from.
+        </p>
+      </header>
 
       <form
-        className="mt-8"
+        className="mt-9 max-w-[42rem]"
         onSubmit={(e) => {
           e.preventDefault()
           submit(draft)
         }}
       >
-        <div className="flex items-center gap-2 rounded-2xl border border-[var(--kn-edge)] bg-[var(--kn-paper)] px-4 py-2 focus-within:border-[var(--kn-ai)]/50">
-          <Search className="size-4 shrink-0 text-muted-foreground" />
+        <div className="pk-field">
+          <Search className="size-[18px] shrink-0 text-[var(--pk-ink-4)]" strokeWidth={1.8} />
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             disabled={libraryIsEmpty}
-            placeholder="What did I save about…?"
-            aria-label="Ask your library"
+            placeholder="What do I know about…?"
+            aria-label="Ask your knowledge"
             maxLength={MAX_QUESTION_CHARS}
-            className="h-10 min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+            className="disabled:cursor-not-allowed"
           />
           <button
             type="submit"
             disabled={busy || draft.trim().length < MIN_QUESTION_CHARS}
             aria-label="Ask"
-            className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-opacity disabled:opacity-40"
+            className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[var(--pk-accent)] text-[var(--pk-accent-ink)] transition-opacity disabled:opacity-25"
           >
             {busy ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" strokeWidth={2.5} />}
           </button>
         </div>
+
         {!libraryIsEmpty && scopeCount !== null && (
-          <p className="mt-2 px-1 text-[12px] text-muted-foreground">
-            Answered from {scopeCount === 1 ? "the 1 item" : `all ${scopeCount.toLocaleString()} items`} you&rsquo;ve saved.
+          <p className="pk-meta mt-3">
+            Answered from {scopeCount === 1 ? "the 1 item" : `all ${scopeCount.toLocaleString()} items`} you&rsquo;ve
+            saved.
           </p>
         )}
 
         {!libraryIsEmpty && recent.length > 0 && state.phase === "idle" && (
-          <div className="mt-3 flex flex-wrap items-center gap-1.5 px-1">
-            <span className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Recent</span>
-            {recent.map((q) => (
-              <button
-                key={q}
-                type="button"
-                onClick={() => {
-                  setDraft(q)
-                  submit(q)
-                }}
-                className="max-w-[22ch] truncate rounded-full border border-[var(--kn-edge)] px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:border-[var(--kn-ai)]/50 hover:text-foreground"
-              >
-                {q}
-              </button>
-            ))}
+          <div className="mt-6">
+            <p className="pk-label mb-2.5">Recent</p>
+            <ul className="flex flex-col">
+              {recent.map((q) => (
+                <li key={q}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraft(q)
+                      submit(q)
+                    }}
+                    className="w-full truncate border-b border-[var(--pk-rule)] py-2.5 text-left text-[14px] text-[var(--pk-ink-2)] transition-colors hover:text-[var(--pk-ink)]"
+                  >
+                    {q}
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </form>
 
-      <div className="mt-8">
+      <div>
         {libraryIsEmpty ? (
           <EmptyLibraryState />
         ) : state.phase === "idle" ? (
@@ -157,30 +168,14 @@ export function AskView({ libraryIsEmpty, scopeCount = null }: { libraryIsEmpty:
           <NoResultsState answer={state.outcome.answer} />
         )}
       </div>
-    </PageContainer>
+    </div>
   )
 }
 
 /* ── States ─────────────────────────────────────────────────────── */
 
 function Panel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-[var(--kn-edge)] bg-[var(--kn-paper)] px-6 py-14 text-center">
-      {children}
-    </div>
-  )
-}
-
-function PanelIcon({ children, tone = "ai" }: { children: React.ReactNode; tone?: "ai" | "warn" }) {
-  return (
-    <span
-      className={`flex size-12 items-center justify-center rounded-2xl ${
-        tone === "warn" ? "bg-secondary text-muted-foreground" : "bg-[var(--kn-ai)]/12 text-[var(--kn-ai)]"
-      }`}
-    >
-      {children}
-    </span>
-  )
+  return <div className="max-w-[48ch] py-16">{children}</div>
 }
 
 /** 1. Empty library — nothing has been saved, so there is nothing to
@@ -189,18 +184,13 @@ function PanelIcon({ children, tone = "ai" }: { children: React.ReactNode; tone?
 function EmptyLibraryState() {
   return (
     <Panel>
-      <PanelIcon>
-        <BookOpen className="size-6" />
-      </PanelIcon>
-      <div className="max-w-sm space-y-2">
-        <p className="text-[15px] font-medium text-foreground">Nothing to ask yet.</p>
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          Ask answers only from what you&apos;ve saved. Save a few pieces and this becomes useful.
-        </p>
-      </div>
+      <p className="text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]">Nothing to ask yet.</p>
+      <p className="mt-2 text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">
+        Ask answers only from what you&apos;ve saved. Save a few pieces and this becomes useful.
+      </p>
       <button
         onClick={openSaveDialog}
-        className="flex h-10 items-center rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground"
+        className="mt-4 text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
       >
         Save a link
       </button>
@@ -213,15 +203,9 @@ function EmptyLibraryState() {
 function IdleState() {
   return (
     <Panel>
-      <PanelIcon>
-        <Sparkles className="size-6" />
-      </PanelIcon>
-      <div className="max-w-sm space-y-2">
-        <p className="text-[15px] font-medium text-foreground">Ask a question.</p>
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          Answers are built from the passages in your own saves, and every claim links to the piece it came from.
-        </p>
-      </div>
+      <p className="text-[14px] leading-[1.65] text-[var(--pk-ink-4)]">
+        Your answer, the passages behind it and the pieces they came from will appear here.
+      </p>
     </Panel>
   )
 }
@@ -230,9 +214,12 @@ function IdleState() {
 function LoadingState({ question }: { question: string }) {
   return (
     <Panel>
-      <Loader2 className="size-5 animate-spin text-[var(--kn-ai)]" />
-      <p className="max-w-md text-sm text-muted-foreground">
-        Searching your library for <span className="text-foreground">{question}</span>
+      <p className="pk-label flex items-center gap-2 text-[var(--pk-signal)]">
+        <Loader2 className="size-3.5 animate-spin" />
+        Retrieving
+      </p>
+      <p className="mt-3 text-[15px] leading-[1.6] text-[var(--pk-ink-3)]">
+        Searching your library for <span className="text-[var(--pk-ink)]">{question}</span>
       </p>
     </Panel>
   )
@@ -244,9 +231,9 @@ function AnswerState({ answer }: { answer: KnowledgeAnswer }) {
   return (
     <article>
       {!grounded ? (
-        <div className="mb-5 flex items-start gap-3 rounded-2xl border border-[var(--kn-edge)] bg-secondary/50 px-4 py-3">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-          <p className="text-[13px] leading-relaxed text-muted-foreground">
+        <div className="mt-8 flex max-w-[60ch] items-start gap-2.5 border-l-2 border-[var(--pk-danger)] pl-3.5">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[var(--pk-danger)]" />
+          <p className="text-[13px] leading-[1.6] text-[var(--pk-ink-2)]">
             This answer refers to {answer.unresolvedCitationIds.length === 1 ? "a source" : "sources"} that
             {answer.unresolvedCitationIds.length === 1 ? " was" : " were"} not retrieved
             {" "}({answer.unresolvedCitationIds.map((id) => `[${id}]`).join(" ")}). Treat it as unverified — those
@@ -255,7 +242,13 @@ function AnswerState({ answer }: { answer: KnowledgeAnswer }) {
         </div>
       ) : null}
 
-      <AnswerBody text={answer.answer} citations={answer.citations} />
+      {/* ANSWER → EVIDENCE → SOURCES. The order is the argument: the
+          claim, the text that backs it, then where that text lives. */}
+      <section className="pk-section">
+        <h2 className="pk-label mb-5">Answer</h2>
+        <AnswerBody text={answer.answer} citations={answer.citations} />
+      </section>
+      <EvidenceList citations={answer.citations} />
       <CitationList citations={answer.citations} />
       <RetrievalNote answer={answer} />
     </article>
@@ -269,18 +262,18 @@ function AnswerState({ answer }: { answer: KnowledgeAnswer }) {
 function InsufficientEvidenceState({ answer }: { answer: KnowledgeAnswer }) {
   return (
     <Panel>
-      <PanelIcon tone="warn">
-        <ShieldAlert className="size-6" />
-      </PanelIcon>
-      <div className="max-w-md space-y-2">
-        <p className="text-[15px] font-medium text-foreground">Not enough to answer this.</p>
-        <p className="text-sm leading-relaxed text-muted-foreground">
+      <div className="max-w-[52ch]">
+        <p className="text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]">Not enough to answer this.</p>
+        <p className="mt-2 text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">
           Your library has {answer.retrieval.chunksRetrieved === 1 ? "a passage" : "passages"} near this topic, but
           {answer.retrieval.chunksRetrieved === 1 ? " it isn't" : " none is"} close enough to answer from. Rather than
           guess, nothing was generated.
         </p>
       </div>
-      <Link href="/knowledge/library" className="text-sm text-muted-foreground underline underline-offset-4">
+      <Link
+        href="/knowledge/library"
+        className="mt-4 inline-block text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
+      >
         Browse your library instead
       </Link>
     </Panel>
@@ -291,17 +284,16 @@ function InsufficientEvidenceState({ answer }: { answer: KnowledgeAnswer }) {
 function NoResultsState({ answer }: { answer: KnowledgeAnswer }) {
   return (
     <Panel>
-      <PanelIcon tone="warn">
-        <Search className="size-6" />
-      </PanelIcon>
-      <div className="max-w-md space-y-2">
-        <p className="text-[15px] font-medium text-foreground">Nothing in your library covers this.</p>
-        <p className="text-sm leading-relaxed text-muted-foreground">{answer.answer}</p>
+      <div className="max-w-[52ch]">
+        <p className="text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]">
+          Nothing in your library covers this.
+        </p>
+        <p className="mt-2 text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">{answer.answer}</p>
       </div>
       {/* Without meaning-based search, "nothing matched" means
           "no saved page used these exact words" — a much weaker
           claim, and the user deserves to know which one they got. */}
-      <div className="max-w-md">
+      <div className="mt-5 max-w-[52ch]">
         <SemanticNotice status={answer.retrieval.semanticSearch} />
       </div>
     </Panel>
@@ -313,24 +305,23 @@ function ErrorState({ failure, onRetry }: { failure: AskFailure; onRetry: () => 
   const copy = FAILURE_COPY[failure.kind]
   return (
     <Panel>
-      <PanelIcon tone="warn">{copy.icon}</PanelIcon>
-      <div className="max-w-md space-y-2">
-        <p className="text-[15px] font-medium text-foreground">{copy.title}</p>
+      <div className="max-w-[52ch]">
+        <p className="text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]">{copy.title}</p>
         {/* The server's own message, not a rewrite of it — it carries
             the specifics (which limit, which credential). */}
-        <p className="text-sm leading-relaxed text-muted-foreground">{failure.message}</p>
+        <p className="mt-2 text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">{failure.message}</p>
       </div>
       {failure.retryable ? (
         <button
           onClick={onRetry}
-          className="flex h-10 items-center rounded-full border border-border px-5 text-sm text-foreground hover:bg-secondary"
+          className="mt-4 text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
         >
           Try again
         </button>
       ) : failure.kind === "unauthorized" ? (
         <Link
-          href="/login"
-          className="flex h-10 items-center rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground"
+          href="/login?callbackUrl=/knowledge/home"
+          className="mt-4 inline-block text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
         >
           Sign in
         </Link>
@@ -339,15 +330,19 @@ function ErrorState({ failure, onRetry }: { failure: AskFailure; onRetry: () => 
   )
 }
 
-const FAILURE_COPY: Record<AskFailure["kind"], { title: string; icon: React.ReactNode }> = {
-  unauthorized: { title: "Sign in to ask.", icon: <ShieldAlert className="size-6" /> },
-  invalid_request: { title: "That question can't be asked.", icon: <AlertTriangle className="size-6" /> },
-  rate_limited: { title: "Too many questions just now.", icon: <Clock className="size-6" /> },
-  provider_unavailable: { title: "Ask isn't configured.", icon: <ShieldAlert className="size-6" /> },
-  provider_error: { title: "Couldn't reach the model.", icon: <AlertTriangle className="size-6" /> },
-  malformed_response: { title: "Unreadable response.", icon: <AlertTriangle className="size-6" /> },
-  network: { title: "You appear to be offline.", icon: <WifiOff className="size-6" /> },
-  unknown: { title: "Something went wrong.", icon: <AlertTriangle className="size-6" /> },
+/* Titles only. The icons these used to carry (a shield, a clock, a
+ * broken-wifi glyph) were decoration for text that already says exactly
+ * what happened, and each one arrived inside a rounded square — the
+ * shape that makes an error state look like a dashboard widget. */
+const FAILURE_COPY: Record<AskFailure["kind"], { title: string }> = {
+  unauthorized: { title: "Sign in to ask." },
+  invalid_request: { title: "That question can't be asked." },
+  rate_limited: { title: "Too many questions just now." },
+  provider_unavailable: { title: "Ask isn't configured." },
+  provider_error: { title: "Couldn't reach the model." },
+  malformed_response: { title: "Unreadable response." },
+  network: { title: "You appear to be offline." },
+  unknown: { title: "Something went wrong." },
 }
 
 /** Retrieval provenance, stated plainly. Shown because a silently
@@ -359,9 +354,9 @@ function RetrievalNote({ answer }: { answer: KnowledgeAnswer }) {
   if (retrieval.droppedChunks > 0) bits.push(`${retrieval.droppedChunks} left out for length`)
 
   return (
-    <div className="mt-8 space-y-3 border-t border-[var(--kn-edge)] pt-4">
+    <div className="mt-2 space-y-3 border-t border-[var(--pk-rule)] pt-5">
       <SemanticNotice status={retrieval.semanticSearch} />
-      <p className="text-[12px] text-muted-foreground">{bits.join(" · ")}</p>
+      <p className="pk-meta">Retrieved {bits.join(" · ")}</p>
     </div>
   )
 }
@@ -381,9 +376,9 @@ function SemanticNotice({ status }: { status: KnowledgeAnswer["retrieval"]["sema
       : "Meaning-based search is temporarily unavailable, so this searched exact words only. Try again later for a fuller answer."
 
   return (
-    <div className="flex items-start gap-2.5 rounded-xl bg-secondary/50 px-3 py-2.5">
-      <Info className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-      <p className="text-[12px] leading-relaxed text-muted-foreground">{copy}</p>
+    <div className="flex max-w-[60ch] items-start gap-2.5 border-l-2 border-[var(--pk-signal)] pl-3.5">
+      <Info className="mt-0.5 size-3.5 shrink-0 text-[var(--pk-signal)]" />
+      <p className="text-[12.5px] leading-[1.6] text-[var(--pk-ink-3)]">{copy}</p>
     </div>
   )
 }

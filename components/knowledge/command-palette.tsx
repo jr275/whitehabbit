@@ -172,11 +172,11 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
     >
       <button
         aria-label="Close command palette"
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-[oklch(0.185_0.022_268_/_28%)] backdrop-blur-[2px]"
         onClick={onClose}
       />
-      <div className="kn-rise relative w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl">
-        <div className="flex items-center gap-3 border-b border-border px-4">
+      <div className="kn-rise relative w-full max-w-xl overflow-hidden rounded-[var(--pk-r-lg)] border border-[var(--pk-rule-2)] bg-[var(--pk-raised)] shadow-[0_24px_64px_-16px_oklch(0.185_0.022_268_/_18%)]">
+        <div className="flex items-center gap-3 border-b border-[var(--pk-rule)] px-4">
           <Search className="size-4 shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
@@ -192,7 +192,7 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
           />
           {searching && <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />}
           <VoiceSearchButton voice={voice} className="shrink-0" />
-          <kbd className="shrink-0 rounded-md border border-border bg-secondary/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          <kbd className="pk-label shrink-0">
             ESC
           </kbd>
         </div>
@@ -206,7 +206,7 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
           {/* Commands */}
           {commandMatches.length > 0 && (
             <>
-              <p                 className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground">
+              <p                 className="pk-label px-3 pb-2 pt-2.5">
                 {hasQuery ? "Commands" : "Quick actions"}
               </p>
               {commandMatches.map((cmd) => {
@@ -220,28 +220,22 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
                     onMouseEnter={() => setActive(i)}
                     onClick={() => runCommand(cmd)}
                     className={cn(
-                      "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors",
-                      isActive ? "bg-secondary" : "hover:bg-secondary/50",
+                      "flex w-full items-center gap-3 rounded-[var(--pk-r-sm)] px-3 py-2.5 text-left transition-colors",
+                      isActive ? "bg-[var(--pk-sunken)]" : "",
                     )}
                   >
-                    <span
-                      className={cn(
-                        "flex size-8 items-center justify-center rounded-lg border",
-                        isActive
-                          ? "border-[var(--kn-ai)]/30 bg-[var(--kn-ai)]/10 text-[var(--kn-ai)]"
-                          : "border-border bg-card text-muted-foreground",
-                      )}
-                    >
-                      <Icon className="size-4" />
-                    </span>
+                    <Icon
+                      className={cn("size-4 shrink-0", isActive ? "text-[var(--pk-ink)]" : "text-[var(--pk-ink-4)]")}
+                      strokeWidth={1.9}
+                    />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-foreground">{cmd.label}</span>
-                      <span className="block truncate text-xs text-muted-foreground">{cmd.hint}</span>
+                      <span className="block truncate text-[14px] font-medium text-[var(--pk-ink)]">{cmd.label}</span>
+                      <span className="pk-meta block truncate">{cmd.hint}</span>
                     </span>
                     {isActive ? (
-                      <CornerDownLeft className="size-3.5 text-muted-foreground" />
+                      <CornerDownLeft className="size-3.5 text-[var(--pk-ink-4)]" />
                     ) : (
-                      <ArrowRight className="size-3.5 text-muted-foreground/40" />
+                      <ArrowRight className="size-3.5 text-[var(--pk-rule-2)]" />
                     )}
                   </button>
                 )
@@ -252,7 +246,7 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
           {/* Real library results */}
           {results.length > 0 && (
             <>
-              <p className="px-3 pb-1 pt-3 text-[11px] font-medium text-muted-foreground">
+              <p className="pk-label px-3 pb-2 pt-3.5">
                 In your library
               </p>
               {results.map((item) => {
@@ -266,30 +260,22 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
                     onMouseEnter={() => setActive(i)}
                     onClick={() => openItem(item)}
                     className={cn(
-                      "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors",
-                      isActive ? "bg-secondary" : "hover:bg-secondary/50",
+                      "flex w-full items-center gap-3 rounded-[var(--pk-r-sm)] px-3 py-2.5 text-left transition-colors",
+                      isActive ? "bg-[var(--pk-sunken)]" : "",
                     )}
                   >
-                    <span
-                      className={cn(
-                        "flex size-8 shrink-0 items-center justify-center rounded-lg border",
-                        isActive
-                          ? "border-[var(--kn-ai)]/30 bg-[var(--kn-ai)]/10 text-[var(--kn-ai)]"
-                          : "border-border bg-card text-muted-foreground",
-                      )}
-                    >
-                      <Icon className="size-4" />
-                    </span>
+                    <Icon
+                      className={cn("size-4 shrink-0", isActive ? "text-[var(--pk-ink)]" : "text-[var(--pk-ink-4)]")}
+                      strokeWidth={1.9}
+                    />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-foreground">{item.title}</span>
-                      <span className="block truncate text-[12px] text-muted-foreground">
-                        {item.source}
-                      </span>
+                      <span className="block truncate text-[14px] font-medium text-[var(--pk-ink)]">{item.title}</span>
+                      <span className="pk-meta block truncate">{item.source}</span>
                     </span>
                     {isActive ? (
-                      <CornerDownLeft className="size-3.5 shrink-0 text-muted-foreground" />
+                      <CornerDownLeft className="size-3.5 shrink-0 text-[var(--pk-ink-4)]" />
                     ) : (
-                      <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/40" />
+                      <ArrowRight className="size-3.5 shrink-0 text-[var(--pk-rule-2)]" />
                     )}
                   </button>
                 )
@@ -300,7 +286,7 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
           {/* Honest empty search state */}
           {showNoResults && (
             <div className="px-3 py-8 text-center">
-              <p className="text-sm text-foreground">No saved items match “{query.trim()}”.</p>
+              <p className="text-[14px] text-[var(--pk-ink)]">No saved items match “{query.trim()}”.</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Search looks through titles, sources, tags and the extracted text of what you&apos;ve saved.
               </p>

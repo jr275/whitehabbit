@@ -48,6 +48,7 @@ import type {
   VoiceState,
 } from "./types"
 import { RESEARCH_STAGES } from "./types"
+import { deriveConnections } from "./connections"
 
 export interface Resource<T> {
   data: T
@@ -101,8 +102,18 @@ export function useKnowledgeConcepts(initial?: KnowledgeConcept[] | null): Resou
   )
 }
 
-export function useKnowledgeConnections(): Resource<KnowledgeConnection[]> {
-  return useMemo(() => ready(CONNECTIONS), [])
+/** Live edges when the viewer's own objects and concepts are supplied,
+ *  the sample otherwise. The fallback is what keeps the signed-out
+ *  prototype intact; the live path is what stops a real library being
+ *  drawn with fixture relationships. */
+export function useKnowledgeConnections(
+  objects?: KnowledgeObject[],
+  concepts?: KnowledgeConcept[],
+): Resource<KnowledgeConnection[]> {
+  return useMemo(
+    () => ready(objects && concepts ? deriveConnections(objects, concepts) : CONNECTIONS),
+    [objects, concepts],
+  )
 }
 
 export function useKnowledgeTimeline(): Resource<KnowledgeTimelineEvent[]> {
