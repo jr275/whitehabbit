@@ -87,6 +87,10 @@ const SHARED_PLATFORM = [
   "lib/runtime-mode",
   "lib/auth",
   "lib/auth-features",
+  // Which product a sign-in is heading into, read from the callbackUrl.
+  // Shared because /login and /signup are shared: one route, one
+  // session, three presentations.
+  "lib/auth-context",
   "lib/auth-password",
   "lib/auth.config",
   "lib/utils",

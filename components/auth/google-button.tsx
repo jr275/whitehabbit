@@ -3,21 +3,26 @@
 /* Real Google OAuth trigger. Only rendered when the server confirms
  * GOOGLE_CLIENT_ID/SECRET are configured (see lib/auth-features'
  * googleAuthConfigured, read per request),
- * so it is never a dead/fake button. Routes through /launch, which
+ * so it is never a dead/fake button. Falls back to /launch, which
  * decides onboarding-vs-product after the session exists. */
 
 import { Loader2 } from "lucide-react"
 import { signIn } from "next-auth/react"
+import { useSearchParams } from "next/navigation"
 import { useState } from "react"
 
 export function GoogleButton({ label = "Continue with Google" }: { label?: string }) {
   const [loading, setLoading] = useState(false)
+  // The destination has to survive here too: this used to send everyone
+  // to /launch, so a Keeply user who signed in with Google landed in
+  // the platform router instead of their library.
+  const params = useSearchParams()
   return (
     <button
       type="button"
       onClick={() => {
         setLoading(true)
-        void signIn("google", { callbackUrl: "/launch" })
+        void signIn("google", { callbackUrl: params.get("callbackUrl") || "/launch" })
       }}
       disabled={loading}
       className="flex h-11 w-full items-center justify-center gap-2.5 rounded-lg border border-border bg-card text-[13px] font-medium text-foreground transition-colors hover:border-foreground/25 hover:bg-secondary/50 disabled:cursor-not-allowed disabled:opacity-60"

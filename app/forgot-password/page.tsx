@@ -9,6 +9,7 @@ export const metadata = {
 export default function ForgotPasswordPage() {
   return (
     <AuthLayout
+      context="neutral"
       eyebrow="Account recovery"
       title="Forgot your password?"
       subtitle="Enter the email on your account and we'll create a secure, single-use link to set a new password."

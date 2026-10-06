@@ -228,3 +228,58 @@ export function clientIpFrom(req: Request, hops: number = trustedProxyHops()): s
 
   return "unknown"
 }
+
+/* ================================================================== *
+ * DEPLOYMENT READINESS.
+ *
+ * Auth.js collapses every authorize() failure into one
+ * `CredentialsSignin` error, so the sign-in form cannot tell a wrong
+ * password from a server that has no database to check it against. It
+ * guessed, and it guessed in the direction that blames the person:
+ * sign-UP on the same deployment correctly said "The database is not
+ * configured", while sign-IN said "Incorrect email or password."
+ *
+ * These report what a sign-in needs, as booleans only — never a value,
+ * never a length. A diagnosis must not become a disclosure.
+ * ================================================================== */
+
+export interface AuthReadiness {
+  database: boolean
+  sessionSecret: boolean
+}
+
+/** Reads the environment under every name a platform may have set it:
+ *  Vercel/Neon write NEON_DATABASE_URL or POSTGRES_URL, and NextAuth v4
+ *  deployments carry NEXTAUTH_SECRET. Missing one of those is a
+ *  configured deployment, not a broken one. */
+export function authReadiness(): AuthReadiness {
+  return {
+    database: Boolean(
+      process.env.DATABASE_URL ||
+        process.env.NEON_DATABASE_URL ||
+        process.env.POSTGRES_URL ||
+        process.env.NEON_DATABASE_URL_UNPOOLED,
+    ),
+    sessionSecret: Boolean(process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET),
+  }
+}
+
+export function canAuthenticate(readiness: AuthReadiness = authReadiness()): boolean {
+  return readiness.database && readiness.sessionSecret
+}
+
+/** The message to show INSTEAD of "incorrect password" when the
+ *  deployment cannot authenticate anyone. Null when it can, so the
+ *  caller falls through to the ordinary credentials message. */
+export function notConfiguredMessage(readiness: AuthReadiness = authReadiness()): string | null {
+  if (!readiness.database && !readiness.sessionSecret) {
+    return "This deployment isn’t finished setting up: it has no database and no session secret. Sign-in can’t work until DATABASE_URL and AUTH_SECRET are set on the server."
+  }
+  if (!readiness.database) {
+    return "This deployment has no database configured, so accounts can’t be read. Set DATABASE_URL on the server and try again."
+  }
+  if (!readiness.sessionSecret) {
+    return "This deployment has no session secret, so a sign-in can’t be kept. Set AUTH_SECRET on the server and try again."
+  }
+  return null
+}
