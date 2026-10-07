@@ -137,6 +137,12 @@ export function LibraryView({
    *  outside a search has no query to have matched. */
   const [searchEvidence, setSearchEvidence] = useState<Record<string, SearchEvidence>>({})
   const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "ready" | "error">("idle")
+  /** Bumped by "Try again" after a failed search. A retry runs the same
+   *  query, and setting state to the value it already holds is a no-op in
+   *  React — the effect below would never re-run and the button would do
+   *  nothing. Counting the attempt is what gives the retry something to
+   *  depend on. */
+  const [searchAttempt, setSearchAttempt] = useState(0)
 
   useEffect(() => {
     if (!searching) {
@@ -162,7 +168,7 @@ export function LibraryView({
       ctrl.abort()
       clearTimeout(t)
     }
-  }, [query, searching])
+  }, [query, searching, searchAttempt])
 
   // Optimistic actions for search results (they live outside the hook's list).
   const patchSearch = useCallback((id: string, updater: (i: KnowledgeItem) => KnowledgeItem) => {
@@ -269,7 +275,7 @@ export function LibraryView({
             <Notice
               title="That search didn’t complete."
               body="Something went wrong on our end."
-              action={{ label: "Try again", onClick: () => setQuery((q) => q) }}
+              action={{ label: "Try again", onClick: () => setSearchAttempt((n) => n + 1) }}
             />
           ) : shownSearch.length === 0 ? (
             <Notice

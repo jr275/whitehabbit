@@ -458,6 +458,17 @@ describe("the search result row", () => {
     assert.match(list, /<ItemRow key=\{item\.id\} item=\{item\} onToggleFavorite=\{toggleFavorite\} onRetry=\{retry\} \/>/)
   })
 
+  it("gives the failed-search retry something to depend on", () => {
+    // "Try again" once called setQuery((q) => q). Setting state to the
+    // value it already holds is a no-op in React, so the debounced search
+    // effect never re-ran and the button did nothing: a reader whose
+    // search failed had no way back except editing the query text. The
+    // retry now counts the attempt, and the effect depends on the count.
+    assert.match(list, /onClick: \(\) => setSearchAttempt\(\(n\) => n \+ 1\)/)
+    assert.match(list, /\}, \[query, searching, searchAttempt\]\)/)
+    assert.doesNotMatch(list, /setQuery\(\(q\) => q\)/, "a retry that re-sets the same value is a no-op")
+  })
+
   it("reaches Ask through the existing helper, not a new endpoint", () => {
     assert.match(reader, /askAboutHref\(/)
     assert.doesNotMatch(reader, /\/api\/knowledge\/ai/, "the reader must not call the answering API itself")
