@@ -10,13 +10,17 @@
  * which is how a screen gets its top 64 pixels back and stops opening
  * with two bands of chrome.
  *
- * On a phone there is no rail, so the same three affordances have to
- * be somewhere: brand, search, save, on one line.
+ * On a phone there is no rail, so the same affordances have to be
+ * somewhere: brand, search, save, account, on one line. Account is
+ * here because the rail is the only other place it lived, and the
+ * rail does not exist at this width — which left a guest on a phone
+ * with no route to /login at all.
  * ================================================================== */
 
 import { Moon, Plus, Search, Sun } from "lucide-react"
 import Link from "next/link"
 import type { KnowledgeTheme } from "@/lib/knowledge/theme"
+import { AccountControl } from "./account-control"
 
 interface KnowledgeTopbarProps {
   onOpenPalette: () => void
@@ -60,6 +64,7 @@ export function KnowledgeTopbar({ onOpenPalette, onOpenSave, theme, onToggleThem
             <Plus className="size-4" strokeWidth={2.4} />
             Save
           </button>
+          <AccountControl layout="header" />
         </div>
       </div>
     </header>
