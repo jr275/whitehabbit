@@ -10,6 +10,7 @@ export const metadata = {
 export default function ResetPasswordPage() {
   return (
     <AuthLayout
+      context="neutral"
       eyebrow="Account recovery"
       title="Set a new password"
       subtitle="Choose a strong password you don't use anywhere else."

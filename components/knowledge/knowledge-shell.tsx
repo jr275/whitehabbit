@@ -1,6 +1,5 @@
 "use client"
 
-import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import { type KnowledgeTheme, persistKnowledgeTheme } from "@/lib/knowledge/theme"
 import { CommandPalette } from "./command-palette"
@@ -9,16 +8,16 @@ import { KnowledgeTopbar } from "./knowledge-topbar"
 import { MobileNav } from "./mobile-nav"
 import { SaveDialog } from "./save-dialog"
 
-const UNCHROMED_ROUTE = "/knowledge"
-
 export function KnowledgeShell({
   children,
   initialTheme,
 }: {
   children: React.ReactNode
+  /* Read from a cookie on the server so the first paint is already the
+   * reader's choice — a theme resolved on the client flashes the other
+   * one first, which is worse than not offering the choice. */
   initialTheme: KnowledgeTheme
 }) {
-  const pathname = usePathname()
   const [theme, setTheme] = useState<KnowledgeTheme>(initialTheme)
 
   function toggleTheme() {
@@ -26,6 +25,7 @@ export function KnowledgeShell({
     setTheme(next)
     persistKnowledgeTheme(next)
   }
+
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [saveOpen, setSaveOpen] = useState(false)
 
@@ -59,17 +59,6 @@ export function KnowledgeShell({
     }
   }, [])
 
-  // The Understand surface brings its own header, navigation, main
-  // landmark and (light) theme — it is a full-page editorial reading
-  // experience rather than a pane inside the app chrome. Rendering it
-  // inside this shell would nest a second <main>, stack two headers,
-  // and frame a light page in the dark sidebar.
-  //
-  // A child route cannot remove a parent layout in the App Router, so
-  // this single explicit exception is the escape hatch. It matches one
-  // path and leaves every other Knowledge route untouched.
-  if (pathname === UNCHROMED_ROUTE) return <>{children}</>
-
   return (
     <div data-kn-theme={theme} className="knowledge-surface min-h-dvh bg-background text-foreground">
       <a
@@ -80,7 +69,7 @@ export function KnowledgeShell({
       </a>
 
       <div className="flex">
-        <KnowledgeSidebar />
+        <KnowledgeSidebar theme={theme} onToggleTheme={toggleTheme} />
 
         <div className="flex min-w-0 flex-1 flex-col">
           <KnowledgeTopbar
@@ -95,7 +84,7 @@ export function KnowledgeShell({
         </div>
       </div>
 
-      <MobileNav onOpenSave={() => setSaveOpen(true)} />
+      <MobileNav />
 
       <CommandPalette
         open={paletteOpen}

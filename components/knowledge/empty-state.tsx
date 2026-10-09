@@ -1,25 +1,24 @@
 "use client"
 
-import { BookOpen, Plus } from "lucide-react"
+/* An empty library is the first thing a new person sees, so it sets
+ * the product's register. It used to be a bordered, shadowed card with
+ * a 64px icon in a tinted rounded square and a centred accent pill —
+ * the standard SaaS "nothing here yet" panel. Nothing in it was wrong;
+ * it was just louder than the product it introduces. */
 
 export function EmptyLibrary({ onSave }: { onSave: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-3xl border border-[var(--kn-edge)] bg-card px-6 py-24 text-center shadow-sm">
-      <span className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-        <BookOpen className="size-7" />
-      </span>
-      <h2 className="mt-7 max-w-md text-balance font-serif text-3xl font-medium leading-tight tracking-tight text-foreground">
-        Your library starts here.
-      </h2>
-      <p className="mt-3 max-w-sm text-pretty text-[15px] leading-relaxed text-muted-foreground">
-        Save something interesting from the web and it will appear here — beautifully readable, whenever you want to
-        come back to it.
+    <div className="max-w-[46ch] py-10">
+      <h2 className="pk-title text-balance text-[var(--pk-ink)]">Your library starts here.</h2>
+      <p className="mt-4 text-pretty text-[15px] leading-[1.65] text-[var(--pk-ink-3)]">
+        Save something from the web and it will appear here — readable, searchable, and connected to everything else
+        you keep.
       </p>
       <button
         onClick={onSave}
-        className="mt-8 flex h-11 items-center gap-2 rounded-full bg-primary px-6 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02] active:scale-95"
+        className="mt-7 flex h-10 items-center gap-1.5 rounded-full bg-[var(--pk-accent)] px-5 text-[13.5px] font-medium text-[var(--pk-accent-ink)] transition-opacity hover:opacity-90"
       >
-        <Plus className="size-4" strokeWidth={2.5} /> Save a link
+        Save a link
       </button>
     </div>
   )

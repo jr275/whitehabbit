@@ -12,13 +12,25 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useState } from "react"
 import { AuthDivider, GoogleButton } from "./google-button"
 
-export function LoginForm({ googleEnabled }: { googleEnabled: boolean }) {
+export function LoginForm({
+  googleEnabled,
+  notConfigured = null,
+}: {
+  googleEnabled: boolean
+  /** Set when the deployment itself cannot authenticate anyone. Shown
+   *  in place of the credentials message, which would otherwise blame
+   *  the person for the server's missing configuration. */
+  notConfigured?: string | null
+}) {
   const router = useRouter()
   const params = useSearchParams()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const callbackUrl = params.get("callbackUrl")
+  const signupHref = callbackUrl ? `/signup?callbackUrl=${encodeURIComponent(callbackUrl)}` : "/signup"
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -27,10 +39,13 @@ export function LoginForm({ googleEnabled }: { googleEnabled: boolean }) {
     const result = await signIn("credentials", { email, password, redirect: false })
     if (result?.error) {
       setSubmitting(false)
-      setError("Incorrect email or password.")
+      // Auth.js reports one error for every authorize() failure, so the
+      // only way to tell "wrong password" from "this server has no
+      // database" is to have asked the server beforehand.
+      setError(notConfigured ?? "Incorrect email or password.")
       return
     }
-    router.push(params.get("callbackUrl") || "/launch")
+    router.push(callbackUrl || "/launch")
     router.refresh()
   }
 
@@ -93,7 +108,11 @@ export function LoginForm({ googleEnabled }: { googleEnabled: boolean }) {
 
       <p className="mt-6 text-center text-[12.5px] text-muted-foreground">
         Don&apos;t have an account?{" "}
-        <Link href="/signup" className="font-medium text-primary hover:underline">
+        {/* Carries the destination across, so switching to sign-up
+            keeps the product identity AND still lands you where you
+            were going. Without it, a Keeply user who clicks here gets
+            a neutral screen and then /launch. */}
+        <Link href={signupHref} className="font-medium text-primary hover:underline">
           Create account
         </Link>
       </p>

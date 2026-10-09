@@ -8,12 +8,15 @@
 import { Loader2 } from "lucide-react"
 import { signIn } from "next-auth/react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useState } from "react"
 import { AuthDivider, GoogleButton } from "./google-button"
 
 export function SignupForm({ googleEnabled }: { googleEnabled: boolean }) {
   const router = useRouter()
+  const params = useSearchParams()
+  const callbackUrl = params.get("callbackUrl")
+  const loginHref = callbackUrl ? `/login?callbackUrl=${encodeURIComponent(callbackUrl)}` : "/login"
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirm, setConfirm] = useState("")
@@ -50,10 +53,10 @@ export function SignupForm({ googleEnabled }: { googleEnabled: boolean }) {
     setSubmitting(false)
     if (result?.error) {
       setError("Account created — please sign in.")
-      router.push("/login")
+      router.push(loginHref)
       return
     }
-    router.push("/launch")
+    router.push(callbackUrl || "/launch")
     router.refresh()
   }
 
@@ -125,7 +128,10 @@ export function SignupForm({ googleEnabled }: { googleEnabled: boolean }) {
 
       <p className="mt-6 text-center text-[12.5px] text-muted-foreground">
         Already have an account?{" "}
-        <Link href="/login" className="font-medium text-primary hover:underline">
+        {/* Same reason as the sign-up link on /login: the destination
+            has to survive the switch, or the person loses both the
+            product identity and the page they were heading for. */}
+        <Link href={loginHref} className="font-medium text-primary hover:underline">
           Sign in
         </Link>
       </p>

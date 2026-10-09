@@ -10,6 +10,7 @@ import {
   MessageSquare,
   Mic,
   StickyNote,
+  Waypoints,
   type LucideIcon,
 } from "lucide-react"
 import type { KnowledgeKind } from "./types"
@@ -20,31 +21,45 @@ export interface NavItem {
   icon: LucideIcon
 }
 
-/** Primary Knowledge navigation — only real, shipped destinations. The
- *  order narrates the product: capture (Home/Library), organise (Topics),
- *  ask (Ask). Search is not here because it is an action, not a route —
- *  the sidebar renders it inline as a button that opens the command
- *  palette. Collections, Audio and Research are intentionally omitted
- *  while they are Coming Soon, so the menu only advertises what works. */
+/* ── Navigation ─────────────────────────────────────────────────────
+ * Not one flat list. The rail gives Search and Ask their own tier
+ * because they are the two doors into the knowledge itself, and
+ * everything below is browsing: a place to go when you do not yet have
+ * a question. A flat list of equals is what made the rail read as an
+ * admin panel, and it also buried the two things the product is for.
+ *
+ * Search is absent from every list here on purpose — it is an action,
+ * not a route. The rail renders it as a field that opens the command
+ * palette (the same engine as ⌘K). */
+
+/** Browsing destinations, in the order they make sense: what just
+ *  happened, everything, the themes across it, the links between them.
+ *  Collections, Audio and Research stay out while they are Coming Soon,
+ *  so the rail only advertises what works. */
 export const KNOWLEDGE_NAV: NavItem[] = [
   { href: "/knowledge/home", label: "Home", icon: Home },
   { href: "/knowledge/library", label: "Library", icon: Library },
   { href: "/knowledge/topics", label: "Topics", icon: Tag },
-  { href: "/knowledge/ai", label: "Ask", icon: Sparkles },
+  { href: "/knowledge", label: "Connections", icon: Waypoints },
 ]
 
-/** Secondary destination — a saved-filter view, not a pillar of its own,
- *  so it sits below the primary nav under a divider. */
+/** The one door that is a route. Rendered above the browse list, at a
+ *  weight none of them get. */
+export const KNOWLEDGE_ASK: NavItem = { href: "/knowledge/ai", label: "Ask", icon: Sparkles }
+
+/** A saved filter, not a pillar — below the rule. */
 export const KNOWLEDGE_SECONDARY_NAV: NavItem[] = [
   { href: "/knowledge/favorites", label: "Favorites", icon: Heart },
 ]
 
-/** Compact set surfaced in the mobile bottom bar (Search lives in the
- *  persistent top-bar field, reachable on every screen). */
+/** The mobile bar. Four destinations and no action: Save and Search
+ *  both live in the mobile header, and a floating accent button for a
+ *  third copy of Save was the loudest thing on every phone screen. */
 export const MOBILE_NAV: NavItem[] = [
   { href: "/knowledge/home", label: "Home", icon: Home },
   { href: "/knowledge/library", label: "Library", icon: Library },
   { href: "/knowledge/ai", label: "Ask", icon: Sparkles },
+  { href: "/knowledge", label: "Connections", icon: Waypoints },
 ]
 
 interface KindMeta {

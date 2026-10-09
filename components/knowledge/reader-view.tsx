@@ -65,7 +65,6 @@ function videoEmbed(rawUrl: string): string | null {
 
 export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
   const [favorite, setFavorite] = useState(doc.favorite)
-  const [tab, setTab] = useState<"notebook" | "info">("info")
   const [progress, setProgress] = useState(0)
   // Local override so a freshly-generated summary shows immediately —
   // same pattern as `favorite` above, since `doc` itself is an
@@ -137,217 +136,163 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
   }, [showProgress])
 
   return (
-    <div className="grid min-h-[calc(100dvh-57px)] lg:grid-cols-[minmax(0,1fr)_360px]">
-      {/* Reading column */}
-      <div className="relative min-w-0">
-        {/* sticky reader header */}
-        <div className="sticky top-0 z-10 border-b border-[var(--kn-edge)] bg-background/85 backdrop-blur">
-          <div className="flex items-center justify-between px-4 py-3 sm:px-8">
+    /* ONE COLUMN.
+     *
+     * The Reader used to be a 1fr + 360px grid: the article on the left
+     * and an Info / Notebook inspector on the right holding the topics,
+     * the source facts and everything Keeply understood. Three
+     * consequences, all bad for a reading surface. The article was
+     * pushed off-centre and never got the page's optical middle. The
+     * understanding was filed in a panel, which is where you put things
+     * a reader is not expected to read. And the panel's second tab
+     * existed only to say a feature had not shipped.
+     *
+     * Everything is now one column in the order a person meets it:
+     *   source → title → byline → summary → the text → what Keeply
+     *   understood → where it came from
+     * AI is a layer around the article, not a sidebar beside it. */
+    <div className="pk-page">
+      {/* A reading surface earns a thinner bar than an app screen: back,
+          the three things you do to a piece, and the progress hairline. */}
+      <div className="sticky top-0 z-10 -mx-[var(--pk-gutter)] border-b border-[var(--pk-rule)] bg-[var(--pk-ground)]/88 px-[var(--pk-gutter)] backdrop-blur">
+        <div className="flex h-14 items-center justify-between gap-3">
+          <Link
+            href="/knowledge/library"
+            className="pk-meta -ml-1 flex items-center gap-1.5 px-1 transition-colors hover:text-[var(--pk-ink)]"
+          >
+            <ArrowLeft className="size-3.5" /> Library
+          </Link>
+          <div className="flex items-center gap-1">
+            {/* Ask about this — routes to the existing Ask surface with
+                the composer pre-filled. Passes only the `q` free-text
+                the flow already accepts; nothing is auto-run or faked. */}
             <Link
-              href="/knowledge/library"
-              className="-ml-1 flex items-center gap-2 rounded-lg px-1.5 py-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              href={askAboutHref(`What are the main ideas in "${doc.title}"?`)}
+              className="pk-meta flex h-8 items-center gap-1.5 rounded-full px-2.5 transition-colors hover:bg-[var(--pk-sunken)] hover:text-[var(--pk-ink)]"
             >
-              <ArrowLeft className="h-4 w-4" /> Back to Library
+              <Sparkles className="size-3.5" />
+              <span className="hidden sm:inline">Ask about this</span>
             </Link>
-            <div className="flex items-center gap-1.5">
-              {/* Ask about this — routes to the existing Ask surface with
-                  the composer pre-filled. Passes only the `q` free-text
-                  the flow already accepts; nothing is auto-run or faked. */}
-              <Link
-                href={askAboutHref(`What are the main ideas in "${doc.title}"?`)}
-                aria-label="Ask about this"
-                className="flex h-9 items-center gap-1.5 rounded-full border border-[var(--kn-edge)] bg-card px-2.5 text-[13px] font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--background)] sm:px-3"
-              >
-                <Sparkles className="size-3.5 text-[var(--kn-ai)]" />
-                <span className="hidden sm:inline">Ask about this</span>
-              </Link>
-              <IconButton
-                label={favorite ? "Remove favorite" : "Add favorite"}
-                active={favorite}
-                onClick={toggleFavorite}
-              >
-                <Heart className={cn("h-4 w-4", favorite && "fill-[var(--kn-ai)] text-[var(--kn-ai)]")} />
-              </IconButton>
-              <a
-                href={doc.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Open original in a new tab"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)]"
-              >
-                <ExternalLink className="h-4 w-4" />
-              </a>
-            </div>
-          </div>
-          {/* reading progress — a hair-thin fill along the header's base */}
-          {showProgress && (
-            <div
-              aria-hidden
-              className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-[var(--kn-ai)] transition-[width] duration-150 ease-out"
-              style={{ width: `${progress * 100}%` }}
-            />
-          )}
-        </div>
-
-        <article
-          className={cn(
-            "mx-auto px-4 py-9 sm:px-8 sm:py-12",
-            surface === "video" || surface === "pdf" ? "max-w-3xl" : "max-w-2xl",
-          )}
-        >
-          {/* ── Unified header block: source · title · meta ─────── */}
-          <SourceLine doc={doc} />
-
-          <h1 className="mt-4 text-balance font-serif text-[2rem] font-medium leading-[1.12] tracking-tight text-foreground sm:text-[2.75rem]">
-            {doc.title}
-          </h1>
-
-          {doc.author ? <p className="mt-3 text-sm text-muted-foreground">By {doc.author}</p> : null}
-
-          <MetaRow doc={doc} />
-
-          {/* ── AI Summary — the existing, backend-provided summary,
-              surfaced honestly. Consumes doc.aiSummary only; no new
-              model calls, no fabrication. Hidden entirely when absent. */}
-          {!processing && !failed && doc.aiSummary?.trim() ? (
-            <AiSummaryCard summary={doc.aiSummary.trim()} />
-          ) : null}
-
-          {/* ─��� Body, routed by real state then kind ────────────── */}
-          {processing ? (
-            <ProcessingBlock />
-          ) : failed ? (
-            <FailedBlock url={doc.url} error={doc.error} />
-          ) : surface === "video" ? (
-            <VideoBlock doc={doc} />
-          ) : surface === "pdf" ? (
-            <PdfBlock doc={doc} />
-          ) : surface === "article" ? (
-            hasBody ? (
-              <>
-                {showTextTools ? <AiSummaryBlock docId={doc.id} summary={aiSummary} onSummary={setAiSummary} /> : null}
-                {showTextTools ? <ReadAloudControls read={read} /> : null}
-                <ArticleBody body={body} cover={doc.cover} title={doc.title} />
-              </>
-            ) : (
-              <ExcerptLede excerpt={doc.excerpt!} cover={doc.cover} title={doc.title} url={doc.url} />
-            )
-          ) : (
-            <UnextractedBlock url={doc.url} />
-          )}
-
-          {/* Mobile-only details — the Info aside is desktop-only, so on
-              small screens surface the same source metadata + topics here
-              rather than leaving them unreachable. */}
-          <div className="mt-12 border-t border-[var(--kn-edge)] pt-8 lg:hidden">
+            <IconButton
+              label={favorite ? "Remove favorite" : "Add favorite"}
+              active={favorite}
+              onClick={toggleFavorite}
+            >
+              <Heart className={cn("h-4 w-4", favorite && "fill-current")} />
+            </IconButton>
             <a
               href={doc.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="mb-6 flex items-center justify-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25"
+              aria-label="Open original in a new tab"
+              className="flex size-8 items-center justify-center rounded-full text-[var(--pk-ink-3)] transition-colors hover:bg-[var(--pk-sunken)] hover:text-[var(--pk-ink)]"
             >
-              <ExternalLink className="size-4" /> Open original
+              <ExternalLink className="h-4 w-4" />
             </a>
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
-              <Meta label="Source" value={doc.source} />
-              {doc.author ? <Meta label="Author" value={doc.author} /> : null}
-              {doc.domain ? <Meta label="Origin" value={doc.domain} /> : null}
-              <Meta label="Type" value={KIND_META[doc.kind].label} />
-              {doc.wordCount ? <Meta label="Words" value={doc.wordCount.toLocaleString()} /> : null}
-              <Meta label="Saved" value={savedAgo(doc.savedAt)} />
-            </dl>
-            {doc.topics.length > 0 ? (
-              <div className="mt-4">
-                <dt className="text-[12px] font-medium text-muted-foreground">Topics</dt>
-                <dd className="mt-2 flex flex-wrap gap-1.5">
-                  {doc.topics.map((t) => (
-                    <span key={t} className="rounded-md bg-secondary/60 px-2 py-1 text-xs text-foreground/80">
-                      {t}
-                    </span>
-                  ))}
-                </dd>
-              </div>
-            ) : null}
           </div>
-        </article>
+        </div>
+        {showProgress && (
+          <div
+            aria-hidden
+            className="absolute inset-x-0 bottom-0 h-px origin-left bg-[var(--pk-ink)] transition-[width] duration-150 ease-out"
+            style={{ width: `${progress * 100}%` }}
+          />
+        )}
       </div>
 
-      {/* Info panel */}
-      <aside className="hidden border-l border-[var(--kn-edge)] bg-[var(--kn-paper)] lg:block">
-        <div className="sticky top-0 flex h-[57px] items-center gap-4 border-b border-[var(--kn-edge)] px-6">
-          <TabButton active={tab === "info"} onClick={() => setTab("info")}>
-            Info
-          </TabButton>
-          <TabButton active={tab === "notebook"} onClick={() => setTab("notebook")}>
-            Notebook
-          </TabButton>
-        </div>
+      <article className="mx-auto max-w-[var(--pk-measure)] pb-28 pt-14 sm:pt-20">
+        {/* ── SOURCE → TITLE → BYLINE ───────────────────────────── */}
+        <SourceLine doc={doc} />
 
-        <div className="p-6">
-          {tab === "info" ? (
-            <div className="space-y-7">
-              <a
-                href={doc.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
-              >
-                <ExternalLink className="size-4" /> Open original
-              </a>
+        <h1 className="pk-title mt-5 text-pretty text-[var(--pk-ink)]">{doc.title}</h1>
 
-              {/* Insights — what Keeply understood about this piece.
-                  Topics come straight from the item; Key ideas and Related
-                  knowledge come from the concepts pipeline (migration 0010)
-                  through /api/knowledge/:id/related. They were dashed "Soon"
-                  slots until that pipeline existed — DiscoveryPanel is the
-                  service plugging in, exactly as the slots were shaped for.
-                  It still renders nothing it cannot support: an unanalyzed
-                  item says so rather than showing an empty result. */}
-              <section aria-label="Insights">
-                <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Insights</h3>
-                <div className="mt-3 space-y-3">
-                  {doc.topics.length > 0 ? (
-                    <div>
-                      <p className="text-[12px] font-medium text-foreground/70">Topics</p>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {doc.topics.map((t) => (
-                          <span key={t} className="rounded-md bg-secondary/60 px-2 py-1 text-xs text-foreground/80">
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                  <DiscoveryPanel itemId={doc.id} />
+        <MetaRow doc={doc} />
+
+        {/* ── SUMMARY — shown ONCE (see AiSummaryBlock below). ──── */}
+        {!processing && !failed && aiSummary?.trim() ? <AiSummaryCard summary={aiSummary.trim()} /> : null}
+
+        {/* ── THE TEXT, routed by real state then kind ──────────── */}
+        {processing ? (
+          <ProcessingBlock />
+        ) : failed ? (
+          <FailedBlock url={doc.url} error={doc.error} />
+        ) : surface === "video" ? (
+          <VideoBlock doc={doc} />
+        ) : surface === "pdf" ? (
+          <PdfBlock doc={doc} />
+        ) : surface === "article" ? (
+          hasBody ? (
+            <>
+              {showTextTools && (
+                <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-[var(--pk-rule)] pb-6">
+                  <AiSummaryBlock docId={doc.id} summary={aiSummary} onSummary={setAiSummary} />
+                  <ReadAloudControls read={read} />
                 </div>
-              </section>
-
-              {/* Details — the source facts we genuinely have today. */}
-              <section aria-label="Details">
-                <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Details</h3>
-                <dl className="mt-3 space-y-4 text-sm">
-                  <Meta label="Source" value={doc.source} />
-                  {doc.author ? <Meta label="Author" value={doc.author} /> : null}
-                  {doc.domain ? <Meta label="Origin" value={doc.domain} /> : null}
-                  <Meta label="Type" value={KIND_META[doc.kind].label} />
-                  {doc.wordCount ? <Meta label="Words" value={doc.wordCount.toLocaleString()} /> : null}
-                  <Meta label="Saved" value={savedAgo(doc.savedAt)} />
-                  {doc.publishedAt ? (
-                    <Meta label="Published" value={new Date(doc.publishedAt).toLocaleDateString()} />
-                  ) : null}
-                </dl>
-              </section>
-            </div>
+              )}
+              <ArticleBody body={body} cover={doc.cover} title={doc.title} />
+            </>
           ) : (
-            <div className="flex flex-col items-center gap-2 py-10 text-center">
-              <p className="text-[12px] font-medium text-muted-foreground">Highlights</p>
-              <p className="max-w-[220px] text-sm leading-relaxed text-muted-foreground">
-                Highlighting isn&apos;t available yet. When it ships, the passages you mark will collect here.
-              </p>
-            </div>
-          )}
-        </div>
-      </aside>
+            <ExcerptLede excerpt={doc.excerpt!} cover={doc.cover} title={doc.title} url={doc.url} />
+          )
+        ) : (
+          <UnextractedBlock url={doc.url} />
+        )}
+
+        {/* ── INSIGHTS — what Keeply understood, in the flow.
+            Topics come straight from the item; Key ideas and Related
+            knowledge come from the concepts pipeline (migration 0010)
+            through /api/knowledge/:id/related. Nothing is rendered that
+            cannot be supported: an unanalyzed item says so rather than
+            showing an empty result. */}
+        {!processing && !failed && (
+          <section aria-label="Insights" className="pk-section mt-10">
+            <h2 className="pk-label mb-6">Insights</h2>
+
+            {doc.topics.length > 0 && (
+              <div className="mb-7">
+                <p className="pk-label mb-2.5">Topics</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-2">
+                  {doc.topics.map((t) => (
+                    <Link
+                      key={t}
+                      href={`/knowledge/library?q=${encodeURIComponent(t)}`}
+                      className="text-[14px] text-[var(--pk-ink-2)] underline decoration-[var(--pk-rule-2)] underline-offset-4 transition-colors hover:text-[var(--pk-ink)]"
+                    >
+                      {t}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <DiscoveryPanel itemId={doc.id} />
+          </section>
+        )}
+
+        {/* ── SOURCE, at the end: where this came from, and the way
+            back to it. The reader wants this after the piece, not
+            beside it. */}
+        <section aria-label="Source" className="pk-section">
+          <h2 className="pk-label mb-6">Source</h2>
+          <dl className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
+            <Meta label="Source" value={doc.source} />
+            {doc.author ? <Meta label="Author" value={doc.author} /> : null}
+            {doc.domain ? <Meta label="Origin" value={doc.domain} /> : null}
+            <Meta label="Type" value={KIND_META[doc.kind].label} />
+            {doc.wordCount ? <Meta label="Words" value={doc.wordCount.toLocaleString()} /> : null}
+            <Meta label="Saved" value={savedAgo(doc.savedAt)} />
+            {doc.publishedAt ? <Meta label="Published" value={new Date(doc.publishedAt).toLocaleDateString()} /> : null}
+          </dl>
+          <a
+            href={doc.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-7 inline-flex items-center gap-1.5 text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
+          >
+            <ExternalLink className="size-3.5" /> Open the original
+          </a>
+        </section>
+      </article>
     </div>
   )
 }
@@ -358,7 +303,7 @@ function SourceLine({ doc }: { doc: KnowledgeDocument }) {
   const [iconFailed, setIconFailed] = useState(false)
   const Kind = KIND_META[doc.kind].icon
   return (
-    <div className="flex items-center gap-2 text-[13px] font-medium text-primary">
+    <div className="pk-label flex items-center gap-2 text-[var(--pk-ink-3)]">
       {doc.favicon && !iconFailed ? (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img
@@ -371,9 +316,11 @@ function SourceLine({ doc }: { doc: KnowledgeDocument }) {
           className="size-4 shrink-0 rounded-[3px] object-contain"
         />
       ) : (
-        <Kind className="size-4 shrink-0" />
+        <Kind className="size-3.5 shrink-0" />
       )}
-      <span className="truncate">{doc.domain ?? doc.source}</span>
+      <span className="truncate">{doc.source || doc.domain}</span>
+      <span aria-hidden className="text-[var(--pk-rule-2)]">/</span>
+      <span className="shrink-0">{KIND_META[doc.kind].label}</span>
     </div>
   )
 }
@@ -381,35 +328,45 @@ function SourceLine({ doc }: { doc: KnowledgeDocument }) {
 /** Quiet, on-brand presentation of the item's existing AI summary.
  *  Single accent (Apple blue), no gradient — it reads as a calm digest
  *  above the full piece, never competing with the headline. */
+/** The item's existing AI summary.
+ *
+ *  It used to be a tinted, bordered panel in the accent colour, sitting
+ *  directly under the headline — the loudest element on a reading page,
+ *  for text the reader did not write and may not want. It is now marked
+ *  the way Keeply marks everything the system produced: a label and a
+ *  rule in the accent, and the words themselves in ordinary ink. The
+ *  claim "Keeply wrote this" is fully carried; the shout is not. */
 function AiSummaryCard({ summary }: { summary: string }) {
   return (
-    <aside
-      aria-label="AI summary"
-      className="mt-8 rounded-2xl border border-[var(--kn-ai)]/25 bg-[var(--kn-ai)]/[0.06] p-5 sm:p-6"
-    >
-      <div className="flex items-center gap-2 text-[13px] font-medium text-[var(--kn-ai)]">
-        <Sparkles className="size-3.5" />
+    <aside aria-label="AI summary" className="mt-9 border-l-2 border-[var(--pk-accent)] pl-5">
+      <p className="pk-label flex items-center gap-1.5 text-[var(--pk-accent)]">
+        <Sparkles className="size-3" />
         Summary
-      </div>
-      <p className="mt-2.5 text-pretty text-[0.95rem] leading-relaxed text-foreground/85">{summary}</p>
+      </p>
+      <p className="mt-2.5 text-pretty text-[15px] leading-[1.68] text-[var(--pk-ink-2)]">{summary}</p>
     </aside>
   )
 }
 
 function MetaRow({ doc }: { doc: KnowledgeDocument }) {
   const duration = durationLabel(doc.kind, doc.durationMin)
+  /* A byline, not a stats bar. The kind already appears in the source
+     line above, so repeating it here between two rules was chrome
+     restating chrome. */
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-x-2.5 gap-y-1 border-y border-[var(--kn-edge)] py-3 text-[13px] text-muted-foreground">
-      <span className="font-medium text-foreground/70">{KIND_META[doc.kind].label}</span>
-      {duration ? (
+    <div className="pk-meta mt-4 flex flex-wrap items-center gap-x-2 gap-y-1">
+      {doc.author && (
         <>
-          <span aria-hidden className="text-muted-foreground/40">·</span>
-          <span className="flex items-center gap-1.5">
-            <Clock className="size-3.5" /> {duration}
-          </span>
+          <span className="text-[var(--pk-ink-2)]">{doc.author}</span>
+          <span aria-hidden>·</span>
         </>
-      ) : null}
-      <span aria-hidden className="text-muted-foreground/40">·</span>
+      )}
+      {duration && (
+        <>
+          <span>{duration}</span>
+          <span aria-hidden>·</span>
+        </>
+      )}
       <span>{savedAgo(doc.savedAt)}</span>
     </div>
   )
@@ -445,40 +402,36 @@ function AiSummaryBlock({
     }
   }
 
-  if (summary) {
-    return (
-      <div className="mt-6 rounded-2xl border border-[var(--kn-edge)] bg-[var(--kn-paper)] px-5 py-4">
-        <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--kn-ai)]">
-          <Sparkles className="size-3.5" aria-hidden /> AI Summary
-        </p>
-        <p className="mt-2 text-[0.95rem] leading-relaxed text-foreground/85">{summary}</p>
-      </div>
-    )
-  }
+  // Nothing to offer when one already exists — AiSummaryCard above is
+  // the one place a summary is DISPLAYED. Both used to render it, which
+  // stayed invisible while summaries were rare: the card only appeared
+  // when doc.aiSummary existed, and back then it usually did not. The
+  // pipeline now writes one for every saved item, so every reader
+  // showed the same two or three sentences twice, one above the other.
+  if (summary) return null
 
   return (
-    <div className="mt-6 flex items-center gap-2">
+    <>
       <button
         type="button"
         onClick={summarize}
         disabled={state === "loading"}
-        aria-label="Summarize this article with AI"
         title="Summarize this article with AI"
-        className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex items-center gap-1.5 text-[13.5px] text-[var(--pk-ink-2)] transition-colors hover:text-[var(--pk-ink)] disabled:cursor-not-allowed disabled:opacity-60"
       >
         {state === "loading" ? (
-          <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          <Loader2 className="size-3.5 animate-spin text-[var(--pk-accent)]" aria-hidden />
         ) : (
-          <Sparkles className="size-3.5 text-[var(--kn-ai)]" aria-hidden />
+          <Sparkles className="size-3.5 text-[var(--pk-accent)]" aria-hidden />
         )}
-        {state === "loading" ? "Summarizing…" : "AI Summary"}
+        {state === "loading" ? "Summarizing…" : "Summarize"}
       </button>
       {state === "error" ? (
-        <span role="status" className="text-[12.5px] text-destructive">
+        <span role="status" className="pk-meta text-[var(--pk-danger)]">
           Couldn&apos;t generate a summary. Try again.
         </span>
       ) : null}
-    </div>
+    </>
   )
 }
 
@@ -490,10 +443,10 @@ function AiSummaryBlock({
 function ReadAloudControls({ read }: { read: UseReadAloudResult }) {
   if (read.state === "unsupported") {
     return (
-      <div className="mt-6 flex items-center gap-2 text-[12.5px] text-muted-foreground">
-        <Headphones className="size-3.5 text-muted-foreground/50" aria-hidden />
-        <span>{read.message}</span>
-      </div>
+      <span className="pk-meta inline-flex items-center gap-1.5">
+        <Headphones className="size-3.5" aria-hidden />
+        {read.message}
+      </span>
     )
   }
 
@@ -507,14 +460,14 @@ function ReadAloudControls({ read }: { read: UseReadAloudResult }) {
   const isActive = isPlaying || isPaused
 
   return (
-    <div className="mt-6 flex flex-wrap items-center gap-1.5 border-b border-[var(--kn-edge)] pb-6">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <button
         type="button"
         onClick={() => (isPlaying ? read.pause() : isPaused ? read.resume() : read.play())}
         aria-label={isPlaying ? "Pause reading" : isPaused ? "Resume reading" : "Listen to this article"}
         aria-pressed={isPlaying}
         title={isPlaying ? "Pause reading" : isPaused ? "Resume reading" : "Listen to this article"}
-        className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--kn-edge)] bg-card px-4 text-sm font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        className="inline-flex items-center gap-1.5 text-[13.5px] text-[var(--pk-ink-2)] transition-colors hover:text-[var(--pk-ink)]"
       >
         {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
         {isPlaying ? "Pause" : isPaused ? "Resume" : "Listen"}
@@ -535,7 +488,7 @@ function ReadAloudControls({ read }: { read: UseReadAloudResult }) {
       ) : null}
 
       {read.state === "error" ? (
-        <span role="status" className="ml-1 text-[12.5px] text-destructive">
+        <span role="status" className="pk-meta text-[var(--pk-danger)]">
           {read.message}
         </span>
       ) : null}
@@ -556,21 +509,24 @@ function ArticleBody({ body, cover, title }: { body: string[]; cover?: string; t
           alt={`Lead image for ${title}`}
           referrerPolicy="no-referrer"
           onError={() => setCoverFailed(true)}
-          className="mt-8 aspect-[16/9] w-full rounded-2xl object-cover"
+          className="mt-10 aspect-[16/9] w-full rounded-[var(--pk-r)] object-cover"
         />
       ) : null}
 
-      <div className="mt-8 space-y-6 text-[1.15rem] leading-[1.75] text-foreground/85 [word-break:break-word] selection:bg-[var(--kn-ai)]/25">
+      {/* THE ONE PLACE THE SERIF IS SPENT.
+          Everything Keeply writes is sans; the text you saved is set in
+          Fraunces. That is not decoration — it is the page saying
+          "these are someone else's words", which no border or label
+          says as quietly, and it is why headings are sans: a serif
+          headline would spend the distinction on nothing.
+
+          The drop cap is gone with it. A 60px accent-coloured initial
+          is a magazine flourish; here it made the accent the first
+          thing the eye hit on every article, on a page whose whole
+          argument is that the article comes first. */}
+      <div className="pk-read mt-10 space-y-6 text-[1.1rem] leading-[1.75] text-[var(--pk-ink)] [word-break:break-word] selection:bg-[var(--pk-accent-wash)]">
         {body.map((p, i) => (
-          <p
-            key={i}
-            className={cn(
-              i === 0 &&
-                "first-letter:float-left first-letter:mr-3 first-letter:mt-1 first-letter:text-6xl first-letter:font-semibold first-letter:leading-[0.8] first-letter:text-[var(--kn-ai)]",
-            )}
-          >
-            {p}
-          </p>
+          <p key={i}>{p}</p>
         ))}
       </div>
     </>
@@ -601,7 +557,7 @@ function ExcerptLede({
           alt={`Lead image for ${title}`}
           referrerPolicy="no-referrer"
           onError={() => setCoverFailed(true)}
-          className="mt-8 aspect-[16/9] w-full rounded-2xl object-cover"
+          className="mt-10 aspect-[16/9] w-full rounded-[var(--pk-r)] object-cover"
         />
       ) : null}
 
@@ -757,35 +713,11 @@ function OpenOriginalPill({ url }: { url: string }) {
 
 /* ── Small shared UI ────────────────────────────────────────────── */
 
-function TabButton({
-  children,
-  active,
-  onClick,
-}: {
-  children: React.ReactNode
-  active: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "relative rounded-sm py-4 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)]",
-        active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {children}
-      {active ? <span className="absolute inset-x-0 -bottom-px h-0.5 bg-foreground" /> : null}
-    </button>
-  )
-}
-
 function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-[12px] font-medium text-muted-foreground">{label}</dt>
-      <dd className="mt-1 text-foreground/85">{value}</dd>
+      <dt className="pk-label">{label}</dt>
+      <dd className="mt-1.5 text-[14px] text-[var(--pk-ink)]">{value}</dd>
     </div>
   )
 }

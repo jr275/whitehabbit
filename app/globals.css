@@ -53,6 +53,8 @@
 }
 
 :root {
+  /* The real serif, captured before any scope repoints --font-fraunces. */
+  --pk-serif: var(--font-fraunces);
   color-scheme: dark;
   /* near-black with a faint cold-blue cast — the void the worker lives in */
   --background: oklch(0.16 0.012 264);
@@ -172,6 +174,29 @@
   color-scheme: dark;
 }
 
+/* ══════════════════════════════════════════════════════════════════ *
+ * THE NEUTRAL ENTRY.
+ *
+ * `/login` and `/signup` are shared by two products with deliberately
+ * unrelated identities. When the URL says which one the person is
+ * heading into, the screen wears that identity. When it says nothing —
+ * someone typing /login, or arriving from an email — the screen must
+ * not pick one, because the page would then be making a claim about
+ * where they are going that nobody made.
+ *
+ * Neutral is the platform's own ground with every product signal
+ * removed: no technical grid, no accent glow, no product cards, and no
+ * coloured accent at all. The one action is achromatic. That is what
+ * distinguishes it from Workforce, which is this ground PLUS all of
+ * those things.
+ * ══════════════════════════════════════════════════════════════════ */
+.auth-neutral {
+  color-scheme: dark;
+  --primary: oklch(0.97 0.003 260);
+  --primary-foreground: oklch(0.17 0.012 264);
+  --ring: oklch(0.72 0.02 262);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -260,120 +285,244 @@
   }
 }
 
-/* ── Keeply · Clean (default) ──────────────────────────────────
- * The same editorial identity as the Understand surface (.kp-understand):
- * warm paper, near-black ink, one vermilion accent, serif headlines.
- * Every semantic token is re-declared so the whole Keeply app reads as
- * one product; Workforce (outside this class) is untouched. */
-.knowledge-surface {
+/* ══════════════════════════════════════════════════════════════════ *
+ * KEEPLY — Personal Knowledge × AI Research
+ *
+ * ONE token set. It used to be two: `.knowledge-surface` carried a
+ * `--kn-*` palette and `.kp-understand` carried a parallel `--kp-*`
+ * one, with the same values typed twice. Two sources of truth drift,
+ * and the drift is exactly what people feel when a click "goes back to
+ * the old design". Both scopes now read the same `--pk-*` variables,
+ * and the legacy names below are thin aliases so nothing had to be
+ * rewritten in one pass.
+ *
+ * THIS SCOPE IS KNOWLEDGE'S ALONE. Workforce keeps its own identity —
+ * the near-black operational surface declared at :root above — and
+ * nothing here reaches it. The two products share an account, a
+ * session and a database; they deliberately share no visual language.
+ *
+ * THE FOUR PRINCIPLES, and what each one costs elsewhere:
+ *
+ * 1. TYPE CARRIES THE PAGE. Three roles, each with a real job, so the
+ *    pairing is information and not decoration:
+ *      sans  — every heading and every control
+ *      serif — ONLY the text you saved (the Reader's article body).
+ *              It is how the page says "these are someone else's
+ *              words", which no border can say as quietly.
+ *      mono  — labels, counts, dates, domains. The instrument layer.
+ *    This is why headings are not serif: a serif headline over a serif
+ *    body would spend the distinction on nothing.
+ *
+ * 2. THE ACCENT IS SPENT ONCE PER SCREEN. Blue marks the one primary
+ *    action and focus. It is not the colour of links, of active nav,
+ *    of every icon and every count — that is how a palette becomes
+ *    "the blue product" and how a UI starts shouting. Hierarchy is
+ *    built from ink weight and space instead, which never competes.
+ *
+ * 3. SURFACES ARE RULES, NOT BOXES. A card is a claim that its
+ *    contents are a separate object. Most lists are not; they are one
+ *    object with many rows, and a hairline says so at a fraction of
+ *    the visual cost. Radii are small for the same reason — a pill is
+ *    a loud shape, and a screen of pills reads as a control panel.
+ *
+ * 4. AI SITS UNDER THE PRODUCT. Three signal colours, each a distinct
+ *    claim the reader may need to check:
+ *      accent    — the system did this (summary, classification)
+ *      signal    — retrieval: how something was found
+ *      evidence  — a cited passage, a source, a reference
+ *    Nothing else is coloured. An interface where AI is everywhere is
+ *    an AI dashboard; one where AI is legible where it matters is a
+ *    product with AI underneath it.
+ * ══════════════════════════════════════════════════════════════════ */
+
+.knowledge-surface,
+.kp-understand {
   color-scheme: light;
 
-  --background: oklch(0.985 0.003 95);
-  --foreground: oklch(0.19 0.012 260);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.19 0.012 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.19 0.012 260);
+  /* ── GROUND ─────────────────────────────────────────────────────
+   * Off-white carrying a trace of the ink's blue, never pure #fff:
+   * paper that has a temperature reads as chosen. White is reserved
+   * for the few surfaces that must lift off it. */
+  --pk-ground: oklch(0.987 0.0025 265);
+  --pk-raised: oklch(1 0 0);
+  --pk-sunken: oklch(0.967 0.0045 265);
 
-  --primary: oklch(0.52 0.17 28);
-  --primary-foreground: oklch(0.985 0.003 95);
+  /* ── INK ────────────────────────────────────────────────────────
+   * Four steps, not two. Most hierarchy on these screens is carried
+   * by which of these a line is set in — that is the work the accent
+   * is no longer doing. */
+  --pk-ink: oklch(0.185 0.022 268);
+  --pk-ink-2: oklch(0.395 0.02 268);
+  --pk-ink-3: oklch(0.545 0.017 267);
+  --pk-ink-4: oklch(0.685 0.013 266);
 
-  --secondary: oklch(0.955 0.004 95);
-  --secondary-foreground: oklch(0.19 0.012 260);
-  --muted: oklch(0.955 0.004 95);
-  --muted-foreground: oklch(0.44 0.014 260);
-  --accent: oklch(0.94 0.005 95);
-  --accent-foreground: oklch(0.19 0.012 260);
+  /* ── STRUCTURE ──────────────────────────────────────────────── */
+  --pk-rule: oklch(0.185 0.022 268 / 8.5%);
+  --pk-rule-2: oklch(0.185 0.022 268 / 15%);
 
-  --destructive: oklch(0.55 0.2 25);
-  --border: oklch(0.19 0.012 260 / 12%);
-  --input: oklch(0.19 0.012 260 / 16%);
-  --ring: oklch(0.52 0.17 28);
+  /* ── THE THREE SIGNALS ──────────────────────────────────────── */
+  --pk-accent: oklch(0.505 0.178 263);
+  --pk-accent-ink: oklch(0.99 0.002 265);
+  --pk-accent-wash: oklch(0.505 0.178 263 / 8%);
+  --pk-signal: oklch(0.585 0.095 216);
+  --pk-signal-wash: oklch(0.585 0.095 216 / 11%);
+  --pk-evidence: oklch(0.575 0.115 63);
+  --pk-evidence-wash: oklch(0.575 0.115 63 / 13%);
 
-  --grow: oklch(0.52 0.12 152);
-  --warn: oklch(0.62 0.14 70);
+  --pk-danger: oklch(0.55 0.2 27);
+  --pk-good: oklch(0.52 0.13 158);
 
-  --sidebar: oklch(0.97 0.004 95);
-  --sidebar-foreground: oklch(0.19 0.012 260);
-  --sidebar-primary: oklch(0.52 0.17 28);
-  --sidebar-primary-foreground: oklch(0.985 0.003 95);
-  --sidebar-accent: oklch(0.94 0.005 95);
-  --sidebar-accent-foreground: oklch(0.19 0.012 260);
-  --sidebar-border: oklch(0.19 0.012 260 / 10%);
-  --sidebar-ring: oklch(0.52 0.17 28);
+  --pk-thumb: oklch(0.185 0.022 268 / 20%);
 
-  --kn-paper: oklch(1 0 0);
-  --kn-well: oklch(0.94 0.004 95);
-  --kn-edge: oklch(0.19 0.012 260 / 12%);
-  --kn-ai: oklch(0.52 0.17 28);
+  /* ── SCALE ──────────────────────────────────────────────────── */
+  --pk-measure: 66ch;          /* reading column */
+  --pk-page: 1120px;           /* index pages */
+  --pk-gutter: clamp(1.25rem, 5vw, 4.5rem);
+  --pk-rail: 236px;            /* the single navigation rail */
+
+  /* ── RADIUS — small on purpose (principle 3) ────────────────── */
+  --pk-r-sm: 4px;
+  --pk-r: 8px;
+  --pk-r-lg: 14px;
+
+  --pk-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --pk-fast: 180ms;
+  --pk-slow: 620ms;
+
+  font-feature-settings: "kern" 1, "liga" 1;
+  -webkit-font-smoothing: antialiased;
 }
 
-.knowledge-surface .thin-scroll::-webkit-scrollbar-thumb {
-  background: oklch(0.19 0.012 260 / 18%);
-}
-
-/* ── Keeply · Black (opt-in) ────────────────────────────────────
- * The original pure-black canvas with a single Apple-blue accent and
- * tight bold sans headlines, selected with data-kn-theme="black". */
-.knowledge-surface[data-kn-theme="black"] {
+/* ══════════════════════════════════════════════════════════════════ *
+ * THE DARK SURFACE.
+ *
+ * main shipped a Clean/Black theme split while this branch was being
+ * written. The split's PALETTE is not kept — its warm paper, vermilion
+ * accent and serif headlines are the identity this redesign replaced,
+ * and the reasons are in the banner above. Its CAPABILITY is: a reader
+ * who prefers a dark surface is a real preference, persisted in a
+ * cookie and resolved on the server so the first paint is already
+ * theirs.
+ *
+ * So dark is not a second identity. It is the SAME one inverted, and
+ * only the ground/ink tokens move: the three signals keep their jobs
+ * and their hues, lifted just enough to hold contrast on a dark
+ * ground. The scale, the radii, the type roles and every component are
+ * untouched, which is the whole point of having one token set.
+ * ══════════════════════════════════════════════════════════════════ */
+/* The base block above declares --pk-* on BOTH .knowledge-surface and
+ * .kp-understand, so the dark override has to reach just as far: a
+ * .kp-understand nested inside the shell would otherwise re-declare the
+ * light ground on itself and win over the inherited dark one. */
+[data-kn-theme="black"],
+[data-kn-theme="black"] .kp-understand {
   color-scheme: dark;
 
-  /* headlines are tight bold SANS here. The `font-serif` utility is
-   * generated by `@theme inline`, so it inlines the *value*
-   * `var(--font-fraunces), …` rather than referencing `--font-serif`.
-   * Overriding `--font-fraunces` to the Geist sans var is therefore
-   * what actually flips every `font-serif` headline in the scope to
-   * sans — cohesively, with no per-component edits. */
-  --font-fraunces: var(--font-geist-sans);
+  /* Ground and ink swap roles. Not pure black: the same trace of
+   * indigo the light surface carries in its ink, which is what makes
+   * the two read as one product rather than as a filter applied to
+   * one of them. */
+  --pk-ground: oklch(0.165 0.014 268);
+  --pk-raised: oklch(0.205 0.015 268);
+  --pk-sunken: oklch(0.235 0.015 268);
 
-  /* neutrals — pure black canvas up to faintly-raised near-black cards */
-  --background: oklch(0.02 0 0);
-  --foreground: oklch(0.97 0 0);
-  --card: oklch(0.16 0 0);
-  --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.18 0 0);
-  --popover-foreground: oklch(0.97 0 0);
+  --pk-ink: oklch(0.965 0.004 265);
+  --pk-ink-2: oklch(0.79 0.012 266);
+  --pk-ink-3: oklch(0.655 0.014 267);
+  --pk-ink-4: oklch(0.525 0.014 268);
 
-  /* the single accent — Apple blue (~#2997ff) */
-  --primary: oklch(0.68 0.16 250);
-  --primary-foreground: oklch(0.99 0 0);
+  --pk-rule: oklch(0.965 0.004 265 / 11%);
+  --pk-rule-2: oklch(0.965 0.004 265 / 19%);
 
-  --secondary: oklch(0.24 0 0);
-  --secondary-foreground: oklch(0.94 0 0);
-  --muted: oklch(0.2 0 0);
-  --muted-foreground: oklch(0.66 0 0);
-  --accent: oklch(0.26 0 0);
-  --accent-foreground: oklch(0.94 0 0);
+  /* Same hues, lifted for a dark ground. A signal that changed colour
+   * between themes would stop being a signal. */
+  --pk-accent: oklch(0.68 0.165 263);
+  --pk-accent-ink: oklch(0.15 0.02 268);
+  --pk-accent-wash: oklch(0.68 0.165 263 / 14%);
+  --pk-signal: oklch(0.71 0.095 216);
+  --pk-signal-wash: oklch(0.71 0.095 216 / 15%);
+  --pk-evidence: oklch(0.76 0.115 68);
+  --pk-evidence-wash: oklch(0.76 0.115 68 / 16%);
 
-  --destructive: oklch(0.64 0.2 25);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.68 0.16 250);
+  --pk-danger: oklch(0.7 0.18 25);
+  --pk-good: oklch(0.72 0.14 160);
 
-  /* success/"saved" — Apple green (~#30d158) */
-  --grow: oklch(0.76 0.18 152);
-  --warn: oklch(0.8 0.16 80);
-
-  /* sidebar — a hair off pure black so the nav frames the canvas */
-  --sidebar: oklch(0.06 0 0);
-  --sidebar-foreground: oklch(0.97 0 0);
-  --sidebar-primary: oklch(0.68 0.16 250);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.2 0 0);
-  --sidebar-accent-foreground: oklch(0.94 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.68 0.16 250);
-
-  /* helpers used throughout the Keeply components */
-  --kn-paper: oklch(0.16 0 0); /* card surface, faintly above black */
-  --kn-well: oklch(0.22 0 0); /* inset wells / skeletons */
-  --kn-edge: oklch(1 0 0 / 12%);
-  --kn-ai: oklch(0.68 0.16 250); /* the accent — same blue, cohesive */
+  --pk-thumb: oklch(0.965 0.004 265 / 20%);
 }
 
-/* thin light scrollbars inside the black reading surface */
-.knowledge-surface[data-kn-theme="black"] .thin-scroll::-webkit-scrollbar-thumb {
-  background: oklch(1 0 0 / 18%);
+/* ── The Keeply app surface ─────────────────────────────────────────
+ * shadcn's semantic tokens are re-pointed at the palette above so
+ * every component already written against `bg-card`, `text-muted-
+ * foreground` or `border-border` lands in the new system with no edit.
+ * That is what makes a change this size safe — and it is scoped to
+ * this class, so Workforce's own mapping at :root is untouched. */
+.knowledge-surface {
+  /* Headings are sans. The `font-serif` utility inlines the *value* of
+   * --font-fraunces rather than referencing --font-serif, so pointing
+   * --font-fraunces at the sans stack is what flips every existing
+   * headline in the scope — cohesively, with no per-component edit.
+   * The real serif survives as --pk-serif (declared at :root, computed
+   * there, and therefore unaffected by this override) and is spent
+   * only on saved article text. */
+  --font-fraunces: var(--font-geist-sans);
+
+  --background: var(--pk-ground);
+  --foreground: var(--pk-ink);
+  --card: var(--pk-raised);
+  --card-foreground: var(--pk-ink);
+  --popover: var(--pk-raised);
+  --popover-foreground: var(--pk-ink);
+
+  --primary: var(--pk-accent);
+  --primary-foreground: var(--pk-accent-ink);
+
+  --secondary: var(--pk-sunken);
+  --secondary-foreground: var(--pk-ink);
+  --muted: var(--pk-sunken);
+  --muted-foreground: var(--pk-ink-3);
+  --accent: var(--pk-sunken);
+  --accent-foreground: var(--pk-ink);
+
+  --destructive: var(--pk-danger);
+  --border: var(--pk-rule);
+  --input: var(--pk-rule-2);
+  --ring: var(--pk-accent);
+
+  --grow: var(--pk-good);
+  --warn: var(--pk-evidence);
+
+  /* The rail sits on the same ground as the page — a separately
+   * filled sidebar is a second surface, and two surfaces is how a
+   * product starts looking like an admin panel. */
+  --sidebar: var(--pk-ground);
+  --sidebar-foreground: var(--pk-ink);
+  --sidebar-primary: var(--pk-accent);
+  --sidebar-primary-foreground: var(--pk-accent-ink);
+  --sidebar-accent: var(--pk-sunken);
+  --sidebar-accent-foreground: var(--pk-ink);
+  --sidebar-border: var(--pk-rule);
+  --sidebar-ring: var(--pk-accent);
+
+  --radius: 0.5rem;
+
+  /* legacy --kn-* aliases */
+  --kn-paper: var(--pk-raised);
+  --kn-well: var(--pk-sunken);
+  --kn-edge: var(--pk-rule);
+  --kn-ai: var(--pk-accent);
+  --kn-retrieval: var(--pk-signal);
+  --kn-evidence: var(--pk-evidence);
+  --kn-evidence-soft: var(--pk-evidence-wash);
+
+  background: var(--pk-ground);
+  color: var(--pk-ink);
+}
+/* The scrollbar thumb is the one mark the browser draws itself, against
+ * whichever ground is current, so it is the one that has to be a token
+ * rather than inherit a colour. */
+.knowledge-surface .thin-scroll::-webkit-scrollbar-thumb,
+.kp-understand .thin-scroll::-webkit-scrollbar-thumb {
+  background: var(--pk-thumb);
 }
 
 /* hide scrollbars on horizontal carousels while keeping them scrollable */
@@ -484,54 +633,207 @@
   animation: wh-output-in 0.28s ease-out;
 }
 
-/* ================================================================== *
- * UNDERSTAND — the light editorial Knowledge surface.
+/* ══════════════════════════════════════════════════════════════════ *
+ * UNDERSTAND — the /knowledge surface.
  *
- * Scoped entirely to `.kp-understand`. The rest of Keeply is a
- * deliberately dark reading surface (see --kn-paper above); this one
- * route is light because it is a different act — reading ABOUT your
- * library rather than reading IN it. Scoping rather than switching the
- * global theme is what keeps both true at once.
- *
- * Neutrals are warm-biased (a trace of the ink hue), not pure grey —
- * a flat #888 is the tell of an unconsidered palette.
- * ================================================================== */
+ * It reads ABOUT the library rather than IN it, so it keeps its wider
+ * editorial rhythm. It no longer keeps its own PALETTE: the `--kp-*`
+ * names below are aliases onto the one token set above, which is why
+ * moving between this page and the rest of Keeply no longer reads as
+ * moving between two products.
+ * ══════════════════════════════════════════════════════════════════ */
 .kp-understand {
-  /* ground + ink */
-  --kp-paper: oklch(0.985 0.003 95);      /* warm near-white */
-  --kp-paper-raised: oklch(1 0 0);
-  --kp-ink: oklch(0.19 0.012 260);        /* near-black, faintly blue */
-  --kp-ink-soft: oklch(0.44 0.014 260);
-  --kp-ink-faint: oklch(0.62 0.012 260);
+  --kp-paper: var(--pk-ground);
+  --kp-paper-raised: var(--pk-raised);
+  --kp-ink: var(--pk-ink);
+  --kp-ink-soft: var(--pk-ink-2);
+  --kp-ink-faint: var(--pk-ink-3);
 
-  /* structure */
-  --kp-rule: oklch(0.19 0.012 260 / 12%);
-  --kp-rule-strong: oklch(0.19 0.012 260 / 26%);
-  --kp-wash: oklch(0.19 0.012 260 / 4%);
+  --kp-rule: var(--pk-rule);
+  --kp-rule-strong: var(--pk-rule-2);
+  --kp-wash: var(--pk-accent-wash);
 
-  /* the single accent — spent in one place at a time */
-  --kp-accent: oklch(0.52 0.17 28);       /* deep vermilion */
-  --kp-accent-soft: oklch(0.52 0.17 28 / 12%);
-  --kp-signal: oklch(0.48 0.09 200);      /* secondary, for graph edges */
+  --kp-accent: var(--pk-accent);
+  --kp-accent-soft: var(--pk-accent-wash);
+  --kp-signal: var(--pk-signal);
+  --kp-evidence: var(--pk-evidence);
+  --kp-evidence-soft: var(--pk-evidence-wash);
 
-  /* scale */
-  --kp-measure: 68ch;
+  --kp-measure: var(--pk-measure);
   --kp-page: 1280px;
-  --kp-gutter: clamp(1.25rem, 4vw, 4rem);
+  --kp-gutter: var(--pk-gutter);
 
-  /* motion */
-  --kp-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --kp-ease: var(--pk-ease);
   --kp-fast: 240ms;
-  --kp-slow: 620ms;
+  --kp-slow: var(--pk-slow);
 
-  background: var(--kp-paper);
-  color: var(--kp-ink);
-  color-scheme: light;
-  font-feature-settings: "kern" 1, "liga" 1;
-  -webkit-font-smoothing: antialiased;
+  background: var(--pk-ground);
+  color: var(--pk-ink);
 }
 
-/* Numerals that line up in columns and do not jitter while counting. */
+/* ══════════════════════════════════════════════════════════════════ *
+ * KEEPLY PRIMITIVES
+ *
+ * The handful of shapes every Keeply screen is built from. They exist
+ * as CSS rather than as components because the surfaces that need them
+ * are spread across two scopes and several route trees; a class is the
+ * only thing both can share without a refactor.
+ *
+ * They live in @layer components so Tailwind utilities (which sit in
+ * @layer utilities) still override them — an unlayered class would
+ * silently beat every `text-*` and `flex` written beside it.
+ * ══════════════════════════════════════════════════════════════════ */
+@layer components {
+  /* ── The instrument layer ─────────────────────────────────────────
+   * Mono, small, wide-tracked, uppercase. Every label, count, date and
+   * domain in Keeply is set in it. It is doing the job a badge or a
+   * coloured chip would otherwise do, at none of the visual cost — the
+   * single largest reason these screens stopped looking like a
+   * dashboard. */
+  .pk-label {
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-size: 10.5px;
+    line-height: 1;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--pk-ink-4);
+    font-variant-numeric: tabular-nums;
+  }
+  .pk-meta {
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-size: 11.5px;
+    line-height: 1.45;
+    letter-spacing: 0.01em;
+    color: var(--pk-ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .pk-num {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* Saved source text — the one place the serif is spent. --pk-serif is
+   * declared at :root so the sans override inside .knowledge-surface
+   * cannot reach it (custom properties substitute at the element that
+   * declares them). */
+  .pk-read {
+    font-family: var(--pk-serif), ui-serif, Georgia, serif;
+    font-optical-sizing: auto;
+  }
+
+  /* ── Display scale ────────────────────────────────────────────────
+   * Fluid, tight, and balanced. The negative tracking is what separates
+   * a confident display size from a merely large one. */
+  .pk-display {
+    font-size: clamp(2.1rem, 1.1rem + 3.1vw, 3.5rem);
+    line-height: 1.02;
+    letter-spacing: -0.033em;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+  .pk-title {
+    font-size: clamp(1.5rem, 1.1rem + 1.3vw, 2rem);
+    line-height: 1.1;
+    letter-spacing: -0.024em;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+  .pk-section-title {
+    font-size: 1.0625rem;
+    line-height: 1.25;
+    letter-spacing: -0.012em;
+    font-weight: 600;
+  }
+
+  /* ── Page frame ─────────────────────────────────────────────────── */
+  .pk-page {
+    width: 100%;
+    max-width: calc(var(--pk-page) + var(--pk-gutter) * 2);
+    margin-inline: auto;
+    padding-inline: var(--pk-gutter);
+  }
+
+  /* A section is announced by a label and a rule, not by a box. */
+  .pk-section {
+    padding-top: clamp(2.25rem, 4vw, 3.5rem);
+    padding-bottom: clamp(1.5rem, 2.5vw, 2.25rem);
+    border-top: 1px solid var(--pk-rule);
+  }
+  .pk-section:first-of-type {
+    border-top: 0;
+  }
+
+  /* ── Row — the replacement for the card grid ──────────────────────
+   * Items in a list are rows of one object, so they are separated by a
+   * hairline and nothing else. No border box, no shadow, no placeholder
+   * cover: an item without an image renders without one rather than
+   * reserving 200px of grey for a generic icon. */
+  .pk-rows {
+    border-top: 1px solid var(--pk-rule);
+  }
+  .pk-row {
+    border-bottom: 1px solid var(--pk-rule);
+    padding-block: 1.125rem;
+    transition: background-color var(--pk-fast) var(--pk-ease);
+    margin-inline: -0.75rem;
+    padding-inline: 0.75rem;
+  }
+  @media (hover: hover) {
+    .pk-row:hover {
+      background: var(--pk-sunken);
+    }
+  }
+
+  /* ── Field — the search/ask input, the one place a pill is right ─── */
+  .pk-field {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    border: 1px solid var(--pk-rule-2);
+    border-radius: 999px;
+    background: var(--pk-raised);
+    padding: 0 1.125rem;
+    height: 3.25rem;
+    transition: border-color var(--pk-fast) var(--pk-ease),
+      box-shadow var(--pk-fast) var(--pk-ease);
+  }
+  .pk-field:focus-within {
+    border-color: color-mix(in oklch, var(--pk-accent) 55%, transparent);
+    box-shadow: 0 0 0 4px var(--pk-accent-wash);
+  }
+  .pk-field input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    outline: none;
+    font-size: 0.9375rem;
+    color: var(--pk-ink);
+  }
+  .pk-field input::placeholder {
+    color: var(--pk-ink-4);
+  }
+
+  /* ── Evidence ─────────────────────────────────────────────────────
+   * A cited passage is marked by a rule in the evidence hue, never by a
+   * filled block: the passage is the content, and a tint would make it
+   * read as chrome. */
+  .pk-evidence {
+    border-left: 2px solid var(--pk-evidence);
+    padding-left: 0.875rem;
+    color: var(--pk-ink-2);
+  }
+}
+
+/* ── Focus ──────────────────────────────────────────────────────── */
+.knowledge-surface :focus-visible,
+.kp-understand :focus-visible {
+  outline: 2px solid var(--pk-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 .kp-understand .kp-tnum {
   font-variant-numeric: tabular-nums;
 }

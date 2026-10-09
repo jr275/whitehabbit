@@ -19,7 +19,7 @@ export function AnswerBody({ text, citations }: { text: string; citations: Answe
   const paragraphs = paragraphsOf(text, citations.map((c) => c.citationId))
 
   return (
-    <div className="space-y-4 text-[15px] leading-[1.7] text-foreground">
+    <div className="max-w-[var(--pk-measure)] space-y-5 text-[16.5px] leading-[1.72] text-[var(--pk-ink)]">
       {paragraphs.map((tokens, i) => (
         <p key={i} className="text-pretty">
           {tokens.map((token, j) => (
@@ -29,16 +29,20 @@ export function AnswerBody({ text, citations }: { text: string; citations: Answe
               ) : token.type === "citation" ? (
                 <a
                   href={`#source-${token.citationId}`}
-                  className="mx-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-md bg-[var(--kn-ai)]/12 px-1 align-[1px] text-[11px] font-medium tabular-nums text-[var(--kn-ai)] no-underline hover:bg-[var(--kn-ai)]/20"
+                  /* A citation is a REFERENCE, not something the model
+                     generated — it wears the evidence signal, and it is a
+                     superscript marker rather than a filled chip, which
+                     at every third sentence reads as a row of buttons. */
+                  className="mx-px align-super text-[11px] font-medium tabular-nums text-[var(--pk-evidence)] no-underline hover:underline"
                 >
-                  {token.citationId}
+                  [{token.citationId}]
                 </a>
               ) : (
                 <span
                   title="This reference doesn't match any source that was retrieved."
-                  className="mx-0.5 inline-flex h-[18px] items-center justify-center rounded-md border border-dashed border-border px-1 align-[1px] text-[11px] tabular-nums text-muted-foreground line-through"
+                  className="mx-px align-super text-[11px] tabular-nums text-[var(--pk-ink-4)] line-through"
                 >
-                  {token.citationId}
+                  [{token.citationId}]
                 </span>
               )}
             </Fragment>

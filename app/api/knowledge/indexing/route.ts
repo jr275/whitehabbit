@@ -25,6 +25,7 @@ import "server-only"
 import { NextResponse } from "next/server"
 import { withApiHandler } from "@/lib/api-error"
 import { describeSemanticSearch, resolveEmbeddingProvider } from "@/lib/ai/embeddings"
+import { deploymentReadiness } from "@/lib/deployment-readiness"
 import { countBacklog, countJobs, enqueueBackfill } from "@/lib/knowledge/backfill"
 import { recordAudit } from "@/lib/db/repo"
 import { enforceRateLimit } from "@/lib/rate-limit"
@@ -41,6 +42,17 @@ export async function GET() {
     const [backlog, jobs] = await Promise.all([countBacklog(scope), countJobs(scope)])
 
     return NextResponse.json({
+      /* EVERY piece of configuration, not just this route's own.
+       *
+       * A half-configured deployment fails in five unrelated places
+       * with five unrelated messages, none of which names the variable
+       * to set. Reported here because this is already the one
+       * session-scoped endpoint an operator opens when something is
+       * not working, and splitting it across two routes would mean
+       * two round trips to answer one question.
+       *
+       * Names only — never a value, a length or a prefix. */
+      deployment: deploymentReadiness(),
       semanticSearch: describeSemanticSearch(provider),
       // The model identity, never the credential. Which model is
       // configured is exactly what an operator needs when a backlog

@@ -1,6 +1,4 @@
 import Link from "next/link"
-import { Library, Sparkles } from "lucide-react"
-import { PageContainer, PageHeader } from "@/components/knowledge/page-header"
 import { requireSession, UnauthenticatedError } from "@/lib/session"
 import { listTagCounts } from "@/lib/knowledge/repo"
 import { tagsToTopics } from "@/lib/knowledge/adapter"
@@ -29,63 +27,57 @@ export default async function TopicsPage() {
   const max = topics.reduce((m, t) => Math.max(m, t.count), 1)
 
   return (
-    <PageContainer>
-      <PageHeader
-        eyebrow="Topics"
-        title="The themes running through your library."
-        subtitle="Topics surface automatically from what you save. Larger means stronger presence."
-      />
+    <div className="pk-page pb-24">
+      <header className="pt-14 sm:pt-20">
+        <p className="pk-label">Topics</p>
+        <h1 className="pk-display mt-4 max-w-[18ch] text-[var(--pk-ink)]">The themes running through your library.</h1>
+        <p className="pk-meta mt-5 max-w-[52ch]">
+          Surfaced automatically from what you save · {topics.length} {topics.length === 1 ? "topic" : "topics"}
+        </p>
+      </header>
 
       {topics.length === 0 ? (
-        <div className="mt-10 rounded-3xl border border-dashed border-[var(--kn-edge)] bg-[var(--kn-paper)] px-6 py-16 text-center">
-          <p className="text-sm text-foreground">No topics yet.</p>
-          <p className="mt-1 text-xs text-muted-foreground">
+        <div className="max-w-[46ch] py-16">
+          <p className="text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]">No topics yet.</p>
+          <p className="mt-2 text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">
             Save a few things and topics will start to appear here.
           </p>
         </div>
       ) : (
-        <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        /* A topic is a word, a weight and two things you can do with
+           it. It used to be a card with a progress bar; with one piece
+           per topic every bar was full, so the loudest mark on the page
+           encoded nothing. The bar is now a hairline whose width is the
+           topic's share of the largest one, drawn UNDER the row rather
+           than inside a box — present when it means something, silent
+           when it does not. */
+        <ul className="pk-rows mt-10">
           {topics.map((t) => (
-            <div
-              key={t.id}
-              className="flex flex-col gap-3 rounded-2xl border border-[var(--kn-edge)] bg-[var(--kn-paper)] p-5"
-            >
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="font-serif text-2xl font-medium tracking-tight text-foreground">{t.label}</span>
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {t.count} {t.count === 1 ? "piece" : "pieces"}
-                </span>
-              </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
-                <div
-                  className="h-full rounded-full bg-[var(--kn-ai)]/70"
-                  style={{ width: `${(t.count / max) * 100}%` }}
-                />
-              </div>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                {/* A topic card used to be a dead end: a label, a count
-                    and a bar, with no way to reach the pieces it was
-                    counting. searchItems already matches an item's
-                    tags, so the topic's own name is the query that
-                    finds them — no tag-filter endpoint and no second
-                    retrieval path. */}
+            <li key={t.id} className="pk-row group">
+              <div className="flex items-baseline justify-between gap-6">
                 <Link
                   href={topicItemsHref(t.label)}
-                  className="inline-flex items-center gap-1.5 rounded text-[12.5px] font-medium text-foreground transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
+                  className="min-w-0 flex-1 truncate text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]"
                 >
-                  <Library className="size-3.5" /> See the {t.count === 1 ? "piece" : "pieces"}
+                  {t.label}
                 </Link>
                 <Link
                   href={askAboutHref(`What have I saved about ${t.label}?`)}
-                  className="inline-flex items-center gap-1.5 rounded text-[12.5px] font-medium text-[var(--kn-ai)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
+                  className="pk-meta shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
                 >
-                  <Sparkles className="size-3.5" /> Ask about this topic
+                  Ask about this →
                 </Link>
+                <span className="pk-meta pk-num w-20 shrink-0 text-right">
+                  {t.count} {t.count === 1 ? "piece" : "pieces"}
+                </span>
               </div>
-            </div>
+              <div aria-hidden className="mt-3 h-px w-full bg-[var(--pk-rule)]">
+                <div className="h-px bg-[var(--pk-ink-4)]" style={{ width: `${(t.count / max) * 100}%` }} />
+              </div>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
-    </PageContainer>
+    </div>
   )
 }

@@ -1,3 +1,10 @@
+/* The shared masthead. Every Keeply index page opens the same way — a
+ * mono label, a large tight headline, one quiet line of context — so
+ * that four surfaces written at four different times still read as one
+ * product. Restyling this file is what carried Settings, Research,
+ * Coming Soon and the guest Topics view into the new language without
+ * touching any of them. */
+
 interface PageHeaderProps {
   eyebrow: string
   title: string
@@ -6,18 +13,16 @@ interface PageHeaderProps {
 
 export function PageHeader({ eyebrow, title, subtitle }: PageHeaderProps) {
   return (
-    <header className="flex flex-col gap-3">
-      <p className="text-sm font-medium text-primary">{eyebrow}</p>
-      <h1 className="text-balance font-serif text-4xl font-medium leading-[1.05] tracking-tight text-foreground sm:text-5xl">
-        {title}
-      </h1>
+    <header className="pt-14 sm:pt-20">
+      <p className="pk-label">{eyebrow}</p>
+      <h1 className="pk-display mt-4 max-w-[18ch] text-[var(--pk-ink)]">{title}</h1>
       {subtitle && (
-        <p className="max-w-xl text-pretty text-base leading-relaxed text-muted-foreground">{subtitle}</p>
+        <p className="mt-5 max-w-[54ch] text-pretty text-[15px] leading-[1.65] text-[var(--pk-ink-3)]">{subtitle}</p>
       )}
     </header>
   )
 }
 
 export function PageContainer({ children }: { children: React.ReactNode }) {
-  return <div className="mx-auto max-w-[1500px] px-4 py-8 sm:px-6 lg:px-8">{children}</div>
+  return <div className="pk-page pb-24">{children}</div>
 }
