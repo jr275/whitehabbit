@@ -52,6 +52,10 @@ export function rowToDocument(row: KnowledgeRow, tags: string[] = []): Knowledge
   return {
     ...rowToItem(row, tags),
     contentText: row.content_text ?? undefined,
+    // Extracted by extract.ts and stored by repo.ts since the column
+    // existed; it simply was not carried across this boundary, so it
+    // never reached the Reader.
+    lang: row.lang ?? undefined,
     publishedAt: row.published_at ? new Date(Number(row.published_at)).toISOString() : undefined,
     wordCount: row.word_count ?? undefined,
     attempts: row.attempts,

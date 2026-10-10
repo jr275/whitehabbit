@@ -78,6 +78,12 @@ export interface KnowledgeItem {
 /** The full reader payload — includes the extracted body text. */
 export interface KnowledgeDocument extends KnowledgeItem {
   contentText?: string
+  /** BCP-47 tag the page declared in <html lang>, as extracted and
+   *  stored. Present only when the page declared one — it is never
+   *  guessed. Read Aloud uses it to pick the narration voice; without
+   *  it a Portuguese article is read in the reader's browser locale,
+   *  which is usually the wrong voice. */
+  lang?: string
   publishedAt?: string
   wordCount?: number
   attempts: number

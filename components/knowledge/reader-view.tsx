@@ -23,6 +23,7 @@ import type { KnowledgeDocument } from "@/lib/knowledge/types"
 import { KIND_META, askAboutHref, durationLabel, savedAgo } from "@/lib/knowledge/config"
 import { patchItem, summarizeItem } from "@/lib/knowledge/client"
 import { DiscoveryPanel } from "./discovery-panel"
+import { READ_ALOUD_RATES, type ReadAloudRate } from "@/lib/knowledge/read-aloud"
 import { useReadAloud, type UseReadAloudResult } from "@/lib/knowledge/use-read-aloud"
 import { cn } from "@/lib/utils"
 
@@ -100,7 +101,7 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
 
   // Keyed on doc.id so navigating to a different item tears down any
   // in-progress speech and starts fresh (see the hook).
-  const read = useReadAloud(doc.id, body)
+  const read = useReadAloud(doc.id, body, doc.lang)
 
   async function toggleFavorite() {
     const next = !favorite
@@ -229,7 +230,12 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
                   <ReadAloudControls read={read} />
                 </div>
               )}
-              <ArticleBody body={body} cover={doc.cover} title={doc.title} />
+              <ArticleBody
+                body={body}
+                cover={doc.cover}
+                title={doc.title}
+                spokenIndex={read.state === "playing" || read.state === "paused" ? read.paragraphIndex : null}
+              />
             </>
           ) : (
             <ExcerptLede excerpt={doc.excerpt!} cover={doc.cover} title={doc.title} url={doc.url} />
@@ -484,6 +490,7 @@ function ReadAloudControls({ read }: { read: UseReadAloudResult }) {
           <IconButton label="Stop reading" onClick={read.stop}>
             <Square className="size-3.5" />
           </IconButton>
+          <RateSelect read={read} />
         </>
       ) : null}
 
@@ -496,9 +503,53 @@ function ReadAloudControls({ read }: { read: UseReadAloudResult }) {
   )
 }
 
+/** Playback speed.
+ *
+ * A native <select> rather than a row of pills: five options is one
+ * too many for a toolbar that already carries four buttons, and the
+ * native control is the one that is already keyboard- and
+ * screen-reader-correct on every platform, including the mobile
+ * sheet. It is only rendered while Read Aloud is active, so it costs
+ * nothing on an article nobody is listening to.
+ *
+ * Changing speed mid-paragraph restarts that paragraph — the Web
+ * Speech API fixes an utterance's rate when it is created. See
+ * ReadAloudController.setRate. */
+function RateSelect({ read }: { read: UseReadAloudResult }) {
+  return (
+    <label className="flex items-center">
+      <span className="sr-only">Playback speed</span>
+      <select
+        value={read.rate}
+        onChange={(e) => read.setRate(Number(e.target.value) as ReadAloudRate)}
+        className="h-8 rounded-full border border-[var(--pk-rule-2)] bg-[var(--pk-raised)] px-2 text-[12px] text-[var(--pk-ink-2)] transition-colors hover:border-[var(--pk-ink-4)]"
+      >
+        {READ_ALOUD_RATES.map((r) => (
+          <option key={r} value={r}>
+            {r}×
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 /* ── Body surfaces ──────────────────────────────────────────────── */
 
-function ArticleBody({ body, cover, title }: { body: string[]; cover?: string; title: string }) {
+function ArticleBody({
+  body,
+  cover,
+  title,
+  spokenIndex,
+}: {
+  body: string[]
+  cover?: string
+  title: string
+  /** The paragraph Read Aloud is narrating, or null when it is not
+   *  speaking. Null rather than 0, so a resting player does not mark
+   *  the first paragraph as if it were being read. */
+  spokenIndex: number | null
+}) {
   const [coverFailed, setCoverFailed] = useState(false)
   return (
     <>
@@ -525,8 +576,23 @@ function ArticleBody({ body, cover, title }: { body: string[]; cover?: string; t
           thing the eye hit on every article, on a page whose whole
           argument is that the article comes first. */}
       <div className="pk-read mt-10 space-y-6 text-[1.1rem] leading-[1.75] text-[var(--pk-ink)] [word-break:break-word] selection:bg-[var(--pk-accent-wash)]">
+        {/* The narrated paragraph is marked with a wash and a rule in
+            the margin, not a colour change on the text: the article's
+            own ink is the one thing the Reader does not repaint.
+            aria-current carries the same fact to a screen reader,
+            which cannot see either. */}
         {body.map((p, i) => (
-          <p key={i}>{p}</p>
+          <p
+            key={i}
+            aria-current={i === spokenIndex ? "true" : undefined}
+            className={
+              i === spokenIndex
+                ? "-mx-3 rounded-[var(--pk-r-sm)] border-l-2 border-[var(--pk-accent)] bg-[var(--pk-accent-wash)] px-3 py-0.5 transition-colors"
+                : "transition-colors"
+            }
+          >
+            {p}
+          </p>
         ))}
       </div>
     </>
