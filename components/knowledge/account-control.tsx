@@ -30,6 +30,9 @@ import { useState } from "react"
  *  lives in the browser-local store, so Home is the honest landing
  *  spot in both directions. */
 const SIGN_IN_HREF = "/login?callbackUrl=/knowledge/home"
+/** Both auth pages read callbackUrl to keep the Keeply identity and to
+ *  land the reader back in their library instead of /launch. */
+const SIGN_UP_HREF = "/signup?callbackUrl=/knowledge/home"
 const SIGN_OUT_OPTS = { callbackUrl: "/login?callbackUrl=/knowledge/home" }
 
 export function AccountControl({ layout }: { layout: "rail" | "header" }) {
@@ -63,6 +66,16 @@ export function AccountControl({ layout }: { layout: "rail" | "header" }) {
         >
           <LogIn className="size-4" />
           Sign in to save permanently
+        </Link>
+        {/* Creating an account and signing in are different intents,
+            and a visitor with a local library has by definition never
+            had one. Reaching sign-up only THROUGH a sign-in screen
+            makes the common case the indirect one. */}
+        <Link
+          href={SIGN_UP_HREF}
+          className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2.5 rounded-[var(--pk-r)] px-2 py-1.5 pl-[2.1rem] text-[13px] text-[var(--pk-ink-3)] transition-colors hover:bg-[var(--pk-sunken)] hover:text-[var(--pk-ink)]"
+        >
+          Create an account
         </Link>
         {/* The disclosure the offer implies but does not state: until
             they sign in, nothing they save leaves this browser. */}
