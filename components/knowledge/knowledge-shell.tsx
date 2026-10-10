@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { type KnowledgeTheme, persistKnowledgeTheme } from "@/lib/knowledge/theme"
 import { CommandPalette } from "./command-palette"
+import { GuestImport } from "./guest-import"
 import { KnowledgeSidebar } from "./knowledge-sidebar"
 import { KnowledgeTopbar } from "./knowledge-topbar"
 import { MobileNav } from "./mobile-nav"
@@ -78,6 +79,10 @@ export function KnowledgeShell({
             theme={theme}
             onToggleTheme={toggleTheme}
           />
+          {/* Above the page, not inside it: the offer to move a
+              browser-local library into the account applies to every
+              Knowledge screen, and belongs to none of them. */}
+          <GuestImport />
           <main id="kn-main" className="flex-1 pb-24 lg:pb-0">
             {children}
           </main>

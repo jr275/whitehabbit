@@ -168,6 +168,19 @@ export function useKnowledgeLibrary(opts: UseLibraryOptions = {}): LibraryState 
     return () => window.removeEventListener(GUEST_UPDATED_EVENT, onUpdated as EventListener)
   }, [])
 
+  // A guest import (components/knowledge/guest-import) moves items from
+  // the browser-local store into the account through the real API. It
+  // can move many at once and the ids change in the process, so this
+  // re-reads the page rather than patching: there is no local item to
+  // map to the row the server just created.
+  useEffect(() => {
+    function onImported() {
+      load()
+    }
+    window.addEventListener("knowledge:imported", onImported)
+    return () => window.removeEventListener("knowledge:imported", onImported)
+  }, [load])
+
   const toggleFavorite = useCallback(async (item: KnowledgeItem) => {
     const next = !item.favorite
     setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, favorite: next } : i)))

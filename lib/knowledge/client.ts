@@ -147,6 +147,29 @@ export async function saveUrl(url: string): Promise<SaveResult> {
   }
 }
 
+/**
+ * Save a URL into the AUTHENTICATED account, with NO guest fallback.
+ *
+ * saveUrl() above falls back to the browser-local store on 401, which
+ * is right for the ordinary Save button and exactly wrong here: this is
+ * the one call whose whole purpose is to move an item OUT of that
+ * store. A session that expired mid-import would write the item
+ * straight back where it came from and report success, and the import
+ * would then delete the local copy it believed it had moved.
+ *
+ * So a 401 is a real failure here, surfaced like any other. The caller
+ * keeps the local item.
+ */
+export async function saveUrlToAccount(url: string): Promise<SaveResult> {
+  const res = await fetch("/api/knowledge", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url }),
+  })
+  const data = await parse<{ item: KnowledgeItem; duplicate?: boolean }>(res)
+  return { item: data.item, duplicate: data.duplicate === true }
+}
+
 export async function fetchDocument(id: string, signal?: AbortSignal): Promise<KnowledgeDocument> {
   // A guest-created id can't exist server-side; go straight to the store.
   if (id.startsWith("kn_guest_")) {
