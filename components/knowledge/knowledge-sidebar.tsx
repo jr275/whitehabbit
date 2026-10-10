@@ -23,12 +23,11 @@
  * own shell (components/studio/top-nav.tsx) in its own identity.
  * ================================================================== */
 
-import { LogIn, LogOut, Moon, Plus, Search, Settings, Sun } from "lucide-react"
-import { signOut, useSession } from "next-auth/react"
+import { Moon, Plus, Search, Settings, Sun } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useState } from "react"
 import type { KnowledgeTheme } from "@/lib/knowledge/theme"
+import { AccountControl } from "./account-control"
 import { cn } from "@/lib/utils"
 import {
   KNOWLEDGE_ASK,
@@ -47,12 +46,6 @@ export function KnowledgeSidebar({
   onToggleTheme: () => void
 }) {
   const pathname = usePathname()
-  const { data: session, status } = useSession()
-  const [accountOpen, setAccountOpen] = useState(false)
-  const isGuest = status === "unauthenticated"
-  const email = session?.user?.email ?? ""
-  const name = isGuest ? "Guest" : session?.user?.name || email.split("@")[0] || "Your account"
-  const initial = (name || "Y").charAt(0).toUpperCase()
 
   return (
     <aside className="sticky top-0 hidden h-dvh w-[var(--pk-rail)] shrink-0 flex-col border-r border-[var(--pk-rule)] px-5 lg:flex">
@@ -131,44 +124,8 @@ export function KnowledgeSidebar({
       </button>
 
       {/* ── Account ───────────────────────────────────────────── */}
-      <div className="relative mb-5">
-        {accountOpen && (
-          <div className="absolute inset-x-0 bottom-full z-30 mb-2 overflow-hidden rounded-[var(--pk-r)] border border-[var(--pk-rule-2)] bg-[var(--pk-raised)] p-1 shadow-lg shadow-[oklch(0.185_0.022_268_/_6%)]">
-            <div className="px-2.5 py-2">
-              <p className="truncate text-[13px] font-medium text-[var(--pk-ink)]">{name}</p>
-              <p className="pk-meta mt-0.5 truncate">{isGuest ? "Saved on this device" : email}</p>
-            </div>
-            {isGuest ? (
-              <Link
-                href="/login?callbackUrl=/knowledge/home"
-                onClick={() => setAccountOpen(false)}
-                className="flex w-full items-center gap-2.5 rounded-[var(--pk-r-sm)] px-2.5 py-2 text-[13px] font-medium text-[var(--pk-accent)] transition-colors hover:bg-[var(--pk-sunken)]"
-              >
-                <LogIn className="size-4" />
-                Sign in to save permanently
-              </Link>
-            ) : (
-              <button
-                onClick={() => signOut({ callbackUrl: "/login?callbackUrl=/knowledge/home" })}
-                className="flex w-full items-center gap-2.5 rounded-[var(--pk-r-sm)] px-2.5 py-2 text-[13px] text-[var(--pk-ink-2)] transition-colors hover:bg-[var(--pk-sunken)]"
-              >
-                <LogOut className="size-4" />
-                Sign out
-              </button>
-            )}
-          </div>
-        )}
-        <button
-          onClick={() => setAccountOpen((v) => !v)}
-          aria-expanded={accountOpen}
-          className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2.5 rounded-[var(--pk-r)] px-2 py-1.5 text-left transition-colors hover:bg-[var(--pk-sunken)]"
-        >
-          <span className="flex size-6 items-center justify-center rounded-full bg-[var(--pk-sunken)] text-[11px] font-medium text-[var(--pk-ink-2)]">
-            {initial}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--pk-ink-2)]">{name}</span>
-        </button>
-      </div>
+      <AccountControl layout="rail" />
+
     </aside>
   )
 }
