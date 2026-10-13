@@ -23,7 +23,14 @@ import assert from "node:assert/strict"
 
 import { canonicalizeUrl, canonicalizeUrlSafe } from "@/lib/knowledge/url"
 import * as repo from "@/lib/knowledge/repo"
-import { closeTestPool, createTenant, getTestPool, prepareDatabase, TEST_DATABASE_URL } from "./helpers/db"
+import {
+  assertDisposableTarget,
+  closeTestPool,
+  createTenant,
+  getTestPool,
+  prepareDatabase,
+  TEST_DATABASE_URL,
+} from "./helpers/db"
 
 describe("test harness", () => {
   it("resolves the @/ path alias the way Next.js does", () => {
@@ -59,12 +66,15 @@ describe("test database", () => {
     await closeTestPool()
   })
 
-  it("refuses to run against a database that is not obviously disposable", () => {
-    assert.match(
-      new URL(TEST_DATABASE_URL).pathname,
-      /test/i,
-      "prepareDatabase() DROPs the schema — the name guard is the only thing between a typo and real data",
-    )
+  /* The guard's own behaviour is proved in tests/platform/test-db-guard.test.ts,
+   * against fabricated targets and with no database involved. What
+   * belongs HERE is the one thing that file cannot show: that the
+   * target this suite is actually pointed at is one the guard accepts.
+   *
+   * The assertion it replaced compared the default constant against
+   * /test/i, which is true by construction and exercised nothing. */
+  it("is pointed at a target the guard accepts", () => {
+    assert.doesNotThrow(() => assertDisposableTarget(TEST_DATABASE_URL))
   })
 
   it("applies every migration onto an empty schema", async () => {

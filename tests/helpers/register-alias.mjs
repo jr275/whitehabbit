@@ -9,7 +9,9 @@
  *    lib/db/client.ts reads it at module load. It always OVERRIDES, so
  *    a developer with a real DATABASE_URL in their shell cannot run
  *    the suite against it by accident. tests/helpers/db.ts additionally
- *    refuses to touch a database whose name does not contain "test".
+ *    refuses any target outside its allowlist, matched by equality and
+ *    not by substring, from getTestPool() — the single place every
+ *    connection is made.
  * ================================================================== */
 
 import { register } from "node:module"

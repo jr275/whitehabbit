@@ -13,6 +13,17 @@
  * dropped and rebuilt from migrations/ on every run, so tests never
  * inherit state from a previous run, and running the real migration
  * files is itself a check that they apply cleanly and in order.
+ *
+ * THE TARGET GUARD. prepareDatabase() runs DROP SCHEMA public CASCADE.
+ * The only thing between a mistyped env var and someone's real data is
+ * assertDisposableTarget(), so it lives in getTestPool() — the single
+ * place every connection comes from — and not only in the function
+ * that happens to drop the schema. A test file that reaches for a pool
+ * and issues its own DELETE never asked prepareDatabase() for
+ * permission; before this, nothing stopped it.
+ *
+ * Identity is checked by EQUALITY against an allowlist, never by
+ * substring: "latest" and "contest" both contain "test".
  * ================================================================== */
 
 import { readdirSync, readFileSync } from "node:fs"
@@ -30,8 +41,97 @@ const MIGRATIONS_DIR = path.join(process.cwd(), "migrations")
 let pool: pg.Pool | null = null
 let prepared = false
 
+/** Thrown when the target cannot be shown to be disposable. Distinct
+ *  from a connection error so a test can assert the REASON, not just
+ *  that something failed. */
+export class UnsafeTestTargetError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "UnsafeTestTargetError"
+  }
+}
+
+/* The policy, stated as data. Extending it is a deliberate edit to this
+ * list, not a side effect of naming a database something new. */
+const ALLOWED_DATABASES = new Set(["whitehabbit_test"])
+const ALLOWED_HOSTS = new Set(["127.0.0.1", "localhost", "::1"])
+const ALLOWED_PROTOCOLS = new Set(["postgres:", "postgresql:"])
+
+/**
+ * Refuse any target that cannot be PROVEN disposable.
+ *
+ * Fails closed on every ambiguity — an unparseable URL, a missing
+ * database name, an unexpected scheme — because the caller is about to
+ * drop a schema and "probably fine" is not a basis for that.
+ *
+ * Messages name the rejected database or host, which is useful and not
+ * secret. They never carry the URL, which holds a password.
+ */
+export function assertDisposableTarget(raw: string): void {
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    throw new UnsafeTestTargetError("The test database URL could not be parsed.")
+  }
+
+  if (!ALLOWED_PROTOCOLS.has(parsed.protocol)) {
+    throw new UnsafeTestTargetError(`Refusing protocol "${parsed.protocol}" — not a PostgreSQL URL.`)
+  }
+
+  const database = parsed.pathname.replace(/^\//, "")
+  if (database === "") {
+    throw new UnsafeTestTargetError("The test database URL names no database.")
+  }
+  if (!ALLOWED_DATABASES.has(database)) {
+    throw new UnsafeTestTargetError(`Refusing database "${database}" — not in the allowlist.`)
+  }
+
+  // url.hostname keeps the brackets on an IPv6 literal.
+  const host = parsed.hostname.replace(/^\[|\]$/g, "")
+  if (!ALLOWED_HOSTS.has(host)) {
+    throw new UnsafeTestTargetError(`Refusing host "${host}" — not in the allowlist.`)
+  }
+}
+
+/**
+ * Two configured targets that disagree mean nobody can say which one
+ * the destructive path would reach. That is the ambiguity the guard
+ * exists for, so it refuses rather than picking one.
+ *
+ * Takes both values as arguments instead of reading the environment, so
+ * the rule is testable without mutating process.env.
+ */
+export function assertNoConflictingConfig(testUrl: string, appUrl: string | undefined): void {
+  if (appUrl && appUrl !== testUrl) {
+    throw new UnsafeTestTargetError(
+      "TEST_DATABASE_URL and DATABASE_URL name different targets — refusing to guess which one to reset.",
+    )
+  }
+}
+
+/**
+ * The destructive step, with its guard inseparable from it.
+ *
+ * `run` is injected so a test can prove the negative that matters: on a
+ * rejected target the statement is never handed to anything. Observing
+ * that the guard threw does not prove that — only counting the calls
+ * that never happened does.
+ */
+export async function resetSchema(target: string, run: (sql: string) => Promise<unknown>): Promise<void> {
+  assertDisposableTarget(target)
+  assertNoConflictingConfig(target, process.env.DATABASE_URL)
+  await run("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;")
+}
+
 export function getTestPool(): pg.Pool {
-  if (!pool) pool = new Pool({ connectionString: TEST_DATABASE_URL, max: 8 })
+  if (!pool) {
+    // Before the Pool exists, not before the DROP: this is the one
+    // place every connection in the suite is created.
+    assertDisposableTarget(TEST_DATABASE_URL)
+    assertNoConflictingConfig(TEST_DATABASE_URL, process.env.DATABASE_URL)
+    pool = new Pool({ connectionString: TEST_DATABASE_URL, max: 8 })
+  }
   return pool
 }
 
@@ -43,16 +143,8 @@ export function getTestPool(): pg.Pool {
 export async function prepareDatabase(): Promise<void> {
   if (prepared) return
 
-  // prepareDatabase() DROPS the schema. Refuse to run against anything
-  // that is not obviously a disposable test database — this is the one
-  // guard between a mistyped env var and someone's real data.
-  const name = new URL(TEST_DATABASE_URL).pathname
-  if (!/test/i.test(name)) {
-    throw new Error(`Refusing to reset "${name}" — the test database name must contain "test".`)
-  }
-
   const p = getTestPool()
-  await p.query("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;")
+  await resetSchema(TEST_DATABASE_URL, (sql) => p.query(sql))
 
   const files = readdirSync(MIGRATIONS_DIR)
     .filter((f) => f.endsWith(".sql"))
