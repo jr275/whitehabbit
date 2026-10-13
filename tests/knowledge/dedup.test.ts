@@ -22,15 +22,24 @@
  * in place — not deleted, not left stale.
  *
  * service.saveUrl itself is mostly avoided in the length/tenancy tests
- * above: it calls assertSafeUrl, which performs real DNS, and a test
- * suite that needs the public internet is a test suite that fails for
- * reasons that have nothing to do with the code. Its own dedup is the
- * composition tested via the save()/findExisting() helpers below —
- * canonicalise, look up, insert, catch the unique violation. Later
- * blocks (S3/S4, and the S5 API-boundary suite at the end of this
- * file) DO call saveUrl directly, using either a literal public IP
- * (the SSRF guard checks it with no lookup) or an ordinary hostname
- * for inputs that are rejected before DNS is ever reached.
+ * above: its own dedup is the composition tested via the
+ * save()/findExisting() helpers below — canonicalise, look up, insert,
+ * catch the unique violation. Later blocks (S3/S4, and the S5
+ * API-boundary suite at the end of this file) DO call saveUrl
+ * directly.
+ *
+ * DNS IS SUPPLIED, NOT BORROWED FROM THE INTERNET. saveUrl validates
+ * through the SSRF guard, which resolves a hostname. These tests used
+ * to let that reach the real resolver, so two of them failed in any
+ * environment without public DNS — for reasons that had nothing to do
+ * with dedup. They now pass `resolver`, saveUrl's test seam, and
+ * control the answer explicitly.
+ *
+ * That seam cannot be used to smuggle a forbidden URL past the guard:
+ * every address a resolver returns is validated by the same rules, so
+ * answering with loopback or a private range produces a REFUSAL. The
+ * "a resolver cannot be used to save a forbidden destination" block
+ * below asserts that, which is what makes the seam safe to have.
  * ================================================================== */
 
 import { after, before, describe, it } from "node:test"
@@ -40,7 +49,28 @@ import { randomBytes } from "node:crypto"
 import { canonicalizeUrlSafe, MAX_CANONICAL_URL_BYTES } from "@/lib/knowledge/url"
 import * as repo from "@/lib/knowledge/repo"
 import { SaveValidationError, saveUrl } from "@/lib/knowledge/service"
+import { MAX_RESOLVED_ADDRESSES, type AddressResolver } from "@/lib/security/ssrf-guard"
 import { closeTestPool, createTenant, getTestPool, prepareDatabase, type TestTenant } from "../helpers/db"
+
+/* ---- controlled DNS ------------------------------------------------ *
+ *
+ * A real public address, so the guard's CIDR math admits it. Nothing
+ * is ever connected to in these tests: saveUrl only VALIDATES the URL
+ * and enqueues a job, so this answer is used for the range check and
+ * nothing else. */
+const PUBLIC_V4 = "93.184.216.34"
+
+const resolvesToPublic: AddressResolver = async () => [{ address: PUBLIC_V4, family: 4 }]
+const resolvesToLoopback: AddressResolver = async () => [{ address: "127.0.0.1", family: 4 }]
+const resolvesToPrivate: AddressResolver = async () => [{ address: "10.0.0.7", family: 4 }]
+const resolvesToMixed: AddressResolver = async () => [
+  { address: PUBLIC_V4, family: 4 },
+  { address: "192.168.1.1", family: 4 },
+]
+const resolvesToNothing: AddressResolver = async () => []
+const resolverThatFails: AddressResolver = async () => {
+  throw new Error("getaddrinfo ENOTFOUND internal-billing.corp")
+}
 
 let alice: TestTenant
 let bob: TestTenant
@@ -416,6 +446,193 @@ describe("dedup — hash routes are distinct documents", () => {
   })
 })
 
+describe("a resolver cannot be used to save a forbidden destination", () => {
+  /* The seam exists so DNS is deterministic, NOT so a caller can
+   * choose what counts as safe. Every address a resolver returns is
+   * validated by resolveSafeUrl under the same rules, so each case
+   * below must be REFUSED and must persist nothing. Without these, the
+   * seam added in this phase would be an SSRF bypass with a test
+   * suite that approved of it. */
+  const forbidden: [string, AddressResolver][] = [
+    ["loopback", resolvesToLoopback],
+    ["a private range", resolvesToPrivate],
+    ["a mixed answer with one private address", resolvesToMixed],
+    ["an empty answer", resolvesToNothing],
+    ["a resolver that throws", resolverThatFails],
+  ]
+
+  for (const [label, resolver] of forbidden) {
+    it(`refuses a hostname resolving to ${label}, and writes nothing`, async () => {
+      const tenant = await createTenant("ssrf")
+      const before = await countItems(tenant.orgId)
+      await assert.rejects(
+        () => saveUrl({ orgId: tenant.orgId, userId: tenant.userId, url: "https://example.com/blocked" }, { resolver }),
+        (err: unknown) => {
+          assert.ok(err instanceof SaveValidationError, "a 400, not a 500")
+          // The guard's own detail names the address; the user-facing
+          // message must not, or it becomes an existence oracle.
+          assert.doesNotMatch(err.message, /127\.0\.0\.1|10\.0\.0\.7|192\.168|ENOTFOUND|internal-billing/)
+          return true
+        },
+      )
+      assert.equal(await countItems(tenant.orgId), before, "nothing was persisted")
+    })
+  }
+
+  /* A MALFORMED RESOLVER ANSWER IS A 400, NOT A 500 (B-1).
+   *
+   * The 3.2-B audit found that a resolver answering `null`, or an
+   * array holding `[null]`, raised a TypeError inside the guard
+   * instead of an UnsafeUrlError. saveUrl converts only
+   * UnsafeUrlError, so the user got a 500 for what is a refusal —
+   * fail-closed, but the wrong status and an error log that looked
+   * like a crash. These cases live HERE, at the consumer, because the
+   * 400 is a property of this path and not of the guard.
+   *
+   * The shapes themselves, and the "blocked" code from safeFetch, are
+   * asserted in tests/security/ip-policy.test.ts; this file owns only
+   * the HTTP-status and persistence halves. */
+  const malformedAnswers: [string, () => unknown][] = [
+    ["null instead of an array", () => null],
+    ["an array holding null", () => [null]],
+    ["an array holding undefined", () => [undefined]],
+    ["a non-array", () => "93.184.216.34"],
+    ["a public address followed by an invalid item", () => [{ address: PUBLIC_V4, family: 4 }, null]],
+    ["an item whose address is not a string", () => [{ address: 2130706433, family: 4 }]],
+  ]
+
+  for (const [label, answer] of malformedAnswers) {
+    it(`refuses ${label} with a 400, and writes nothing`, async () => {
+      const tenant = await createTenant("ssrf-shape")
+      const before = await countItems(tenant.orgId)
+      const resolver = (async () => answer()) as unknown as AddressResolver
+      await assert.rejects(
+        () =>
+          saveUrl(
+            { orgId: tenant.orgId, userId: tenant.userId, url: `https://example.com/shape-${randomBytes(4).toString("hex")}` },
+            { resolver },
+          ),
+        (err: unknown) => {
+          assert.ok(
+            err instanceof SaveValidationError,
+            `a malformed answer must be a 400, not a 500 — got ${err instanceof Error ? err.name : typeof err}`,
+          )
+          assert.doesNotMatch(err.message, /93\.184\.216\.34|2130706433|TypeError/, "detail reached the user")
+          return true
+        },
+      )
+      assert.equal(await countItems(tenant.orgId), before, "nothing was persisted")
+    })
+  }
+
+  /* THE RANGES ADDED BY REMEDIATION 3.2-A, THROUGH THE REAL saveUrl.
+   *
+   * The five cases above pre-date it and cover ranges the old
+   * string-based classifier already refused. These are the ones it
+   * ACCEPTED, so without them this consumer's evidence would stop at
+   * "the mechanism works" rather than "it works for the addresses the
+   * remediation is about". Each must be a 400 that names no address
+   * and leaves the library empty. */
+  const newlyCovered: [string, string][] = [
+    ["an uncompressed IPv6 loopback", "0:0:0:0:0:0:0:1"],
+    ["an IPv4-compatible loopback", "::127.0.0.1"],
+    ["link-local above the fe80: spelling", "fe90::1"],
+    ["CGNAT", "100.64.0.1"],
+    ["documentation space", "192.0.2.1"],
+    ["benchmarking space", "198.18.0.1"],
+    ["multicast", "239.255.255.250"],
+    ["the broadcast address", "255.255.255.255"],
+    ["6to4 encapsulating loopback", "2002:7f00:1::1"],
+  ]
+
+  for (const [label, address] of newlyCovered) {
+    it(`refuses ${label} (${address}) as a DNS answer, and writes nothing`, async () => {
+      const tenant = await createTenant("ssrf-new")
+      const before = await countItems(tenant.orgId)
+      const resolver: AddressResolver = async () => [
+        { address, family: address.includes(":") ? 6 : 4 },
+      ]
+      await assert.rejects(
+        () =>
+          saveUrl(
+            { orgId: tenant.orgId, userId: tenant.userId, url: `https://example.com/new-${randomBytes(4).toString("hex")}` },
+            { resolver },
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof SaveValidationError, "a 400, not a 500")
+          assert.ok(
+            !err.message.includes(address),
+            "the refused address must not reach the user-facing message",
+          )
+          return true
+        },
+      )
+      assert.equal(await countItems(tenant.orgId), before, "nothing was persisted")
+    })
+  }
+
+  it("still saves when the resolver answers with a public address", async () => {
+    // The positive control. Without it, a guard that refused every
+    // resolver answer would satisfy all five cases above.
+    const tenant = await createTenant("ssrf-ok")
+    const result = await saveUrl(
+      { orgId: tenant.orgId, userId: tenant.userId, url: "https://example.com/allowed" },
+      { resolver: resolvesToPublic },
+    )
+    assert.equal(result.duplicate, false)
+    assert.equal(await countItems(tenant.orgId), 1)
+  })
+
+  /* THE ADDRESS CAP NOW APPLIES HERE TOO.
+   *
+   * MAX_ADDRESSES used to live in safe-fetch and bound only the
+   * fetching path. It moved into the guard, so saveUrl — which only
+   * VALIDATES — inherits it. That is a real behaviour change for this
+   * consumer, so both sides of the boundary are pinned here. */
+  it("accepts a hostname answering with exactly the address limit", async () => {
+    const exactly: AddressResolver = async () =>
+      Array.from({ length: MAX_RESOLVED_ADDRESSES }, (_, i) => ({ address: `93.184.216.${i + 1}`, family: 4 }))
+    const tenant = await createTenant("cap-ok")
+    const result = await saveUrl(
+      { orgId: tenant.orgId, userId: tenant.userId, url: "https://example.com/eight" },
+      { resolver: exactly },
+    )
+    assert.equal(result.duplicate, false)
+    assert.equal(await countItems(tenant.orgId), 1, "eight addresses is within the limit and must save")
+  })
+
+  it("refuses a hostname answering with one address over the limit, and writes nothing", async () => {
+    const tooMany: AddressResolver = async () =>
+      Array.from({ length: MAX_RESOLVED_ADDRESSES + 1 }, (_, i) => ({ address: `93.184.216.${i + 1}`, family: 4 }))
+    const tenant = await createTenant("cap-over")
+    const before = await countItems(tenant.orgId)
+    await assert.rejects(
+      () => saveUrl({ orgId: tenant.orgId, userId: tenant.userId, url: "https://example.com/nine" }, { resolver: tooMany }),
+      (err: unknown) => {
+        assert.ok(err instanceof SaveValidationError, "a 400, not a 500")
+        return true
+      },
+    )
+    assert.equal(await countItems(tenant.orgId), before, "nothing was persisted")
+  })
+
+  it("performs no resolution at all for a literal public IP", async () => {
+    // A literal is checked by CIDR math, so the resolver must never be
+    // consulted — there is no rebinding window to close for one.
+    let called = 0
+    const counting: AddressResolver = async () => {
+      called += 1
+      return [{ address: PUBLIC_V4, family: 4 }]
+    }
+    const tenant = await createTenant("ssrf-lit")
+    await saveUrl(
+      { orgId: tenant.orgId, userId: tenant.userId, url: `https://${PUBLIC_V4}/literal` },
+      { resolver: counting },
+    )
+    assert.equal(called, 0, "a literal address needs no lookup")
+  })
+})
+
 describe("dedup — S3/S4 (Commit 9): credentials and non-http schemes never reach the database", () => {
   // Unlike the length tests above, none of these need a real IP or any
   // network access at all: the rejection happens in service.normalizeUrl
@@ -454,7 +671,10 @@ describe("dedup — S3/S4 (Commit 9): credentials and non-http schemes never rea
 
   it("the equivalent public URL (same page, no credentials) still saves fine", async () => {
     const tenant = await createTenant("creds-public")
-    const result = await saveUrl({ orgId: tenant.orgId, userId: tenant.userId, url: "https://example.com/article" })
+    const result = await saveUrl(
+      { orgId: tenant.orgId, userId: tenant.userId, url: "https://example.com/article" },
+      { resolver: resolvesToPublic },
+    )
     assert.equal(result.duplicate, false)
     assert.equal(await countItems(tenant.orgId), 1)
     const row = await repo.getItem(result.row.id, tenant.orgId, tenant.userId)
@@ -465,7 +685,10 @@ describe("dedup — S3/S4 (Commit 9): credentials and non-http schemes never rea
 
   it("plain http:// (not just https://) still saves fine — the scheme check allows both", async () => {
     const tenant = await createTenant("http-scheme")
-    const result = await saveUrl({ orgId: tenant.orgId, userId: tenant.userId, url: "http://example.com/plain-http" })
+    const result = await saveUrl(
+      { orgId: tenant.orgId, userId: tenant.userId, url: "http://example.com/plain-http" },
+      { resolver: resolvesToPublic },
+    )
     assert.equal(result.duplicate, false)
     assert.equal(await countItems(tenant.orgId), 1)
     const row = await repo.getItem(result.row.id, tenant.orgId, tenant.userId)
