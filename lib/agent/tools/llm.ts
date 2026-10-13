@@ -67,6 +67,14 @@ export async function callLlm(input: LlmCallInput): Promise<ToolActionResult<Llm
     if (result.reason === "not_configured") {
       return { ok: false, blocked: true, blockedReason: result.message, durationMs: result.durationMs }
     }
+    /* "aborted" means a caller cancelled the request, which is an
+     * execution outcome rather than a provider fault — and it is not
+     * one of ExecutionReasonCode's provider codes. Workforce passes no
+     * signal today, so this branch is unreachable from here; it exists
+     * so the mapping is explicit instead of a cast. */
+    if (result.reason === "aborted") {
+      return { ok: false, errorCode: "execution_error", error: result.message, durationMs: result.durationMs }
+    }
     return { ok: false, errorCode: result.reason, error: result.message, durationMs: result.durationMs }
   }
 
