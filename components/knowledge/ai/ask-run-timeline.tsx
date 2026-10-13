@@ -34,8 +34,9 @@
 
 import { AlertTriangle, Check, Circle, Loader2, Minus } from "lucide-react"
 
-import { ASK_STEP_LABELS } from "@/lib/knowledge/agui"
+import type { Dictionary } from "@/lib/knowledge/i18n/dictionary"
 import type { AskRunState, AskStepState } from "@/lib/knowledge/ask-run"
+import { useT } from "../i18n"
 
 /**
  * How long a step took, from the stream's own two timestamps.
@@ -60,38 +61,35 @@ function stepDuration(step: AskStepState): string | null {
 /** The one-line detail under a step, built only from values the
  *  pipeline actually reported. Returns null when there is nothing
  *  true to say yet. */
-function stepDetail(step: AskStepState, run: AskRunState): string | null {
+function stepDetail(t: Dictionary, step: AskStepState, run: AskRunState): string | null {
   switch (step.name) {
     case "retrieval": {
       const r = run.retrieval
       if (!r) return null
-      const how = r.semanticSearch ? `${r.mode} search` : `${r.mode} search (no embeddings configured)`
-      return `${r.candidates} candidate${r.candidates === 1 ? "" : "s"} · ${how}`
+      const base = t.run.candidates(r.candidates, r.mode)
+      return r.semanticSearch ? base : t.run.noEmbeddings(base)
     }
     case "evidence": {
       const e = run.evidence
       if (!e) return null
       if (e.refused) {
-        return e.chunksRejected > 0
-          ? `nothing supported a claim — ${e.chunksRejected} passage${e.chunksRejected === 1 ? "" : "s"} were close but not evidence`
-          : "nothing in your library covers this"
+        return e.chunksRejected > 0 ? t.run.refusedWithRejects(e.chunksRejected) : t.run.refusedEmpty
       }
-      const used = `${e.chunksUsed} passage${e.chunksUsed === 1 ? "" : "s"} used`
-      return e.chunksRejected > 0 ? `${used} · ${e.chunksRejected} rejected` : used
+      const used = t.run.passagesUsed(e.chunksUsed)
+      return e.chunksRejected > 0 ? `${used} · ${t.run.rejected(e.chunksRejected)}` : used
     }
     case "generation": {
-      if (run.evidence?.refused) return "skipped — no model was asked"
+      if (run.evidence?.refused) return t.run.generationSkipped
       const u = run.usage
       if (!u) return null
-      return `${u.model} · ${u.inputTokens} in, ${u.outputTokens} out`
+      return t.run.usage(u.model, u.inputTokens, u.outputTokens)
     }
     case "verification": {
       const c = run.citations
       if (!c) return null
-      const n = c.citations.length
-      const base = `${n} citation${n === 1 ? "" : "s"} checked`
+      const base = t.run.citationsChecked(c.citations.length)
       return c.unresolvedCitationIds.length > 0
-        ? `${base} · ${c.unresolvedCitationIds.length} did not resolve`
+        ? `${base} · ${t.run.unresolved(c.unresolvedCitationIds.length)}`
         : base
     }
     default:
@@ -108,28 +106,28 @@ function stepDetail(step: AskStepState, run: AskRunState): string | null {
  * region, every step change re-announced all four. A separate concise
  * region announces the transition and leaves the list a list.
  */
-function liveAnnouncement(run: AskRunState, streaming: boolean): string {
-  if (run.phase === "error") return `Stopped. ${run.error?.message ?? ""}`.trim()
-  if (run.truncated) return "The connection ended before the answer finished."
+function liveAnnouncement(t: Dictionary, run: AskRunState, streaming: boolean): string {
+  if (run.phase === "error") return t.run.stoppedWith(run.error?.message ?? "").trim()
+  if (run.truncated) return t.run.connectionEnded
   const running = run.steps.find((s) => s.status === "running")
-  if (running) return `${ASK_STEP_LABELS[running.name]}…`
-  if (run.phase === "finished") return "Finished."
-  return streaming ? "Working…" : ""
+  if (running) return `${t.run.steps[running.name]}…`
+  if (run.phase === "finished") return t.run.finished
+  return streaming ? t.run.workingEllipsis : ""
 }
 
 /** A step the run will never reach is not "waiting" — say so. */
-function statusWord(step: AskStepState, run: AskRunState): string {
-  if (step.status === "pending" && step.name === "generation" && run.evidence?.refused) return "not needed"
-  if (step.status === "pending" && step.name === "verification" && run.evidence?.refused) return "not needed"
+function statusWord(t: Dictionary, step: AskStepState, run: AskRunState): string {
+  if (step.status === "pending" && step.name === "generation" && run.evidence?.refused) return t.run.status.notNeeded
+  if (step.status === "pending" && step.name === "verification" && run.evidence?.refused) return t.run.status.notNeeded
   switch (step.status) {
     case "pending":
-      return run.phase === "running" ? "waiting" : "not reached"
+      return run.phase === "running" ? t.run.status.waiting : t.run.status.notReached
     case "running":
-      return "in progress"
+      return t.run.status.inProgress
     case "done":
-      return "done"
+      return t.run.status.done
     case "failed":
-      return "failed"
+      return t.run.status.failed
   }
 }
 
@@ -151,17 +149,24 @@ function StepIcon({ step, run }: { step: AskStepState; run: AskRunState }) {
 }
 
 export function AskRunTimeline({ run, streaming }: { run: AskRunState; streaming: boolean }) {
+  const t = useT()
   return (
     <div className="max-w-[52ch]">
       <p className="pk-label text-[var(--pk-signal)]">
-        {run.phase === "error" ? "Stopped" : run.truncated ? "Interrupted" : streaming ? "Working" : "Done"}
+        {run.phase === "error"
+          ? t.run.stopped
+          : run.truncated
+            ? t.run.interrupted
+            : streaming
+              ? t.run.working
+              : t.run.done}
       </p>
 
       {/* The live region: one sentence, announced as it changes, so a
           screen reader hears each stage instead of silence followed by
           a wall of text. */}
       <p className="sr-only" role="status" aria-live="polite">
-        {liveAnnouncement(run, streaming)}
+        {liveAnnouncement(t, run, streaming)}
       </p>
 
       {/* A continuous rail behind the markers, so four steps read as
@@ -170,7 +175,7 @@ export function AskRunTimeline({ run, streaming }: { run: AskRunState; streaming
           misalign when a detail line wraps. */}
       <ol className="mt-5" aria-busy={streaming}>
         {run.steps.map((step, i) => {
-          const detail = stepDetail(step, run)
+          const detail = stepDetail(t, step, run)
           const duration = step.status === "done" ? stepDuration(step) : null
           const last = i === run.steps.length - 1
           return (
@@ -190,12 +195,12 @@ export function AskRunTimeline({ run, streaming }: { run: AskRunState; streaming
                         : "text-[14px] text-[var(--pk-ink)]"
                     }
                   >
-                    {ASK_STEP_LABELS[step.name]}
+                    {t.run.steps[step.name]}
                   </span>
                   {duration && <span className="pk-meta text-[var(--pk-ink-4)]">{duration}</span>}
                 </span>
                 {/* The status in words — not only an icon and a colour. */}
-                <span className="sr-only">: {statusWord(step, run)}</span>
+                <span className="sr-only">: {statusWord(t, step, run)}</span>
                 {detail && (
                   <span className="mt-1 block text-[13px] leading-[1.55] text-[var(--pk-ink-4)]">{detail}</span>
                 )}
@@ -214,8 +219,7 @@ export function AskRunTimeline({ run, streaming }: { run: AskRunState; streaming
       {/* Truncation is not failure, and is not described as one. */}
       {run.truncated && run.phase !== "error" && (
         <p className="mt-5 border-l-2 border-[var(--pk-rule-2)] pl-3.5 text-[14px] leading-[1.6] text-[var(--pk-ink-3)]">
-          The connection ended before the answer finished. Nothing was reported as failing — asking again will start a
-          fresh run.
+          {t.run.truncated}
         </p>
       )}
     </div>

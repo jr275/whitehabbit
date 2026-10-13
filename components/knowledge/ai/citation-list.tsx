@@ -27,16 +27,18 @@
 import Link from "next/link"
 import { ArrowUpRight } from "lucide-react"
 import type { AnsweredCitation } from "@/lib/knowledge/ai"
+import { useT } from "../i18n"
 
 /** The passages. Skipped entirely when no citation carried one, rather
  *  than rendered as an empty section with a heading. */
 export function EvidenceList({ citations }: { citations: AnsweredCitation[] }) {
+  const t = useT()
   const withText = citations.filter((c) => c.used && c.excerpt)
   if (withText.length === 0) return null
 
   return (
     <section className="pk-section">
-      <h2 className="pk-label mb-5 text-[var(--pk-evidence)]">Evidence</h2>
+      <h2 className="pk-label mb-5 text-[var(--pk-evidence)]">{t.ask.evidence}</h2>
       <ol className="flex flex-col gap-6">
         {withText.map((c) => (
           <li key={c.citationId} id={`source-${c.citationId}`} className="flex scroll-mt-24 gap-3.5">
@@ -61,6 +63,7 @@ export function EvidenceList({ citations }: { citations: AnsweredCitation[] }) {
 
 /** The pieces. Rows, not cards — they are entries in one list. */
 export function CitationList({ citations }: { citations: AnsweredCitation[] }) {
+  const t = useT()
   if (citations.length === 0) return null
 
   const cited = citations.filter((c) => c.used)
@@ -68,7 +71,7 @@ export function CitationList({ citations }: { citations: AnsweredCitation[] }) {
 
   return (
     <section className="pk-section">
-      <h2 className="pk-label mb-5">Sources</h2>
+      <h2 className="pk-label mb-5">{t.ask.sources}</h2>
 
       {cited.length > 0 && (
         <ul className="pk-rows">
@@ -80,7 +83,7 @@ export function CitationList({ citations }: { citations: AnsweredCitation[] }) {
 
       {consulted.length > 0 && (
         <div className="mt-8">
-          <p className="pk-label mb-4">Consulted, not cited</p>
+          <p className="pk-label mb-4">{t.ask.consultedNotCited}</p>
           <ul className="pk-rows">
             {consulted.map((c) => (
               <SourceRow key={c.citationId} citation={c} muted />

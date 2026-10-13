@@ -23,11 +23,12 @@
  * own shell (components/studio/top-nav.tsx) in its own identity.
  * ================================================================== */
 
-import { Moon, Plus, Search, Settings, Sun } from "lucide-react"
+import { Languages, Moon, Plus, Search, Settings, Sun } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import type { KnowledgeTheme } from "@/lib/knowledge/theme"
 import { AccountControl } from "./account-control"
+import { LOCALE_NAMES, useLocale, useT } from "./i18n"
 import { cn } from "@/lib/utils"
 import {
   KNOWLEDGE_ASK,
@@ -46,6 +47,9 @@ export function KnowledgeSidebar({
   onToggleTheme: () => void
 }) {
   const pathname = usePathname()
+  const t = useT()
+  const { locale, setLocale } = useLocale()
+  const other = locale === "pt-BR" ? "en" : "pt-BR"
 
   return (
     <aside className="sticky top-0 hidden h-dvh w-[var(--pk-rail)] shrink-0 flex-col border-r border-[var(--pk-rule)] px-5 lg:flex">
@@ -55,7 +59,7 @@ export function KnowledgeSidebar({
       <Link
         href="/knowledge/home"
         className="mt-7 block text-[17px] font-semibold tracking-[-0.02em] text-[var(--pk-ink)]"
-        aria-label="Keeply home"
+        aria-label={t.common.keeplyHome}
       >
         Keeply
       </Link>
@@ -68,7 +72,7 @@ export function KnowledgeSidebar({
           className="flex h-10 w-full items-center gap-2.5 rounded-full border border-[var(--pk-rule-2)] bg-[var(--pk-raised)] pl-3.5 pr-2 text-left transition-colors hover:border-[var(--pk-ink-4)]"
         >
           <Search className="size-[15px] shrink-0 text-[var(--pk-ink-3)]" strokeWidth={1.9} />
-          <span className="flex-1 truncate text-[13.5px] text-[var(--pk-ink-3)]">Search</span>
+          <span className="flex-1 truncate text-[13.5px] text-[var(--pk-ink-3)]">{t.common.search}</span>
           <kbd className="pk-label rounded px-1 py-1 text-[9.5px] tracking-[0.08em]">⌘K</kbd>
         </button>
 
@@ -84,8 +88,8 @@ export function KnowledgeSidebar({
        *  between the rail's content and its capture button. The spacer
        *  now sits BETWEEN the groups, which puts tier 3 where the
        *  comment always said it went and leaves no void anywhere. */}
-      <nav className="mt-8 flex flex-1 flex-col" aria-label="Knowledge navigation">
-        <p className="pk-label px-1 pb-2.5">Browse</p>
+      <nav className="mt-8 flex flex-1 flex-col" aria-label={t.nav.knowledgeNavigation}>
+        <p className="pk-label px-1 pb-2.5">{t.nav.browse}</p>
         <div className="space-y-px">
           {KNOWLEDGE_NAV.map((item) => (
             <NavLink key={item.href} item={item} active={isNavActive(pathname, item.href)} />
@@ -99,7 +103,7 @@ export function KnowledgeSidebar({
             <NavLink key={item.href} item={item} active={isNavActive(pathname, item.href)} />
           ))}
           <NavLink
-            item={{ href: "/knowledge/settings", label: "Settings", icon: Settings }}
+            item={{ href: "/knowledge/settings", labelKey: "settings", icon: Settings }}
             active={isNavActive(pathname, "/knowledge/settings")}
           />
         </div>
@@ -114,7 +118,7 @@ export function KnowledgeSidebar({
         className="mt-5 mb-4 flex h-10 w-full items-center justify-center gap-1.5 rounded-full bg-[var(--pk-accent)] text-[13.5px] font-medium text-[var(--pk-accent-ink)] transition-opacity hover:opacity-90"
       >
         <Plus className="size-4" strokeWidth={2.4} />
-        Save a link
+        {t.common.saveALink}
       </button>
 
       {/* ── Appearance ─────────────────────────────────────────────
@@ -124,11 +128,30 @@ export function KnowledgeSidebar({
       <button
         type="button"
         onClick={onToggleTheme}
-        aria-label={theme === "black" ? "Switch to the light surface" : "Switch to the dark surface"}
+        aria-label={theme === "black" ? t.common.switchToLight : t.common.switchToDark}
         className="-mx-2 mb-1 flex w-[calc(100%+1rem)] items-center gap-2.5 rounded-[var(--pk-r)] px-2 py-1.5 text-left text-[13px] text-[var(--pk-ink-3)] transition-colors hover:bg-[var(--pk-sunken)] hover:text-[var(--pk-ink)]"
       >
         {theme === "black" ? <Sun className="size-[15px]" strokeWidth={1.8} /> : <Moon className="size-[15px]" strokeWidth={1.8} />}
-        {theme === "black" ? "Light" : "Dark"}
+        {theme === "black" ? t.common.light : t.common.dark}
+      </button>
+
+      {/* ── Language ───────────────────────────────────────────────
+          Beside the theme toggle, in the part of the rail that is about
+          the reader rather than the library — and, like it, it names
+          the state it moves TO. A control labelled "Português" while
+          the screen is already in Portuguese tells you nothing; one
+          labelled "English" tells you what pressing it does. The name
+          is always written IN its own language, because a language
+          named in a language you cannot read is not a choice. */}
+      <button
+        type="button"
+        onClick={() => setLocale(other)}
+        lang={other}
+        aria-label={`${t.common.language}: ${LOCALE_NAMES[other]}`}
+        className="-mx-2 mb-1 flex w-[calc(100%+1rem)] items-center gap-2.5 rounded-[var(--pk-r)] px-2 py-1.5 text-left text-[13px] text-[var(--pk-ink-3)] transition-colors hover:bg-[var(--pk-sunken)] hover:text-[var(--pk-ink)]"
+      >
+        <Languages className="size-[15px]" strokeWidth={1.8} />
+        {LOCALE_NAMES[other]}
       </button>
 
       {/* ── Account ───────────────────────────────────────────── */}
@@ -141,6 +164,7 @@ export function KnowledgeSidebar({
 /** Ask gets a weight no browse item gets: full ink, a heavier face, and
  *  its own row. It is a destination that answers, not a place to look. */
 function AskLink({ active }: { active: boolean }) {
+  const t = useT()
   const Icon = KNOWLEDGE_ASK.icon
   return (
     <Link
@@ -154,7 +178,7 @@ function AskLink({ active }: { active: boolean }) {
       )}
     >
       <Icon className="size-[15px]" strokeWidth={1.9} />
-      Ask your knowledge
+      {t.nav.askYourKnowledge}
     </Link>
   )
 }
@@ -164,6 +188,7 @@ function AskLink({ active }: { active: boolean }) {
  *  content it sits beside and the single most dashboard-looking
  *  convention in the pattern library. */
 function NavLink({ item, active }: { item: (typeof KNOWLEDGE_NAV)[number]; active: boolean }) {
+  const t = useT()
   const Icon = item.icon
   return (
     <Link
@@ -185,7 +210,7 @@ function NavLink({ item, active }: { item: (typeof KNOWLEDGE_NAV)[number]; activ
         <span aria-hidden className="absolute left-[-8px] top-1/2 h-4 w-px -translate-y-1/2 bg-[var(--pk-ink)]" />
       )}
       <Icon className="size-[15px] shrink-0" strokeWidth={active ? 2 : 1.75} />
-      {item.label}
+      {t.nav[item.labelKey]}
     </Link>
   )
 }

@@ -20,6 +20,7 @@ import {
   Square,
 } from "lucide-react"
 import type { KnowledgeDocument } from "@/lib/knowledge/types"
+import { useLocale, useT } from "./i18n"
 import { KIND_META, askAboutHref, durationLabel, savedAgo } from "@/lib/knowledge/config"
 import { patchItem, summarizeItem } from "@/lib/knowledge/client"
 import { DiscoveryPanel } from "./discovery-panel"
@@ -65,6 +66,8 @@ function videoEmbed(rawUrl: string): string | null {
 }
 
 export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
+  const t = useT()
+  const { locale, n } = useLocale()
   const [favorite, setFavorite] = useState(doc.favorite)
   const [progress, setProgress] = useState(0)
   // Local override so a freshly-generated summary shows immediately —
@@ -172,10 +175,10 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
               className="pk-meta flex h-8 items-center gap-1.5 rounded-full px-2.5 transition-colors hover:bg-[var(--pk-sunken)] hover:text-[var(--pk-ink)]"
             >
               <Sparkles className="size-3.5" />
-              <span className="hidden sm:inline">Ask about this</span>
+              <span className="hidden sm:inline">{t.reader.askAboutThis}</span>
             </Link>
             <IconButton
-              label={favorite ? "Remove favorite" : "Add favorite"}
+              label={favorite ? t.reader.removeFavorite : t.reader.addFavorite}
               active={favorite}
               onClick={toggleFavorite}
             >
@@ -185,7 +188,7 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
               href={doc.url}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="Open original in a new tab"
+              aria-label={t.reader.openOriginal}
               className="flex size-8 items-center justify-center rounded-full text-[var(--pk-ink-3)] transition-colors hover:bg-[var(--pk-sunken)] hover:text-[var(--pk-ink)]"
             >
               <ExternalLink className="h-4 w-4" />
@@ -251,12 +254,12 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
             cannot be supported: an unanalyzed item says so rather than
             showing an empty result. */}
         {!processing && !failed && (
-          <section aria-label="Insights" className="pk-section mt-10">
-            <h2 className="pk-label mb-6">Insights</h2>
+          <section aria-label={t.reader.insights} className="pk-section mt-10">
+            <h2 className="pk-label mb-6">{t.reader.insights}</h2>
 
             {doc.topics.length > 0 && (
               <div className="mb-7">
-                <p className="pk-label mb-2.5">Topics</p>
+                <p className="pk-label mb-2.5">{t.reader.topics}</p>
                 <div className="flex flex-wrap gap-x-4 gap-y-2">
                   {doc.topics.map((t) => (
                     <Link
@@ -278,16 +281,16 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
         {/* ── SOURCE, at the end: where this came from, and the way
             back to it. The reader wants this after the piece, not
             beside it. */}
-        <section aria-label="Source" className="pk-section">
-          <h2 className="pk-label mb-6">Source</h2>
+        <section aria-label={t.reader.source} className="pk-section">
+          <h2 className="pk-label mb-6">{t.reader.source}</h2>
           <dl className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
-            <Meta label="Source" value={doc.source} />
-            {doc.author ? <Meta label="Author" value={doc.author} /> : null}
-            {doc.domain ? <Meta label="Origin" value={doc.domain} /> : null}
-            <Meta label="Type" value={KIND_META[doc.kind].label} />
-            {doc.wordCount ? <Meta label="Words" value={doc.wordCount.toLocaleString()} /> : null}
-            <Meta label="Saved" value={savedAgo(doc.savedAt)} />
-            {doc.publishedAt ? <Meta label="Published" value={new Date(doc.publishedAt).toLocaleDateString()} /> : null}
+            <Meta label={t.reader.source} value={doc.source} />
+            {doc.author ? <Meta label={t.reader.author} value={doc.author} /> : null}
+            {doc.domain ? <Meta label={t.reader.origin} value={doc.domain} /> : null}
+            <Meta label={t.reader.type} value={t.kinds[doc.kind]} />
+            {doc.wordCount ? <Meta label={t.reader.words} value={n(doc.wordCount)} /> : null}
+            <Meta label={t.reader.saved} value={savedAgo(t, locale, doc.savedAt)} />
+            {doc.publishedAt ? <Meta label={t.reader.published} value={new Date(doc.publishedAt).toLocaleDateString(locale)} /> : null}
           </dl>
           <a
             href={doc.url}
@@ -306,6 +309,7 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
 /* ── Header pieces ──────────────────────────────────────────────── */
 
 function SourceLine({ doc }: { doc: KnowledgeDocument }) {
+  const t = useT()
   const [iconFailed, setIconFailed] = useState(false)
   const Kind = KIND_META[doc.kind].icon
   return (
@@ -326,7 +330,7 @@ function SourceLine({ doc }: { doc: KnowledgeDocument }) {
       )}
       <span className="truncate">{doc.source || doc.domain}</span>
       <span aria-hidden className="text-[var(--pk-rule-2)]">/</span>
-      <span className="shrink-0">{KIND_META[doc.kind].label}</span>
+      <span className="shrink-0">{t.kinds[doc.kind]}</span>
     </div>
   )
 }
@@ -343,8 +347,9 @@ function SourceLine({ doc }: { doc: KnowledgeDocument }) {
  *  rule in the accent, and the words themselves in ordinary ink. The
  *  claim "Keeply wrote this" is fully carried; the shout is not. */
 function AiSummaryCard({ summary }: { summary: string }) {
+  const t = useT()
   return (
-    <aside aria-label="AI summary" className="mt-9 border-l-2 border-[var(--pk-accent)] pl-5">
+    <aside aria-label={t.reader.aiSummary} className="mt-9 border-l-2 border-[var(--pk-accent)] pl-5">
       <p className="pk-label flex items-center gap-1.5 text-[var(--pk-accent)]">
         <Sparkles className="size-3" />
         Summary
@@ -355,7 +360,9 @@ function AiSummaryCard({ summary }: { summary: string }) {
 }
 
 function MetaRow({ doc }: { doc: KnowledgeDocument }) {
-  const duration = durationLabel(doc.kind, doc.durationMin)
+  const t = useT()
+  const { locale } = useLocale()
+  const duration = durationLabel(t, doc.kind, doc.durationMin)
   /* A byline, not a stats bar. The kind already appears in the source
      line above, so repeating it here between two rules was chrome
      restating chrome. */
@@ -373,7 +380,7 @@ function MetaRow({ doc }: { doc: KnowledgeDocument }) {
           <span aria-hidden>·</span>
         </>
       )}
-      <span>{savedAgo(doc.savedAt)}</span>
+      <span>{savedAgo(t, locale, doc.savedAt)}</span>
     </div>
   )
 }
@@ -393,6 +400,7 @@ function AiSummaryBlock({
   summary: string | undefined
   onSummary: (summary: string) => void
 }) {
+  const t = useT()
   const [state, setState] = useState<"idle" | "loading" | "error">("idle")
 
   if (docId.startsWith("kn_guest_")) return null
@@ -422,7 +430,7 @@ function AiSummaryBlock({
         type="button"
         onClick={summarize}
         disabled={state === "loading"}
-        title="Summarize this article with AI"
+        title={t.reader.summarizeTitle}
         className="inline-flex items-center gap-1.5 text-[13.5px] text-[var(--pk-ink-2)] transition-colors hover:text-[var(--pk-ink)] disabled:cursor-not-allowed disabled:opacity-60"
       >
         {state === "loading" ? (
@@ -430,7 +438,7 @@ function AiSummaryBlock({
         ) : (
           <Sparkles className="size-3.5 text-[var(--pk-accent)]" aria-hidden />
         )}
-        {state === "loading" ? "Summarizing…" : "Summarize"}
+        {state === "loading" ? t.reader.summarizing : t.reader.summarize}
       </button>
       {state === "error" ? (
         <span role="status" className="pk-meta text-[var(--pk-danger)]">
@@ -447,6 +455,7 @@ function AiSummaryBlock({
  *  Reader's own idiom), not a music player: no waveform, no scrubber,
  *  no album-art chrome. */
 function ReadAloudControls({ read }: { read: UseReadAloudResult }) {
+  const t = useT()
   if (read.state === "unsupported") {
     return (
       <span className="pk-meta inline-flex items-center gap-1.5">
@@ -470,9 +479,9 @@ function ReadAloudControls({ read }: { read: UseReadAloudResult }) {
       <button
         type="button"
         onClick={() => (isPlaying ? read.pause() : isPaused ? read.resume() : read.play())}
-        aria-label={isPlaying ? "Pause reading" : isPaused ? "Resume reading" : "Listen to this article"}
+        aria-label={isPlaying ? t.reader.pauseReading : isPaused ? t.reader.resumeReading : t.reader.listen}
         aria-pressed={isPlaying}
-        title={isPlaying ? "Pause reading" : isPaused ? "Resume reading" : "Listen to this article"}
+        title={isPlaying ? t.reader.pauseReading : isPaused ? t.reader.resumeReading : t.reader.listen}
         className="inline-flex items-center gap-1.5 text-[13.5px] text-[var(--pk-ink-2)] transition-colors hover:text-[var(--pk-ink)]"
       >
         {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
@@ -481,13 +490,13 @@ function ReadAloudControls({ read }: { read: UseReadAloudResult }) {
 
       {isActive ? (
         <>
-          <IconButton label="Previous paragraph" onClick={read.previous} disabled={!read.hasPrevious}>
+          <IconButton label={t.reader.previousParagraph} onClick={read.previous} disabled={!read.hasPrevious}>
             <ChevronLeft className="size-4" />
           </IconButton>
-          <IconButton label="Next paragraph" onClick={read.next} disabled={!read.hasNext}>
+          <IconButton label={t.reader.nextParagraph} onClick={read.next} disabled={!read.hasNext}>
             <ChevronRight className="size-4" />
           </IconButton>
-          <IconButton label="Stop reading" onClick={read.stop}>
+          <IconButton label={t.reader.stopReading} onClick={read.stop}>
             <Square className="size-3.5" />
           </IconButton>
           <RateSelect read={read} />
@@ -516,9 +525,10 @@ function ReadAloudControls({ read }: { read: UseReadAloudResult }) {
  * Speech API fixes an utterance's rate when it is created. See
  * ReadAloudController.setRate. */
 function RateSelect({ read }: { read: UseReadAloudResult }) {
+  const t = useT()
   return (
     <label className="flex items-center">
-      <span className="sr-only">Playback speed</span>
+      <span className="sr-only">{t.reader.playbackSpeed}</span>
       <select
         value={read.rate}
         onChange={(e) => read.setRate(Number(e.target.value) as ReadAloudRate)}
@@ -701,13 +711,14 @@ function VideoBlock({ doc }: { doc: KnowledgeDocument }) {
 }
 
 function PdfBlock({ doc }: { doc: KnowledgeDocument }) {
+  const t = useT()
   return (
     <div className="mt-8 flex flex-col items-center gap-5 rounded-2xl border border-[var(--kn-edge)] bg-[var(--kn-paper)] px-6 py-14 text-center">
       <span className="flex size-14 items-center justify-center rounded-2xl bg-[var(--kn-ai)]/10 text-[var(--kn-ai)]">
         <FileType2 className="size-7" />
       </span>
       <div>
-        <p className="font-serif text-xl font-medium text-foreground">This is a PDF document.</p>
+        <p className="font-serif text-xl font-medium text-foreground">{t.reader.isPdf}</p>
         <p className="mx-auto mt-1.5 max-w-sm text-pretty text-sm text-muted-foreground">
           PDFs open best in their own viewer. Open it in a new tab to read, search and download.
         </p>
@@ -725,24 +736,26 @@ function PdfBlock({ doc }: { doc: KnowledgeDocument }) {
 }
 
 function ProcessingBlock() {
+  const t = useT()
   return (
     <div className="mt-10 flex flex-col items-center gap-3 rounded-2xl border border-[var(--kn-edge)] bg-[var(--kn-paper)] py-16 text-center">
       <Loader2 className="size-6 animate-spin text-[var(--kn-ai)]" />
-      <p className="text-sm text-foreground">We&apos;re still fetching and extracting this.</p>
-      <p className="text-xs text-muted-foreground">This page will fill in with the full text once it&apos;s ready.</p>
+      <p className="text-sm text-foreground">{t.reader.stillFetching}</p>
+      <p className="text-xs text-muted-foreground">{t.reader.stillFetchingHint}</p>
     </div>
   )
 }
 
 function FailedBlock({ url, error }: { url: string; error?: string }) {
+  const t = useT()
   return (
     <div className="mt-10 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-[var(--kn-edge)] bg-[var(--kn-paper)] py-16 text-center">
       <span className="flex size-11 items-center justify-center rounded-full bg-destructive/10 text-destructive">
         <AlertCircle className="size-5" />
       </span>
-      <p className="text-sm font-medium text-foreground">We couldn&apos;t extract this page.</p>
+      <p className="text-sm font-medium text-foreground">{t.reader.extractFailed}</p>
       <p className="max-w-sm text-xs text-muted-foreground">
-        {error ? error : "The source may block automated reading. You can still open it at the source."}
+        {error ? error : t.reader.extractFailedHint}
       </p>
       <OpenOriginalPill url={url} />
     </div>
@@ -750,12 +763,13 @@ function FailedBlock({ url, error }: { url: string; error?: string }) {
 }
 
 function UnextractedBlock({ url }: { url: string }) {
+  const t = useT()
   return (
     <div className="mt-10 flex flex-col items-center gap-3 rounded-2xl border border-[var(--kn-edge)] bg-[var(--kn-paper)] py-16 text-center">
       <span className="flex size-11 items-center justify-center rounded-full bg-secondary text-muted-foreground">
         <FileText className="size-5" />
       </span>
-      <p className="text-sm font-medium text-foreground">There&apos;s no readable text for this one.</p>
+      <p className="text-sm font-medium text-foreground">{t.reader.noReadableText}</p>
       <p className="max-w-sm text-xs text-muted-foreground">
         We saved the link, but this page didn&apos;t expose article text we could pull in.
       </p>

@@ -52,6 +52,7 @@ import {
   MIN_QUESTION_CHARS,
   type KnowledgeAnswer,
 } from "@/lib/knowledge/ai"
+import { useLocale, useT } from "../i18n"
 import { AnswerBody } from "./answer-body"
 import { AskRunTimeline } from "./ask-run-timeline"
 import { CitationList, EvidenceList } from "./citation-list"
@@ -95,6 +96,8 @@ export function AskView({ libraryIsEmpty, scopeCount = null }: { libraryIsEmpty:
    * all of them. The outcome states below are unchanged: the stream
    * still delivers the whole KnowledgeAnswer as the record, and it is
    * classified by the same classifyAnswer the non-streaming path uses. */
+  const t = useT()
+  const { n } = useLocale()
   const { question, run, failure, streaming, ask, cancel } = useKnowledgeAskStream()
   const [draft, setDraft] = useState("")
   const [recent, setRecent] = useState<string[]>([])
@@ -139,17 +142,17 @@ export function AskView({ libraryIsEmpty, scopeCount = null }: { libraryIsEmpty:
           for assistive tech — a page with no h1 is a worse outcome
           than a quiet one. */}
       <header className={asked ? "pt-10 sm:pt-12" : "pt-14 sm:pt-20"}>
-        <p className="pk-label">Ask</p>
+        <p className="pk-label">{t.ask.eyebrow}</p>
         <h1
           className={
             asked ? "sr-only" : "pk-display mt-4 max-w-[16ch] text-[var(--pk-ink)]"
           }
         >
-          Ask your knowledge.
+          {t.ask.title}
         </h1>
         {!asked && (
           <p className="mt-5 max-w-[52ch] text-[15px] leading-[1.65] text-[var(--pk-ink-3)]">
-            Answers are built only from what you&rsquo;ve saved, and every claim carries the passage it came from.
+            {t.ask.lede}
           </p>
         )}
       </header>
@@ -186,8 +189,8 @@ export function AskView({ libraryIsEmpty, scopeCount = null }: { libraryIsEmpty:
               }
             }}
             disabled={libraryIsEmpty}
-            placeholder="What do I know about…?"
-            aria-label="Ask your knowledge"
+            placeholder={t.ask.placeholder}
+            aria-label={t.ask.fieldLabel}
             aria-describedby="ask-composer-hint"
             maxLength={MAX_QUESTION_CHARS}
             className="disabled:cursor-not-allowed"
@@ -201,7 +204,7 @@ export function AskView({ libraryIsEmpty, scopeCount = null }: { libraryIsEmpty:
             <button
               type="button"
               onClick={cancel}
-              aria-label="Stop"
+              aria-label={t.ask.stopLabel}
               className="flex size-9 shrink-0 items-center justify-center rounded-full border border-[var(--pk-rule-2)] text-[var(--pk-ink-2)] transition-colors hover:border-[var(--pk-ink-4)] hover:text-[var(--pk-ink)]"
             >
               <Square className="size-3 fill-current" strokeWidth={0} />
@@ -210,7 +213,7 @@ export function AskView({ libraryIsEmpty, scopeCount = null }: { libraryIsEmpty:
             <button
               type="submit"
               disabled={draft.trim().length < MIN_QUESTION_CHARS}
-              aria-label="Ask"
+              aria-label={t.ask.sendLabel}
               className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[var(--pk-accent)] text-[var(--pk-accent-ink)] transition-opacity disabled:opacity-25"
             >
               <ArrowUp className="size-4" strokeWidth={2.5} />
@@ -224,29 +227,29 @@ export function AskView({ libraryIsEmpty, scopeCount = null }: { libraryIsEmpty:
         <div className="mt-2.5 flex flex-wrap items-baseline justify-between gap-x-5 gap-y-1.5">
           <p className="pk-meta">
             {libraryIsEmpty
-              ? "Nothing saved yet."
+              ? t.ask.nothingSaved
               : scopeCount !== null
-                ? `Answered from ${scopeCount === 1 ? "the 1 item" : `all ${scopeCount.toLocaleString()} items`} you’ve saved.`
+                ? t.ask.scope(scopeCount, n(scopeCount))
                 : /* The library count has not been read yet. Saying a
                      number here would be a guess about their data. */
                   ""}
           </p>
           <p id="ask-composer-hint" className="pk-meta">
             {busy ? (
-              "Esc to stop"
+              t.ask.stopHint
             ) : draft.length >= COUNTER_VISIBLE_FROM ? (
               <span className={draft.length >= MAX_QUESTION_CHARS ? "text-[var(--pk-danger)]" : undefined}>
-                {draft.length.toLocaleString()} / {MAX_QUESTION_CHARS.toLocaleString()}
+                {n(draft.length)} / {n(MAX_QUESTION_CHARS)}
               </span>
             ) : (
-              "Enter to send · Shift+Enter for a new line"
+              t.ask.sendHint
             )}
           </p>
         </div>
 
         {!libraryIsEmpty && recent.length > 0 && !asked && (
           <div className="mt-6">
-            <p className="pk-label mb-2.5">Recent</p>
+            <p className="pk-label mb-2.5">{t.ask.recent}</p>
             <ul className="flex flex-col">
               {recent.map((q) => (
                 <li key={q}>
@@ -274,7 +277,7 @@ export function AskView({ libraryIsEmpty, scopeCount = null }: { libraryIsEmpty:
       ) : !asked ? (
         <IdleState />
       ) : (
-        <section className="mt-10" aria-label="Your question and its answer">
+        <section className="mt-10" aria-label={t.ask.exchangeLabel}>
           <AskedTurn question={question} />
 
           <div className="mt-7">
@@ -309,9 +312,10 @@ export function AskView({ libraryIsEmpty, scopeCount = null }: { libraryIsEmpty:
  *  are the whole distinction between this turn and the answer — which
  *  is as much chrome as one exchange needs. */
 function AskedTurn({ question }: { question: string }) {
+  const t = useT()
   return (
     <div className="pk-turn-asked max-w-[var(--pk-measure)]">
-      <p className="pk-label mb-2 text-[var(--pk-accent)]">You asked</p>
+      <p className="pk-label mb-2 text-[var(--pk-accent)]">{t.ask.youAsked}</p>
       {/* whitespace-pre-line: a question typed over several lines is
           read back the way it was written. */}
       <p className="whitespace-pre-line text-[15.5px] leading-[1.6] text-[var(--pk-ink-2)]">{question}</p>
@@ -329,17 +333,16 @@ function Panel({ children }: { children: React.ReactNode }) {
  *  ask. Shown instead of letting a question run and reporting a
  *  refusal that would read as a failure of the feature. */
 function EmptyLibraryState() {
+  const t = useT()
   return (
     <Panel>
-      <p className="text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]">Nothing to ask yet.</p>
-      <p className="mt-2 text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">
-        Ask answers only from what you&apos;ve saved. Save a few pieces and this becomes useful.
-      </p>
+      <p className="text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]">{t.ask.emptyTitle}</p>
+      <p className="mt-2 text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">{t.ask.emptyBody}</p>
       <button
         onClick={openSaveDialog}
         className="mt-4 text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
       >
-        Save a link
+        {t.common.saveALink}
       </button>
     </Panel>
   )
@@ -348,11 +351,10 @@ function EmptyLibraryState() {
 /** 2. Idle. No suggested questions: a canned prompt is a claim about
  *  what is in the library, and this component does not know. */
 function IdleState() {
+  const t = useT()
   return (
     <Panel>
-      <p className="text-[14px] leading-[1.65] text-[var(--pk-ink-4)]">
-        Your answer, the passages behind it and the pieces they came from will appear here.
-      </p>
+      <p className="text-[14px] leading-[1.65] text-[var(--pk-ink-4)]">{t.ask.idle}</p>
     </Panel>
   )
 }
@@ -364,17 +366,16 @@ function IdleState() {
 
 /** 4/5/6. The answer, its citations and its source cards. */
 function AnswerState({ answer, run }: { answer: KnowledgeAnswer; run: AskRunState }) {
+  const t = useT()
   const grounded = isFullyGrounded(answer)
+  const ids = answer.unresolvedCitationIds.map((id) => `[${id}]`).join(" ")
   return (
     <article>
       {!grounded ? (
         <div className="flex max-w-[60ch] items-start gap-2.5 border-l-2 border-[var(--pk-danger)] pl-3.5">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[var(--pk-danger)]" />
           <p className="text-[13px] leading-[1.6] text-[var(--pk-ink-2)]">
-            This answer refers to {answer.unresolvedCitationIds.length === 1 ? "a source" : "sources"} that
-            {answer.unresolvedCitationIds.length === 1 ? " was" : " were"} not retrieved
-            {" "}({answer.unresolvedCitationIds.map((id) => `[${id}]`).join(" ")}). Treat it as unverified — those
-            references point to nothing in your library.
+            {answer.unresolvedCitationIds.length === 1 ? t.ask.ungroundedOne(ids) : t.ask.ungrounded(ids)}
           </p>
         </div>
       ) : null}
@@ -382,7 +383,7 @@ function AnswerState({ answer, run }: { answer: KnowledgeAnswer; run: AskRunStat
       {/* ANSWER → EVIDENCE → SOURCES. The order is the argument: the
           claim, the text that backs it, then where that text lives. */}
       <section className="pk-section">
-        <h2 className="pk-label mb-5">Answer</h2>
+        <h2 className="pk-label mb-5">{t.ask.answer}</h2>
         <AnswerBody text={answer.answer} citations={answer.citations} />
       </section>
       <EvidenceList citations={answer.citations} />
@@ -397,21 +398,20 @@ function AnswerState({ answer, run }: { answer: KnowledgeAnswer; run: AskRunStat
  *  difference is actionable: the topic is nearby in the library but
  *  nothing in it supports a claim. */
 function InsufficientEvidenceState({ answer }: { answer: KnowledgeAnswer }) {
+  const t = useT()
   return (
     <Panel>
       <div className="max-w-[52ch]">
-        <p className="text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]">Not enough to answer this.</p>
+        <p className="text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]">{t.ask.insufficientTitle}</p>
         <p className="mt-2 text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">
-          Your library has {answer.retrieval.chunksRetrieved === 1 ? "a passage" : "passages"} near this topic, but
-          {answer.retrieval.chunksRetrieved === 1 ? " it isn't" : " none is"} close enough to answer from. Rather than
-          guess, nothing was generated.
+          {t.ask.insufficientBody(answer.retrieval.chunksRetrieved)}
         </p>
       </div>
       <Link
         href="/knowledge/library"
         className="mt-4 inline-block text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
       >
-        Browse your library instead
+        {t.ask.browseInstead}
       </Link>
     </Panel>
   )
@@ -419,12 +419,11 @@ function InsufficientEvidenceState({ answer }: { answer: KnowledgeAnswer }) {
 
 /** 8. No results — retrieval found nothing at all. */
 function NoResultsState({ answer }: { answer: KnowledgeAnswer }) {
+  const t = useT()
   return (
     <Panel>
       <div className="max-w-[52ch]">
-        <p className="text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]">
-          Nothing in your library covers this.
-        </p>
+        <p className="text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]">{t.ask.noResultsTitle}</p>
         <p className="mt-2 text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">{answer.answer}</p>
       </div>
       {/* Without meaning-based search, "nothing matched" means
@@ -439,11 +438,11 @@ function NoResultsState({ answer }: { answer: KnowledgeAnswer }) {
 
 /** 9/10/11. Every failure, named. */
 function ErrorState({ failure, onRetry }: { failure: AskFailure; onRetry: () => void }) {
-  const copy = FAILURE_COPY[failure.kind]
+  const t = useT()
   return (
     <div className="max-w-[48ch]">
       <div className="max-w-[52ch] border-l-2 border-[var(--pk-danger)] pl-3.5">
-        <p className="text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]">{copy.title}</p>
+        <p className="text-[17px] font-medium tracking-[-0.011em] text-[var(--pk-ink)]">{t.askFailure[failure.kind]}</p>
         {/* The server's own message, not a rewrite of it — it carries
             the specifics (which limit, which credential). */}
         <p className="mt-2 text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">{failure.message}</p>
@@ -453,34 +452,38 @@ function ErrorState({ failure, onRetry }: { failure: AskFailure; onRetry: () => 
           onClick={onRetry}
           className="mt-4 text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
         >
-          Try again
+          {t.common.tryAgain}
         </button>
       ) : failure.kind === "unauthorized" ? (
         <Link
           href="/login?callbackUrl=/knowledge/home"
           className="mt-4 inline-block text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
         >
-          Sign in
+          {t.common.signIn}
         </Link>
       ) : null}
     </div>
   )
 }
 
-/* Titles only. The icons these used to carry (a shield, a clock, a
+/* The failure titles live in the dictionary, under `askFailure`, keyed
+ * by the SERVER's own taxonomy. The line below is not decoration: it
+ * makes TypeScript check that the dictionary covers every AskFailure
+ * kind — in BOTH languages at once, since they share a key set — so a
+ * new failure kind cannot ship with an empty heading in Portuguese.
+ *
+ * The icons these titles used to carry (a shield, a clock, a
  * broken-wifi glyph) were decoration for text that already says exactly
  * what happened, and each one arrived inside a rounded square — the
  * shape that makes an error state look like a dashboard widget. */
-const FAILURE_COPY: Record<AskFailure["kind"], { title: string }> = {
-  unauthorized: { title: "Sign in to ask." },
-  invalid_request: { title: "That question can't be asked." },
-  rate_limited: { title: "Too many questions just now." },
-  provider_unavailable: { title: "Ask isn't configured." },
-  provider_error: { title: "Couldn't reach the model." },
-  malformed_response: { title: "Unreadable response." },
-  network: { title: "You appear to be offline." },
-  unknown: { title: "Something went wrong." },
-}
+type FailureCopyIsExhaustive = Record<AskFailure["kind"], string> extends Pick<
+  ReturnType<typeof useT>["askFailure"],
+  AskFailure["kind"]
+>
+  ? true
+  : never
+const _failureCopyIsExhaustive: FailureCopyIsExhaustive = true
+void _failureCopyIsExhaustive
 
 /** Retrieval provenance, stated plainly. Shown because a silently
  *  degraded answer — semantic retrieval unavailable, half the context
@@ -493,19 +496,20 @@ const FAILURE_COPY: Record<AskFailure["kind"], { title: string }> = {
  *  many passages were rejected. It is closed by default because it is
  *  provenance, not the answer. */
 function RetrievalNote({ answer, run }: { answer: KnowledgeAnswer; run: AskRunState }) {
+  const t = useT()
   const { retrieval } = answer
-  const bits: string[] = [`${retrieval.chunksUsed} ${retrieval.chunksUsed === 1 ? "passage" : "passages"}`]
-  if (retrieval.droppedChunks > 0) bits.push(`${retrieval.droppedChunks} left out for length`)
+  const bits: string[] = [t.ask.passages(retrieval.chunksUsed)]
+  if (retrieval.droppedChunks > 0) bits.push(t.ask.droppedForLength(retrieval.droppedChunks))
 
   return (
     <div className="mt-2 space-y-4 border-t border-[var(--pk-rule)] pt-5">
       <SemanticNotice status={retrieval.semanticSearch} />
-      <p className="pk-meta">Retrieved {bits.join(" · ")}</p>
+      <p className="pk-meta">{t.ask.retrieved(bits.join(" · "))}</p>
 
       <details className="group">
         <summary className="pk-label inline-flex cursor-pointer list-none items-center gap-1.5 transition-colors hover:text-[var(--pk-ink-2)] [&::-webkit-details-marker]:hidden">
           <ChevronRight aria-hidden className="size-3 transition-transform group-open:rotate-90" />
-          How this answer was produced
+          {t.ask.provenance}
         </summary>
         <div className="mt-4">
           <AskRunTimeline run={run} streaming={false} />
@@ -522,12 +526,11 @@ function RetrievalNote({ answer, run }: { answer: KnowledgeAnswer; run: AskRunSt
  *  disabled reasons are shown differently because the actions differ:
  *  one is a deployment task, the other is an outage to wait out. */
 function SemanticNotice({ status }: { status: KnowledgeAnswer["retrieval"]["semanticSearch"] }) {
+  const t = useT()
   if (status.enabled || status.reason === "not_requested") return null
 
   const copy =
-    status.reason === "provider_not_configured"
-      ? "Meaning-based search is not configured on this deployment, so this searched exact words only. Questions phrased differently from your saved text may find nothing."
-      : "Meaning-based search is temporarily unavailable, so this searched exact words only. Try again later for a fuller answer."
+    status.reason === "provider_not_configured" ? t.ask.semanticNotConfigured : t.ask.semanticUnavailable
 
   return (
     <div className="flex max-w-[60ch] items-start gap-2.5 border-l-2 border-[var(--pk-signal)] pl-3.5">

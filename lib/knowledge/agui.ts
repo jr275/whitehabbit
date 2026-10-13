@@ -87,14 +87,12 @@ export function isAskStepName(value: unknown): value is AskStepName {
   return typeof value === "string" && (ASK_STEPS as readonly string[]).includes(value)
 }
 
-/** What each step is, in the user's terms. One definition, used by the
- *  timeline UI — not re-invented per component. */
-export const ASK_STEP_LABELS: Record<AskStepName, string> = {
-  retrieval: "Searching your library",
-  evidence: "Weighing the evidence",
-  generation: "Writing the answer",
-  verification: "Checking every citation",
-}
+/* The step LABELS used to live here, in English only. They moved to
+ * lib/knowledge/i18n/dictionary.ts (`run.steps`), keyed by this same
+ * AskStepName, when Keeply became bilingual — a name a reader sees
+ * belongs with the other names a reader sees, and keeping a second
+ * English-only copy here would have been one of the two that drifts.
+ * This module keeps the step IDENTIFIERS, which are wire values. */
 
 /* ------------------------------------------------------------------ *
  * CUSTOM EVENT NAMES. AG-UI's CUSTOM event is the protocol's escape

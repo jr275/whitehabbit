@@ -24,6 +24,7 @@ import { Heart } from "lucide-react"
 import { KIND_META, savedAgo, durationLabel } from "@/lib/knowledge/config"
 import type { KnowledgeItem } from "@/lib/knowledge/types"
 import { cn } from "@/lib/utils"
+import { useLocale, useT } from "./i18n"
 
 export interface ItemRowProps {
   item: KnowledgeItem
@@ -35,11 +36,14 @@ export interface ItemRowProps {
 }
 
 export function ItemRow({ item, evidence, onToggleFavorite, onRetry }: ItemRowProps) {
+  const t = useT()
+  const { locale } = useLocale()
   const [coverFailed, setCoverFailed] = useState(false)
   const kind = KIND_META[item.kind]
+  const kindName = t.kinds[item.kind]
   const processing = item.state !== "ready" && item.state !== "failed"
   const failed = item.state === "failed"
-  const duration = durationLabel(item.kind, item.durationMin)
+  const duration = durationLabel(t, item.kind, item.durationMin)
   const showCover = Boolean(item.cover) && !coverFailed && !failed
 
   return (
@@ -48,9 +52,9 @@ export function ItemRow({ item, evidence, onToggleFavorite, onRetry }: ItemRowPr
         {/* SOURCE — mono, quiet, above the title. The instrument layer
             doing the job a coloured badge used to do. */}
         <div className="pk-label flex items-center gap-2">
-          <span className="truncate">{item.source || item.domain || kind.label}</span>
+          <span className="truncate">{item.source || item.domain || kindName}</span>
           <span aria-hidden className="text-[var(--pk-rule-2)]">/</span>
-          <span className="shrink-0">{kind.label}</span>
+          <span className="shrink-0">{kindName}</span>
         </div>
 
         <h3 className="mt-2 text-pretty text-[17px] font-medium leading-[1.28] tracking-[-0.011em] text-[var(--pk-ink)]">
@@ -68,29 +72,29 @@ export function ItemRow({ item, evidence, onToggleFavorite, onRetry }: ItemRowPr
         ) : null}
 
         <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <span className="pk-meta">{savedAgo(item.savedAt)}</span>
+          <span className="pk-meta">{savedAgo(t, locale, item.savedAt)}</span>
           {item.author && <span className="pk-meta">· {item.author}</span>}
           {duration && <span className="pk-meta">· {duration}</span>}
 
-          {item.topics.slice(0, 3).map((t) => (
+          {item.topics.slice(0, 3).map((topic) => (
             <Link
-              key={t}
-              href={`/knowledge/library?q=${encodeURIComponent(t)}`}
+              key={topic}
+              href={`/knowledge/library?q=${encodeURIComponent(topic)}`}
               className="pk-meta relative z-10 text-[var(--pk-ink-4)] underline decoration-[var(--pk-rule-2)] underline-offset-[3px] transition-colors hover:text-[var(--pk-ink-2)]"
             >
-              {t}
+              {topic}
             </Link>
           ))}
 
           {/* State is stated, never implied by colour alone. */}
-          {processing && <span className="pk-label text-[var(--pk-signal)]">Reading…</span>}
-          {failed && <span className="pk-label text-[var(--pk-danger)]">Couldn&rsquo;t fetch</span>}
+          {processing && <span className="pk-label text-[var(--pk-signal)]">{t.item.reading}</span>}
+          {failed && <span className="pk-label text-[var(--pk-danger)]">{t.item.couldNotFetch}</span>}
           {failed && onRetry && (
             <button
               onClick={() => onRetry(item)}
               className="pk-label relative z-10 text-[var(--pk-ink-2)] underline underline-offset-[3px]"
             >
-              Retry
+              {t.item.retry}
             </button>
           )}
         </div>
@@ -111,7 +115,7 @@ export function ItemRow({ item, evidence, onToggleFavorite, onRetry }: ItemRowPr
       {onToggleFavorite && (
         <button
           onClick={() => onToggleFavorite(item)}
-          aria-label={item.favorite ? "Remove from favorites" : "Add to favorites"}
+          aria-label={item.favorite ? t.item.removeFromFavorites : t.item.addToFavorites}
           aria-pressed={item.favorite}
           className={cn(
             "relative z-10 mt-5 flex size-8 shrink-0 items-center justify-center self-start rounded-full transition-opacity",

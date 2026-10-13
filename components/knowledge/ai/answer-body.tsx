@@ -29,6 +29,7 @@
 import { Fragment, useCallback, useState } from "react"
 import { Check, Copy } from "lucide-react"
 import { blocksOf, type AnswerBlock, type AnswerInline, type AnsweredCitation } from "@/lib/knowledge/ai"
+import { useT } from "../i18n"
 
 export function AnswerBody({ text, citations }: { text: string; citations: AnsweredCitation[] }) {
   const blocks = blocksOf(
@@ -111,6 +112,7 @@ function Block({ block }: { block: AnswerBlock }) {
 }
 
 function Inline({ tokens }: { tokens: AnswerInline[] }) {
+  const t = useT()
   return (
     <>
       {tokens.map((token, i) => (
@@ -138,7 +140,7 @@ function Inline({ tokens }: { tokens: AnswerInline[] }) {
             </a>
           ) : (
             <span
-              title="This reference doesn't match any source that was retrieved."
+              title={t.ask.unknownCitation}
               className="mx-px align-super text-[11px] tabular-nums text-[var(--pk-ink-4)] line-through"
             >
               [{token.citationId}]
@@ -160,6 +162,7 @@ function Inline({ tokens }: { tokens: AnswerInline[] }) {
  * to run or highlight anything.
  */
 function CodeBlock({ language, code }: { language: string | null; code: string }) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
 
   const copy = useCallback(() => {
@@ -177,15 +180,15 @@ function CodeBlock({ language, code }: { language: string | null; code: string }
   return (
     <div className="group relative rounded-[var(--pk-r)] border border-[var(--pk-rule)] bg-[var(--pk-sunken)]">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--pk-rule)] px-3.5 py-2">
-        <span className="pk-label">{language ?? "code"}</span>
+        <span className="pk-label">{language ?? t.ask.code}</span>
         <button
           type="button"
           onClick={copy}
-          aria-label={copied ? "Copied" : "Copy code"}
+          aria-label={copied ? t.ask.copied : t.ask.copyCode}
           className="inline-flex items-center gap-1.5 text-[11.5px] text-[var(--pk-ink-3)] transition-colors hover:text-[var(--pk-ink)]"
         >
           {copied ? <Check className="size-3.5 text-[var(--pk-good)]" /> : <Copy className="size-3.5" />}
-          <span>{copied ? "Copied" : "Copy"}</span>
+          <span>{copied ? t.ask.copied : t.ask.copy}</span>
         </button>
       </div>
       <pre className="thin-scroll overflow-x-auto px-3.5 py-3">
