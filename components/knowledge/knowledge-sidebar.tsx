@@ -76,7 +76,15 @@ export function KnowledgeSidebar({
       </div>
 
       {/* ── Tier 2 — browse ────────────────────────────────────── */}
-      <nav className="mt-8 flex-1" aria-label="Knowledge navigation">
+      {/* The three tiers at the top of this file describe tier 3 as
+       *  "saved filters, settings, account — quiet, at the bottom".
+       *  The layout did not do that: `flex-1` sat on the whole nav, so
+       *  both groups stayed packed under Browse and the slack —
+       *  measured at 235px on a 900px viewport — opened up below them,
+       *  between the rail's content and its capture button. The spacer
+       *  now sits BETWEEN the groups, which puts tier 3 where the
+       *  comment always said it went and leaves no void anywhere. */}
+      <nav className="mt-8 flex flex-1 flex-col" aria-label="Knowledge navigation">
         <p className="pk-label px-1 pb-2.5">Browse</p>
         <div className="space-y-px">
           {KNOWLEDGE_NAV.map((item) => (
@@ -84,9 +92,9 @@ export function KnowledgeSidebar({
           ))}
         </div>
 
-        <div className="my-5 h-px bg-[var(--pk-rule)]" />
+        <div className="mt-6 flex-1" aria-hidden />
 
-        <div className="space-y-px">
+        <div className="space-y-px border-t border-[var(--pk-rule)] pt-5">
           {KNOWLEDGE_SECONDARY_NAV.map((item) => (
             <NavLink key={item.href} item={item} active={isNavActive(pathname, item.href)} />
           ))}
@@ -103,7 +111,7 @@ export function KnowledgeSidebar({
           hierarchy from ink weight and space. */}
       <button
         onClick={openSaveDialog}
-        className="mb-4 flex h-10 w-full items-center justify-center gap-1.5 rounded-full bg-[var(--pk-accent)] text-[13.5px] font-medium text-[var(--pk-accent-ink)] transition-opacity hover:opacity-90"
+        className="mt-5 mb-4 flex h-10 w-full items-center justify-center gap-1.5 rounded-full bg-[var(--pk-accent)] text-[13.5px] font-medium text-[var(--pk-accent-ink)] transition-opacity hover:opacity-90"
       >
         <Plus className="size-4" strokeWidth={2.4} />
         Save a link
@@ -168,8 +176,13 @@ function NavLink({ item, active }: { item: (typeof KNOWLEDGE_NAV)[number]; activ
           : "text-[var(--pk-ink-3)] hover:bg-[var(--pk-sunken)] hover:text-[var(--pk-ink)]",
       )}
     >
+      {/* The rule marks the ITEM, so it sits just inside the rail's own
+       *  padding — 8px clear of the row. At left-[-20px] it landed on
+       *  the rail's outer edge, which at x=0 is the window edge: a 1px
+       *  mark twenty pixels from the thing it marks reads as an
+       *  artifact, not as a state. */}
       {active && (
-        <span aria-hidden className="absolute left-[-20px] top-1/2 h-4 w-px -translate-y-1/2 bg-[var(--pk-ink)]" />
+        <span aria-hidden className="absolute left-[-8px] top-1/2 h-4 w-px -translate-y-1/2 bg-[var(--pk-ink)]" />
       )}
       <Icon className="size-[15px] shrink-0" strokeWidth={active ? 2 : 1.75} />
       {item.label}

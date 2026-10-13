@@ -102,7 +102,10 @@ function SourceRow({ citation, muted = false }: { citation: AnsweredCitation; mu
             already has, and the outbound link is offered beside it. */}
         <Link
           href={`/knowledge/read/${citation.knowledgeItemId}`}
-          className="text-[15px] font-medium leading-snug text-[var(--pk-ink)] hover:underline"
+          /* block, not inline: the domain link below is a separate line
+             of the row, and two inline anchors ran together as one
+             word ("Why chunking projects failexample.com"). */
+          className="block text-[15px] font-medium leading-snug text-[var(--pk-ink)] hover:underline"
         >
           {citation.title}
         </Link>

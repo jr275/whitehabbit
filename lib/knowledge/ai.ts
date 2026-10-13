@@ -363,3 +363,226 @@ export function paragraphsOf(text: string, citationIds: Iterable<string>): Answe
     .filter((p) => p.length > 0)
     .map((p) => tokenizeAnswer(p, ids))
 }
+
+/* ------------------------------------------------------------------ *
+ * STRUCTURE IN THE ANSWER — blocks and inline marks.
+ *
+ * WHY THIS EXISTS AT ALL. SYSTEM_PROMPT (lib/knowledge/answer.ts) asks
+ * for a direct prose answer and says nothing about formatting, so the
+ * model is free to use the formatting it uses everywhere else: a
+ * bulleted list of three findings, a bolded term, a backticked
+ * identifier, a fenced block when the question was about code. Until
+ * now every one of those arrived on screen as its own syntax —
+ * literal `- `, literal `**`, literal backticks — which reads as a
+ * rendering bug and, worse, makes a careful answer look careless.
+ *
+ * WHY IT IS NOT A MARKDOWN LIBRARY. The invariant this file and
+ * ./answer-body.tsx have always held is that model output cannot draw
+ * its own UI: this is text derived from arbitrary saved web pages, so
+ * it is never HTML, never `dangerouslySetInnerHTML`, and never handed
+ * to a parser that emits markup. What follows is a closed grammar that
+ * produces DATA — a list of blocks of inline tokens — which the
+ * component renders as React elements. The set of elements that can
+ * ever appear is fixed here, in code, not chosen by the text. A
+ * construct outside the grammar is not an error and is not dropped: it
+ * stays verbatim as prose, which is exactly what it did before.
+ *
+ * WHAT IS DELIBERATELY NOT SUPPORTED, and why:
+ *   - `_underscore_` emphasis. `chunk_id_hash` would italicise its
+ *     middle. Technical answers carry snake_case constantly and
+ *     asterisks are what models actually emit, so underscores are
+ *     left as text.
+ *   - links. A model-authored href is a model-authored navigation
+ *     target. The only links in an answer are citations, which are
+ *     resolved against the API's own citation list by tokenizeAnswer.
+ *   - tables, images, HTML. Nothing here opens a second way to put
+ *     markup on the page.
+ *   - nesting. An inline mark carries a plain string, never more
+ *     tokens, so there is no recursion to get wrong.
+ * ------------------------------------------------------------------ */
+
+/** A run inside one block. `citation`/`unresolved` keep the meaning
+ *  AnswerToken gives them — the grounding rule is still decided by
+ *  tokenizeAnswer and nowhere else. */
+export type AnswerInline =
+  | { type: "text"; value: string }
+  | { type: "citation"; citationId: string }
+  | { type: "unresolved"; citationId: string }
+  | { type: "strong"; value: string }
+  | { type: "emphasis"; value: string }
+  | { type: "code"; value: string }
+
+export type AnswerBlock =
+  | { type: "paragraph"; inline: AnswerInline[] }
+  /** 3 or 4 only: the page owns h1 and h2, so an answer's own headings
+   *  start below them rather than competing with them. */
+  | { type: "heading"; level: 3 | 4; inline: AnswerInline[] }
+  | { type: "list"; ordered: boolean; items: AnswerInline[][] }
+  | { type: "quote"; inline: AnswerInline[] }
+  /** Verbatim. Never tokenized: a citation marker inside a code sample
+   *  is part of the sample. `language` is the fence's own word or null
+   *  — it is a label, never a reason to run anything. */
+  | { type: "code"; language: string | null; code: string }
+
+/* Both marks require the content to begin and end with a non-space, as
+ * markdown does. Without that, "2 * 3 * 4" italicises " 3 ". */
+const INLINE_RE = /`([^`\n]+)`|\*\*(?=\S)([^*\n]*\S)\*\*|\*(?=\S)([^*\n]*\S)\*/g
+
+/** Expands one plain run into inline marks. Anything unpaired stays
+ *  text, verbatim. */
+function markRun(value: string): AnswerInline[] {
+  const out: AnswerInline[] = []
+  let cursor = 0
+
+  for (const m of value.matchAll(INLINE_RE)) {
+    const start = m.index ?? 0
+    if (start > cursor) out.push({ type: "text", value: value.slice(cursor, start) })
+    if (m[1] !== undefined) out.push({ type: "code", value: m[1] })
+    else if (m[2] !== undefined) out.push({ type: "strong", value: m[2] })
+    else out.push({ type: "emphasis", value: m[3] })
+    cursor = start + m[0].length
+  }
+
+  if (cursor < value.length) out.push({ type: "text", value: value.slice(cursor) })
+  return out
+}
+
+/**
+ * One line of prose as inline tokens: citations first — by the same
+ * tokenizeAnswer every other path uses — then marks inside what is
+ * left over.
+ *
+ * The order matters and is the safe one. A marker is classified
+ * against the API's citation list before any formatting is considered,
+ * so no amount of asterisks can turn an invented `[9]` into a link.
+ */
+export function inlineOf(text: string, citationIds: Iterable<string>): AnswerInline[] {
+  return tokenizeAnswer(text, citationIds).flatMap((token) =>
+    token.type === "text" ? markRun(token.value) : [token],
+  )
+}
+
+const FENCE_RE = /^\s*(?:```|~~~)\s*([A-Za-z0-9+#._-]{0,20})\s*$/
+const HEADING_RE = /^(#{1,6})\s+(.*)$/
+const QUOTE_RE = /^>\s?(.*)$/
+const BULLET_RE = /^\s{0,3}[-*•]\s+(.*)$/
+const ORDERED_RE = /^\s{0,3}(\d{1,3})[.)]\s+(.*)$/
+
+/**
+ * The answer as blocks.
+ *
+ * A plain-prose answer — the overwhelmingly common case, and the one
+ * the prompt asks for — comes out of this as exactly the paragraphs
+ * paragraphsOf produces. paragraphsOf is kept beside it because it is
+ * what tests/knowledge/ai-contract.test.ts pins: the paragraph rule
+ * did not change, it gained siblings.
+ */
+export function blocksOf(text: string, citationIds: Iterable<string>): AnswerBlock[] {
+  const ids = [...citationIds]
+  const lines = text.split("\n")
+  const blocks: AnswerBlock[] = []
+
+  /* Open accumulators. Only one is ever non-empty, and every path that
+   * starts a new kind of block flushes the others first. */
+  let para: string[] = []
+  let quote: string[] = []
+  let list: { ordered: boolean; items: string[] } | null = null
+
+  const flushPara = () => {
+    // Joined with a space, not a newline: a single newline inside a
+    // paragraph already rendered as a space, and this keeps that.
+    const joined = para.join(" ").trim()
+    para = []
+    if (joined !== "") blocks.push({ type: "paragraph", inline: inlineOf(joined, ids) })
+  }
+  const flushQuote = () => {
+    const joined = quote.join(" ").trim()
+    quote = []
+    if (joined !== "") blocks.push({ type: "quote", inline: inlineOf(joined, ids) })
+  }
+  const flushList = () => {
+    const open = list
+    list = null
+    if (!open) return
+    const items = open.items.map((item) => item.trim()).filter((item) => item !== "")
+    if (items.length > 0) {
+      blocks.push({ type: "list", ordered: open.ordered, items: items.map((item) => inlineOf(item, ids)) })
+    }
+  }
+  const flushAll = () => {
+    flushPara()
+    flushQuote()
+    flushList()
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]
+    const fence = FENCE_RE.exec(line)
+
+    if (fence) {
+      flushAll()
+      const language = fence[1] === "" ? null : fence[1]
+      const body: string[] = []
+      i += 1
+      // An UNCLOSED fence runs to the end of the answer rather than
+      // discarding the rest of it. Losing text would be worse than
+      // showing more of it as code than the model intended.
+      while (i < lines.length && !FENCE_RE.test(lines[i])) {
+        body.push(lines[i])
+        i += 1
+      }
+      const code = body.join("\n").replace(/^\n+|\n+$/g, "")
+      if (code !== "") blocks.push({ type: "code", language, code })
+      continue
+    }
+
+    if (line.trim() === "") {
+      flushAll()
+      continue
+    }
+
+    const heading = HEADING_RE.exec(line)
+    if (heading) {
+      flushAll()
+      const inline = inlineOf(heading[2].trim(), ids)
+      if (inline.length > 0) blocks.push({ type: "heading", level: heading[1].length <= 3 ? 3 : 4, inline })
+      continue
+    }
+
+    const quoted = QUOTE_RE.exec(line)
+    if (quoted) {
+      flushPara()
+      flushList()
+      quote.push(quoted[1])
+      continue
+    }
+
+    const bullet = BULLET_RE.exec(line)
+    const ordered = bullet ? null : ORDERED_RE.exec(line)
+    if (bullet || ordered) {
+      flushPara()
+      flushQuote()
+      const wantsOrdered = bullet === null
+      // A list that switches marker is two lists — rendering an
+      // ordered item inside a bulleted list would renumber it.
+      if (list && list.ordered !== wantsOrdered) flushList()
+      if (!list) list = { ordered: wantsOrdered, items: [] }
+      list.items.push(bullet ? bullet[1] : (ordered as RegExpExecArray)[2])
+      continue
+    }
+
+    // A non-blank line under an open list continues its last item
+    // (markdown's lazy continuation), which is how a wrapped bullet
+    // arrives.
+    if (list && list.items.length > 0) {
+      list.items[list.items.length - 1] += ` ${line.trim()}`
+      continue
+    }
+
+    flushQuote()
+    para.push(line)
+  }
+
+  flushAll()
+  return blocks
+}

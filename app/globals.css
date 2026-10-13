@@ -816,6 +816,65 @@
     color: var(--pk-ink-4);
   }
 
+  /* ── Composer — the field, once a question can be more than a line ─
+   * A pill is right for one line of search and wrong for three: the
+   * cap is 1,000 characters and a question that uses them has to be
+   * readable while it is being written. So this is the same surface,
+   * the same hairline and the same focus ring as .pk-field, with the
+   * radius opened up and the height given back to the text. The button
+   * sits on the last line (align-items: flex-end) rather than floating
+   * in the vertical middle of a grown box. */
+  .pk-composer {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.75rem;
+    width: 100%;
+    border: 1px solid var(--pk-rule-2);
+    border-radius: var(--pk-r-lg);
+    background: var(--pk-raised);
+    padding: 0.625rem 0.625rem 0.625rem 1rem;
+    transition: border-color var(--pk-fast) var(--pk-ease),
+      box-shadow var(--pk-fast) var(--pk-ease);
+  }
+  .pk-composer:focus-within {
+    border-color: color-mix(in oklch, var(--pk-accent) 55%, transparent);
+    box-shadow: 0 0 0 4px var(--pk-accent-wash);
+  }
+  .pk-composer textarea {
+    flex: 1;
+    /* min-width: 0 is what stops a long unbroken question from pushing
+     * the send button off a phone screen — a flex item's default
+     * min-width is its content. */
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    outline: none;
+    resize: none;
+    /* Grows with the question up to about six lines, then scrolls
+     * inside itself. The page never scrolls because of the composer. */
+    max-height: 11.5rem;
+    padding-block: 0.4375rem;
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    color: var(--pk-ink);
+    font-family: inherit;
+  }
+  .pk-composer textarea::placeholder {
+    color: var(--pk-ink-4);
+  }
+
+  /* ── The exchange ─────────────────────────────────────────────────
+   * One question and its answer. The question is marked by an accent
+   * rule and set a step down from the answer, which is the whole
+   * distinction between the two turns — no bubble, no avatar, and no
+   * transcript, because the runtime holds exactly one exchange at a
+   * time (lib/knowledge/use-knowledge-ask-stream.ts). Inventing a
+   * scrollback would be inventing state. */
+  .pk-turn-asked {
+    border-left: 2px solid var(--pk-accent);
+    padding-left: 0.875rem;
+  }
+
   /* ── Evidence ─────────────────────────────────────────────────────
    * A cited passage is marked by a rule in the evidence hue, never by a
    * filled block: the passage is the content, and a tint would make it
@@ -833,6 +892,18 @@
   outline: 2px solid var(--pk-accent);
   outline-offset: 2px;
   border-radius: 2px;
+}
+
+/* The composer draws its OWN focus ring on the wrapper (.pk-composer
+ * :focus-within), so the rule above would land a second, square-cornered
+ * rectangle inside the rounded field — which reads as a rendering fault.
+ * It has to live out here, unlayered, beside the rule it answers:
+ * @layer components loses to an unlayered declaration whatever its
+ * specificity, which is why the first attempt at this inside the layer
+ * had no effect at all. Focus is not removed, only de-duplicated — the
+ * ring the user sees is still the one on the field. */
+.knowledge-surface .pk-composer textarea:focus-visible {
+  outline: none;
 }
 .kp-understand .kp-tnum {
   font-variant-numeric: tabular-nums;

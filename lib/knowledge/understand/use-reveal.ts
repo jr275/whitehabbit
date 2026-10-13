@@ -15,7 +15,12 @@
  * because its animation was disabled but its initial state was not.
  * ================================================================== */
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+
+/* useLayoutEffect warns when it runs on the server, and useEffect is
+ * too late for the one thing below that must happen BEFORE the browser
+ * paints. This is the standard isomorphic pairing. */
+const useBeforePaint = typeof window === "undefined" ? useEffect : useLayoutEffect
 
 export function usePrefersReducedMotion(): boolean {
   // Starts false so server and first client paint agree; the effect
@@ -91,17 +96,39 @@ export function useReveal<T extends HTMLElement = HTMLDivElement>(options: Revea
  * library is read — so it eases out and settles, rather than ticking
  * like a scoreboard. Under reduced motion it never runs: the final
  * value is what renders, immediately.
+ *
+ * ---- THE INITIAL VALUE IS THE REAL ONE ---------------------------
+ *
+ * It used to start at 0, which meant the server-rendered HTML, the
+ * paint before hydration, a crawler, and anyone whose JS had not
+ * arrived yet all read "You saved 0 things" — the one sentence this
+ * page must never say by accident, and on a sample library a plainly
+ * false one. So the true value is what renders first, and the
+ * animation's own starting point is set BEFORE the browser paints, by
+ * a layout effect that only ever runs on the client. A viewer with JS
+ * still sees the count resolve from 0; a viewer without one sees the
+ * number, not a zero that never moves.
  */
 export function useCountUp(value: number, revealed: boolean, durationMs = 900): number {
   const reduced = usePrefersReducedMotion()
-  const [display, setDisplay] = useState(reduced ? value : 0)
+  const [display, setDisplay] = useState(value)
   const frame = useRef<number | null>(null)
+  const started = useRef(false)
+
+  // Client-only, pre-paint: wind the counter back to its starting
+  // point so the animation has somewhere to travel from. Never runs on
+  // the server, and never after the count has already played.
+  useBeforePaint(() => {
+    if (reduced || revealed || started.current) return
+    setDisplay(0)
+  }, [reduced, revealed])
 
   useEffect(() => {
     if (reduced || !revealed) {
       setDisplay(value)
       return
     }
+    started.current = true
     const start = performance.now()
     const tick = (now: number) => {
       const t = Math.min(1, (now - start) / durationMs)
