@@ -29,6 +29,8 @@ import { Loader2 } from "lucide-react"
 import { conceptHref } from "@/lib/knowledge/links"
 import { fetchRelatedKnowledge } from "@/lib/knowledge/client"
 import type { DiscoveryResult, ItemConcept, RelatedKnowledgeItem } from "@/lib/knowledge/discovery-contract"
+import type { Dictionary } from "@/lib/knowledge/i18n/dictionary"
+import { useT } from "./i18n"
 
 type Phase = "loading" | "ready" | "error"
 
@@ -44,6 +46,7 @@ function hostOf(url: string): string | null {
 }
 
 export function DiscoveryPanel({ itemId }: { itemId: string }) {
+  const t = useT()
   const [result, setResult] = useState<DiscoveryResult | null>(null)
   const [phase, setPhase] = useState<Phase>("loading")
   // Bumped by Retry. Re-running the effect is the whole retry — there
@@ -77,9 +80,9 @@ export function DiscoveryPanel({ itemId }: { itemId: string }) {
 
   if (phase === "loading") {
     return (
-      <Block label="Key ideas">
+      <Block label={t.discovery.keyIdeas}>
         <p className="flex items-center gap-2">
-          <Loader2 className="size-3.5 animate-spin text-[var(--pk-signal)]" aria-hidden /> Reading what this is about…
+          <Loader2 className="size-3.5 animate-spin text-[var(--pk-signal)]" aria-hidden /> {t.discovery.reading}
         </p>
       </Block>
     )
@@ -87,14 +90,14 @@ export function DiscoveryPanel({ itemId }: { itemId: string }) {
 
   if (phase === "error" || !result) {
     return (
-      <Block label="Key ideas">
-        <p>Couldn&apos;t load what we know about this piece.</p>
+      <Block label={t.discovery.keyIdeas}>
+        <p>{t.discovery.loadFailed}</p>
         <button
           type="button"
           onClick={retry}
           className="mt-2 text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
         >
-          Try again
+          {t.common.tryAgain}
         </button>
       </Block>
     )
@@ -102,16 +105,16 @@ export function DiscoveryPanel({ itemId }: { itemId: string }) {
 
   if (result.status === "unavailable") {
     return (
-      <Block label="Key ideas">
-        <p>Saves kept only in this browser aren&apos;t analyzed. Sign in to have Keeply read them.</p>
+      <Block label={t.discovery.keyIdeas}>
+        <p>{t.discovery.guestNotAnalyzed}</p>
       </Block>
     )
   }
 
   if (result.status === "not_analyzed") {
     return (
-      <Block label="Key ideas">
-        <p>Key ideas will appear here after Keeply reads this one.</p>
+      <Block label={t.discovery.keyIdeas}>
+        <p>{t.discovery.pending}</p>
       </Block>
     )
   }
@@ -134,18 +137,19 @@ export function DiscoveryPanel({ itemId }: { itemId: string }) {
  * Grouping costs one pass over rows that already exist and no new
  * extraction: "who and what this mentions" is a different question
  * from "what this is about", and they were being answered together. */
-const CONCEPT_GROUPS: { heading: string; types: ItemConcept["type"][] }[] = [
-  { heading: "Key ideas", types: ["TOPIC", "CONCEPT"] },
-  { heading: "People", types: ["PERSON"] },
-  { heading: "Organizations", types: ["ORGANIZATION"] },
-  { heading: "Technologies & products", types: ["TECHNOLOGY", "PRODUCT"] },
-  { heading: "Also mentioned", types: ["ENTITY"] },
+const CONCEPT_GROUPS: { headingKey: keyof Dictionary["discovery"]["groups"]; types: ItemConcept["type"][] }[] = [
+  { headingKey: "keyIdeas", types: ["TOPIC", "CONCEPT"] },
+  { headingKey: "people", types: ["PERSON"] },
+  { headingKey: "organizations", types: ["ORGANIZATION"] },
+  { headingKey: "technologies", types: ["TECHNOLOGY", "PRODUCT"] },
+  { headingKey: "alsoMentioned", types: ["ENTITY"] },
 ]
 
 function KeyIdeas({ concepts }: { concepts: ItemConcept[] }) {
+  const t = useT()
   if (concepts.length === 0) return null
   const groups = CONCEPT_GROUPS.map((g) => ({
-    heading: g.heading,
+    heading: t.discovery.groups[g.headingKey],
     // Order within a group follows the order the server sent, which is
     // confidence-ranked. No second sort here: re-ranking in a component
     // is a ranking rule nothing tests.
@@ -171,7 +175,7 @@ function KeyIdeas({ concepts }: { concepts: ItemConcept[] }) {
                 <Link
                   href={conceptHref(c.id)}
                   className="text-[14px] text-[var(--pk-ink-2)] underline decoration-[var(--pk-rule-2)] underline-offset-4 transition-colors hover:text-[var(--pk-ink)]"
-                  title={`${c.evidenceCount} passage${c.evidenceCount === 1 ? "" : "s"} in this piece — see everything about it`}
+                  title={t.discovery.passagesInPiece(c.evidenceCount)}
                 >
                   {c.label}
                 </Link>
@@ -187,10 +191,11 @@ function KeyIdeas({ concepts }: { concepts: ItemConcept[] }) {
 /* ── Related knowledge ──────────────────────────────────────────── */
 
 function RelatedKnowledge({ related }: { related: RelatedKnowledgeItem[] }) {
+  const t = useT()
   if (related.length === 0) {
     return (
-      <Block label="Related knowledge">
-        <p>Nothing else you&apos;ve saved shares these ideas yet.</p>
+      <Block label={t.discovery.relatedKnowledge}>
+        <p>{t.discovery.nothingRelated}</p>
       </Block>
     )
   }

@@ -25,6 +25,7 @@ import { LogIn, LogOut } from "lucide-react"
 import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { useState } from "react"
+import { useT } from "./i18n"
 
 /** Where sign-in returns to, and where signing out lands. Guest work
  *  lives in the browser-local store, so Home is the honest landing
@@ -36,12 +37,13 @@ const SIGN_UP_HREF = "/signup?callbackUrl=/knowledge/home"
 const SIGN_OUT_OPTS = { callbackUrl: "/login?callbackUrl=/knowledge/home" }
 
 export function AccountControl({ layout }: { layout: "rail" | "header" }) {
+  const t = useT()
   const { data: session, status } = useSession()
   const [open, setOpen] = useState(false)
 
   const isGuest = status === "unauthenticated"
   const email = session?.user?.email ?? ""
-  const name = isGuest ? "Guest" : session?.user?.name || email.split("@")[0] || "Your account"
+  const name = isGuest ? t.account.guest : session?.user?.name || email.split("@")[0] || t.account.yourAccount
   const initial = (name || "Y").charAt(0).toUpperCase()
 
   /* ── Guest ───────────────────────────────────────────────────────
@@ -51,7 +53,7 @@ export function AccountControl({ layout }: { layout: "rail" | "header" }) {
       return (
         <Link
           href={SIGN_IN_HREF}
-          aria-label="Sign in"
+          aria-label={t.common.signIn}
           className="flex size-9 items-center justify-center rounded-full text-[var(--pk-ink-2)] transition-colors active:bg-[var(--pk-sunken)]"
         >
           <LogIn className="size-[18px]" strokeWidth={1.9} />
@@ -65,7 +67,7 @@ export function AccountControl({ layout }: { layout: "rail" | "header" }) {
           className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2.5 rounded-[var(--pk-r)] px-2 py-1.5 text-[13px] font-medium text-[var(--pk-accent)] transition-colors hover:bg-[var(--pk-sunken)]"
         >
           <LogIn className="size-4" />
-          Sign in to save permanently
+          {t.settings.signInPermanently}
         </Link>
         {/* Creating an account and signing in are different intents,
             and a visitor with a local library has by definition never
@@ -75,11 +77,11 @@ export function AccountControl({ layout }: { layout: "rail" | "header" }) {
           href={SIGN_UP_HREF}
           className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-2.5 rounded-[var(--pk-r)] px-2 py-1.5 pl-[2.1rem] text-[13px] text-[var(--pk-ink-3)] transition-colors hover:bg-[var(--pk-sunken)] hover:text-[var(--pk-ink)]"
         >
-          Create an account
+          {t.account.createAnAccount}
         </Link>
         {/* The disclosure the offer implies but does not state: until
             they sign in, nothing they save leaves this browser. */}
-        <p className="pk-meta mt-1 px-0.5">Saved on this device</p>
+        <p className="pk-meta mt-1 px-0.5">{t.account.savedOnThisDevice}</p>
       </div>
     )
   }
@@ -103,7 +105,7 @@ export function AccountControl({ layout }: { layout: "rail" | "header" }) {
         className="flex w-full items-center gap-2.5 rounded-[var(--pk-r-sm)] px-2.5 py-2 text-[13px] text-[var(--pk-ink-2)] transition-colors hover:bg-[var(--pk-sunken)]"
       >
         <LogOut className="size-4" />
-        Sign out
+        {t.account.signOutAction}
       </button>
     </div>
   )
@@ -121,7 +123,7 @@ export function AccountControl({ layout }: { layout: "rail" | "header" }) {
         <button
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          aria-label="Your account"
+          aria-label={t.account.yourAccount}
           className="flex size-9 items-center justify-center rounded-full transition-colors active:bg-[var(--pk-sunken)]"
         >
           {avatar}

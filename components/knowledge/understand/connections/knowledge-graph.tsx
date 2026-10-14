@@ -32,6 +32,7 @@
 import { useEffect, useMemo, useState } from "react"
 import type { KnowledgeConcept, KnowledgeConnection, KnowledgeObject } from "@/lib/knowledge/understand/types"
 import { Label } from "../shell/section"
+import { useT } from "../../i18n"
 
 interface Step {
   concept: KnowledgeConcept
@@ -51,6 +52,7 @@ export function KnowledgeGraph({
   objects: KnowledgeObject[]
   onOpenObject: (id: string) => void
 }) {
+  const t = useT()
   const conceptById = useMemo(() => new Map(concepts.map((c) => [c.id, c])), [concepts])
   const objectById = useMemo(() => new Map(objects.map((o) => [o.id, o])), [objects])
 
@@ -89,8 +91,7 @@ export function KnowledgeGraph({
   if (concepts.length === 0) {
     return (
       <p className="max-w-[54ch] text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">
-        Connections appear once Keeply has read enough of your library to find ideas that turn up in more than one
-        piece.
+        {t.understand.noConnectionsYet}
       </p>
     )
   }
@@ -99,7 +100,7 @@ export function KnowledgeGraph({
     <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] lg:gap-16">
       {/* ── Where you can start ─────────────────────────────────── */}
       <div>
-        <Label>Concepts</Label>
+        <Label>{t.understand.concepts}</Label>
         <ul className="pk-rows mt-4">
           {[...concepts]
             .sort((a, b) => b.itemCount - a.itemCount || a.label.localeCompare(b.label))
@@ -134,7 +135,7 @@ export function KnowledgeGraph({
       <div>
         {centre && (
           <>
-            <Label>Related to</Label>
+            <Label>{t.understand.relatedTo}</Label>
             <h3 className="pk-title mt-4 text-[var(--pk-ink)]">{centre.label}</h3>
             <p className="pk-meta mt-2">
               {centre.itemCount} {centre.itemCount === 1 ? "piece" : "pieces"} in your library
@@ -142,8 +143,7 @@ export function KnowledgeGraph({
 
             {steps.length === 0 ? (
               <p className="mt-8 max-w-[52ch] text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">
-                Nothing else you&rsquo;ve saved carries this idea alongside another one yet. A connection needs one
-                piece that is about both.
+                {t.understand.noConnectionForIdea}
               </p>
             ) : (
               <ol className="mt-8 flex flex-col">

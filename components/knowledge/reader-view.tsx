@@ -164,14 +164,14 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
             href="/knowledge/library"
             className="pk-meta -ml-1 flex items-center gap-1.5 px-1 transition-colors hover:text-[var(--pk-ink)]"
           >
-            <ArrowLeft className="size-3.5" /> Library
+            <ArrowLeft className="size-3.5" /> {t.nav.library}
           </Link>
           <div className="flex items-center gap-1">
             {/* Ask about this — routes to the existing Ask surface with
                 the composer pre-filled. Passes only the `q` free-text
                 the flow already accepts; nothing is auto-run or faked. */}
             <Link
-              href={askAboutHref(`What are the main ideas in "${doc.title}"?`)}
+              href={askAboutHref(t.reader.askMainIdeas(doc.title))}
               className="pk-meta flex h-8 items-center gap-1.5 rounded-full px-2.5 transition-colors hover:bg-[var(--pk-sunken)] hover:text-[var(--pk-ink)]"
             >
               <Sparkles className="size-3.5" />
@@ -298,7 +298,7 @@ export function ReaderView({ doc }: { doc: KnowledgeDocument }) {
             rel="noopener noreferrer"
             className="mt-7 inline-flex items-center gap-1.5 text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
           >
-            <ExternalLink className="size-3.5" /> Open the original
+            <ExternalLink className="size-3.5" /> {t.reader.openTheOriginal}
           </a>
         </section>
       </article>
@@ -442,7 +442,7 @@ function AiSummaryBlock({
       </button>
       {state === "error" ? (
         <span role="status" className="pk-meta text-[var(--pk-danger)]">
-          Couldn&apos;t generate a summary. Try again.
+          {t.reader.summaryFailed}
         </span>
       ) : null}
     </>
@@ -560,6 +560,7 @@ function ArticleBody({
    *  the first paragraph as if it were being read. */
   spokenIndex: number | null
 }) {
+  const t = useT()
   const [coverFailed, setCoverFailed] = useState(false)
   return (
     <>
@@ -567,7 +568,7 @@ function ArticleBody({
         /* eslint-disable-next-line @next/next/no-img-element */
         <img
           src={cover || "/placeholder.svg"}
-          alt={`Lead image for ${title}`}
+          alt={t.reader.leadImage(title)}
           referrerPolicy="no-referrer"
           onError={() => setCoverFailed(true)}
           className="mt-10 aspect-[16/9] w-full rounded-[var(--pk-r)] object-cover"
@@ -623,6 +624,7 @@ function ExcerptLede({
   title: string
   url: string
 }) {
+  const t = useT()
   const [coverFailed, setCoverFailed] = useState(false)
   return (
     <>
@@ -630,7 +632,7 @@ function ExcerptLede({
         /* eslint-disable-next-line @next/next/no-img-element */
         <img
           src={cover || "/placeholder.svg"}
-          alt={`Lead image for ${title}`}
+          alt={t.reader.leadImage(title)}
           referrerPolicy="no-referrer"
           onError={() => setCoverFailed(true)}
           className="mt-10 aspect-[16/9] w-full rounded-[var(--pk-r)] object-cover"
@@ -643,7 +645,7 @@ function ExcerptLede({
 
       <div className="mt-8 flex flex-col items-start gap-3 border-t border-[var(--kn-edge)] pt-6">
         <p className="text-sm text-muted-foreground">
-          This is the summary we could pull from the source. Open the original to read the full piece.
+          {t.reader.partialSummary}
         </p>
         <a
           href={url}
@@ -651,7 +653,7 @@ function ExcerptLede({
           rel="noopener noreferrer"
           className="inline-flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
         >
-          <ExternalLink className="size-4" /> Open original
+          <ExternalLink className="size-4" /> {t.reader.openOriginal}
         </a>
       </div>
     </>
@@ -720,7 +722,7 @@ function PdfBlock({ doc }: { doc: KnowledgeDocument }) {
       <div>
         <p className="font-serif text-xl font-medium text-foreground">{t.reader.isPdf}</p>
         <p className="mx-auto mt-1.5 max-w-sm text-pretty text-sm text-muted-foreground">
-          PDFs open best in their own viewer. Open it in a new tab to read, search and download.
+          {t.reader.pdfOpensBest}
         </p>
       </div>
       <a
@@ -771,7 +773,7 @@ function UnextractedBlock({ url }: { url: string }) {
       </span>
       <p className="text-sm font-medium text-foreground">{t.reader.noReadableText}</p>
       <p className="max-w-sm text-xs text-muted-foreground">
-        We saved the link, but this page didn&apos;t expose article text we could pull in.
+        {t.reader.noArticleText}
       </p>
       <OpenOriginalPill url={url} />
     </div>
@@ -779,6 +781,7 @@ function UnextractedBlock({ url }: { url: string }) {
 }
 
 function OpenOriginalPill({ url }: { url: string }) {
+  const t = useT()
   return (
     <a
       href={url}
@@ -786,7 +789,7 @@ function OpenOriginalPill({ url }: { url: string }) {
       rel="noopener noreferrer"
       className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--kn-edge)] bg-card px-4 text-xs font-medium text-foreground shadow-sm transition-colors hover:border-foreground/25"
     >
-      <ExternalLink className="size-3.5" /> Open original
+      <ExternalLink className="size-3.5" /> {t.reader.openOriginal}
     </a>
   )
 }

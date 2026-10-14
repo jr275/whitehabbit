@@ -1,20 +1,27 @@
 import { FolderOpen } from "lucide-react"
 import { ComingSoon } from "@/components/knowledge/coming-soon"
+import { getTranslations } from "@/lib/knowledge/i18n/server"
 
-export const metadata = { title: "Collections · Knowledge" }
+/* The tab, the bookmark and the share preview are read as often as
+ * the page, so they come from the dictionary too. This page already
+ * resolves the locale for its own content, so nothing here makes it
+ * any more dynamic than it was. */
+export async function generateMetadata() {
+  const { t } = await getTranslations()
+  return {
+    title: t.meta.collectionsTitle,
+  }
+}
 
-export default function CollectionsPage() {
+export default async function CollectionsPage() {
+  const { t } = await getTranslations()
   return (
     <ComingSoon
-      eyebrow="Collections"
-      title="How you choose to organize."
-      description="Topics surface automatically from what you save — Collections are the sets you build on purpose, around a project, question or theme."
+      eyebrow={t.comingSoon.collectionsEyebrow}
+      title={t.comingSoon.collectionsTitle}
+      description={t.comingSoon.collectionsBody}
       icon={FolderOpen}
-      bullets={[
-        "Create collections and drag saved items into them",
-        "Keep them separate from the topics Keeply detects for you",
-        "Share a collection as a read-only reading list",
-      ]}
+      bullets={t.comingSoon.collectionsBullets}
     />
   )
 }

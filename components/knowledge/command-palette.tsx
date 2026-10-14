@@ -21,25 +21,26 @@ import { searchLibrary } from "@/lib/knowledge/client"
 import { useVoiceSearch } from "@/lib/knowledge/use-voice-search"
 import type { KnowledgeItem } from "@/lib/knowledge/types"
 import { VoiceSearchButton } from "./voice-search-button"
+import { useT } from "./i18n"
 
 interface Command {
   id: string
-  label: string
-  hint: string
   icon: LucideIcon
-  group: "Actions" | "Navigate"
+  group: "actions" | "navigate"
+  labelKey: keyof ReturnType<typeof useT>["palette"]["cmd"]
+  hintKey: keyof ReturnType<typeof useT>["palette"]["cmd"]
   href?: string
 }
 
 // Only real, wired destinations/actions — nothing that pretends to do
 // something we haven't built.
 const COMMANDS: Command[] = [
-  { id: "save", label: "Save a URL", hint: "Add a link to your library", icon: Link2, group: "Actions" },
-  { id: "nav-library", label: "Go to Library", hint: "All your saved knowledge", icon: BookOpen, group: "Navigate", href: "/knowledge/library" },
-  { id: "nav-favorites", label: "Go to Favorites", hint: "The ones you starred", icon: Heart, group: "Navigate", href: "/knowledge/favorites" },
-  { id: "nav-topics", label: "Go to Topics", hint: "Themes across your library", icon: Layers, group: "Navigate", href: "/knowledge/topics" },
-  { id: "nav-ask", label: "Go to Ask", hint: "Ask your knowledge", icon: Sparkles, group: "Navigate", href: "/knowledge/ai" },
-  { id: "nav-home", label: "Go to Home", hint: "Your library overview", icon: Home, group: "Navigate", href: "/knowledge" },
+  { id: "save", labelKey: "save", hintKey: "saveHint", icon: Link2, group: "actions" },
+  { id: "nav-library", labelKey: "library", hintKey: "libraryHint", icon: BookOpen, group: "navigate", href: "/knowledge/library" },
+  { id: "nav-favorites", labelKey: "favorites", hintKey: "favoritesHint", icon: Heart, group: "navigate", href: "/knowledge/favorites" },
+  { id: "nav-topics", labelKey: "topics", hintKey: "topicsHint", icon: Layers, group: "navigate", href: "/knowledge/topics" },
+  { id: "nav-ask", labelKey: "ask", hintKey: "askHint", icon: Sparkles, group: "navigate", href: "/knowledge/ai" },
+  { id: "nav-home", labelKey: "home", hintKey: "homeHint", icon: Home, group: "navigate", href: "/knowledge" },
 ]
 
 const DEBOUNCE_MS = 220
@@ -51,6 +52,7 @@ interface CommandPaletteProps {
 }
 
 export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
+  const t = useT()
   const router = useRouter()
   const [query, setQuery] = useState("")
   const [active, setActive] = useState(0)
@@ -65,11 +67,18 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
   const voice = useVoiceSearch((transcript) => setQuery(transcript))
   const voiceBusy = voice.state === "listening" || voice.state === "processing"
 
+  /* Matched against the TRANSLATED text, not the key. Someone typing
+   * "biblioteca" is looking for "Ir para a Biblioteca", and a filter
+   * over the English source would find nothing — a search box that
+   * silently fails on the language the screen is in. */
   const commandMatches = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return COMMANDS
-    return COMMANDS.filter((c) => c.label.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q))
-  }, [query])
+    return COMMANDS.filter(
+      (c) =>
+        t.palette.cmd[c.labelKey].toLowerCase().includes(q) || t.palette.cmd[c.hintKey].toLowerCase().includes(q),
+    )
+  }, [query, t])
 
   // A flat, ordered list of everything selectable — commands first,
   // then real library results — so arrow keys + Enter traverse both.
@@ -168,10 +177,10 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
       className="fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[12vh]"
       role="dialog"
       aria-modal="true"
-      aria-label="Command palette and library search"
+      aria-label={t.palette.label}
     >
       <button
-        aria-label="Close command palette"
+        aria-label={t.palette.closeLabel}
         className="absolute inset-0 bg-[oklch(0.185_0.022_268_/_28%)] backdrop-blur-[2px]"
         onClick={onClose}
       />
@@ -180,11 +189,11 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
           <Search className="size-4 shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
-            value={voiceBusy ? voice.interimTranscript || (voice.state === "listening" ? "Listening…" : "Processing…") : query}
+            value={voiceBusy ? voice.interimTranscript || (voice.state === "listening" ? t.palette.listening : t.palette.processing) : query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
             readOnly={voiceBusy}
-            placeholder="Search your library or type a command…"
+            placeholder={t.palette.placeholder}
             className={cn(
               "h-14 flex-1 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground",
               voiceBusy && "text-muted-foreground",
@@ -207,7 +216,7 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
           {commandMatches.length > 0 && (
             <>
               <p                 className="pk-label px-3 pb-2 pt-2.5">
-                {hasQuery ? "Commands" : "Quick actions"}
+                {hasQuery ? t.palette.commands : t.palette.quickActions}
               </p>
               {commandMatches.map((cmd) => {
                 cursor += 1
@@ -229,8 +238,8 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
                       strokeWidth={1.9}
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[14px] font-medium text-[var(--pk-ink)]">{cmd.label}</span>
-                      <span className="pk-meta block truncate">{cmd.hint}</span>
+                      <span className="block truncate text-[14px] font-medium text-[var(--pk-ink)]">{t.palette.cmd[cmd.labelKey]}</span>
+                      <span className="pk-meta block truncate">{t.palette.cmd[cmd.hintKey]}</span>
                     </span>
                     {isActive ? (
                       <CornerDownLeft className="size-3.5 text-[var(--pk-ink-4)]" />
@@ -246,9 +255,7 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
           {/* Real library results */}
           {results.length > 0 && (
             <>
-              <p className="pk-label px-3 pb-2 pt-3.5">
-                In your library
-              </p>
+              <p className="pk-label px-3 pb-2 pt-3.5">{t.palette.inYourLibrary}</p>
               {results.map((item) => {
                 cursor += 1
                 const i = cursor
@@ -286,15 +293,15 @@ export function CommandPalette({ open, onClose, onSave }: CommandPaletteProps) {
           {/* Honest empty search state */}
           {showNoResults && (
             <div className="px-3 py-8 text-center">
-              <p className="text-[14px] text-[var(--pk-ink)]">No saved items match “{query.trim()}”.</p>
+              <p className="text-[14px] text-[var(--pk-ink)]">{t.palette.noMatches(query.trim())}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Search looks through titles, sources, tags and the extracted text of what you&apos;ve saved.
+                {t.palette.searchScope}
               </p>
             </div>
           )}
 
           {commandMatches.length === 0 && !hasQuery && (
-            <p className="px-3 py-8 text-center text-sm text-muted-foreground">No commands found.</p>
+            <p className="px-3 py-8 text-center text-sm text-muted-foreground">{t.palette.noCommands}</p>
           )}
         </div>
       </div>

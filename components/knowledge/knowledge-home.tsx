@@ -30,12 +30,13 @@ import { openCommandPalette, openSaveDialog } from "@/lib/knowledge/config"
 import { useKnowledgeLibrary } from "@/lib/knowledge/use-knowledge"
 import { EmptyLibrary } from "./empty-state"
 import { ItemRow, ItemRows } from "./item-row"
+import { useLocale, useT } from "./i18n"
 
-function greeting(now = new Date()): string {
+function greeting(t: ReturnType<typeof useT>, now = new Date()): string {
   const h = now.getHours()
-  if (h < 12) return "Good morning"
-  if (h < 18) return "Good afternoon"
-  return "Good evening"
+  if (h < 12) return t.home.goodMorning
+  if (h < 18) return t.home.goodAfternoon
+  return t.home.goodEvening
 }
 
 /** Time-of-day depends on the *viewer's* local clock, which differs from
@@ -43,10 +44,11 @@ function greeting(now = new Date()): string {
  * mismatch, so we render a stable neutral greeting on the server + first
  * paint, then swap to the localized one after mount. */
 function useGreeting(): string {
-  const [text, setText] = useState("Welcome back")
+  const t = useT()
+  const [text, setText] = useState(t.home.welcomeBack)
   useEffect(() => {
-    setText(greeting())
-  }, [])
+    setText(greeting(t))
+  }, [t])
   return text
 }
 
@@ -58,6 +60,8 @@ function firstName(email?: string | null): string | null {
 }
 
 export function KnowledgeHome() {
+  const t = useT()
+  const { n } = useLocale()
   const { items, status, total, toggleFavorite, retry } = useKnowledgeLibrary({ filter: "all" })
   const { data: session } = useSession()
   const name = firstName(session?.user?.email)
@@ -109,13 +113,13 @@ export function KnowledgeHome() {
           {hello}
           {name ? ` · ${name}` : ""}
         </p>
-        <h1 className="pk-display mt-4 max-w-[13ch] text-[var(--pk-ink)]">Your knowledge.</h1>
+        <h1 className="pk-display mt-4 max-w-[13ch] text-[var(--pk-ink)]">{t.home.yourKnowledge}</h1>
 
         <div className="mt-9 max-w-[38rem]">
           <button type="button" onClick={openCommandPalette} className="pk-field text-left">
             <Search className="size-[18px] shrink-0 text-[var(--pk-ink-4)]" strokeWidth={1.8} />
             <span className="flex-1 truncate text-[15px] text-[var(--pk-ink-4)]">
-              Search everything you saved
+              {t.home.searchEverything}
             </span>
             <kbd className="pk-label shrink-0">⌘K</kbd>
           </button>
@@ -125,7 +129,7 @@ export function KnowledgeHome() {
               href="/knowledge/ai"
               className="group inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--pk-ink)]"
             >
-              Ask your knowledge
+              {t.home.askYourKnowledge}
               <ArrowRight
                 className="size-3.5 transition-transform duration-[var(--pk-fast)] group-hover:translate-x-0.5"
                 strokeWidth={2}
@@ -135,16 +139,15 @@ export function KnowledgeHome() {
               onClick={openSaveDialog}
               className="text-[14px] text-[var(--pk-ink-3)] underline decoration-[var(--pk-rule-2)] underline-offset-4 transition-colors hover:text-[var(--pk-ink)]"
             >
-              Save something new
+              {t.home.saveSomethingNew}
             </button>
           </div>
 
           {status === "ready" && total > 0 && (
             <p className="pk-meta mt-7">
-              {total.toLocaleString()} saved
-              {unreadTotal !== null && ` · ${unreadTotal.toLocaleString()} unread`}
-              {favoritesTotal !== null &&
-                ` · ${favoritesTotal.toLocaleString()} favourite${favoritesTotal === 1 ? "" : "s"}`}
+              {t.home.saved(n(total))}
+              {unreadTotal !== null && ` · ${t.home.unread(n(unreadTotal))}`}
+              {favoritesTotal !== null && ` · ${t.home.favourites(favoritesTotal, n(favoritesTotal))}`}
             </p>
           )}
         </div>
@@ -158,7 +161,7 @@ export function KnowledgeHome() {
         </div>
       ) : (
         <>
-          <Section label="Recently saved" href="/knowledge/library" hrefLabel="Browse library">
+          <Section label={t.home.recentlySaved} href="/knowledge/library" hrefLabel={t.home.browseLibrary}>
             <ItemRows>
               {recent.map((item) => (
                 <ItemRow key={item.id} item={item} onToggleFavorite={toggleFavorite} onRetry={retry} />
@@ -166,7 +169,7 @@ export function KnowledgeHome() {
             </ItemRows>
           </Section>
 
-          <Section label="Your knowledge" href="/knowledge/topics" hrefLabel="All topics">
+          <Section label={t.home.yourKnowledge} href="/knowledge/topics" hrefLabel={t.home.allTopics}>
             {topics.length > 0 ? (
               /* A topic is a word and a count. It used to be a card with
                  a progress bar that was always full — a bar whose only
@@ -188,7 +191,7 @@ export function KnowledgeHome() {
                 ))}
               </ul>
             ) : (
-              <Quiet>Topics will appear here as Keeply reads what you save.</Quiet>
+              <Quiet>{t.home.topicsPending}</Quiet>
             )}
           </Section>
 
@@ -196,10 +199,9 @@ export function KnowledgeHome() {
               was an announcement that the feature did not exist. The
               feature does exist — on /knowledge, built from real
               co-occurrence — so this is a door to it, one line tall. */}
-          <Section label="Discover" href="/knowledge" hrefLabel="Open connections">
+          <Section label={t.home.discover} href="/knowledge" hrefLabel={t.home.openConnections}>
             <Quiet>
-              The links between what you&rsquo;ve saved — concepts that keep turning up together, and the pieces they
-              turn up in.
+              {t.home.discoverBody}
             </Quiet>
           </Section>
         </>

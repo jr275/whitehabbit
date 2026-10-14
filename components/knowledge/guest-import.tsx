@@ -38,6 +38,7 @@ import { useCallback, useEffect, useState } from "react"
 import { saveUrlToAccount } from "@/lib/knowledge/client"
 import { importGuestItems, type GuestImportOutcome } from "@/lib/knowledge/guest-import"
 import { exportGuestItems, guestDelete } from "@/lib/knowledge/guest-store"
+import { useT } from "./i18n"
 
 /** Dismissal lives in sessionStorage, not localStorage: declining is
  *  "not now", and a later visit should be offered again. It is never
@@ -47,6 +48,7 @@ const DISMISSED_KEY = "knowledge.guest.import.dismissed.v1"
 type Phase = "offer" | "working" | "result"
 
 export function GuestImport() {
+  const t = useT()
   const { status } = useSession()
   const [pending, setPending] = useState<{ id: string; url: string }[]>([])
   const [phase, setPhase] = useState<Phase>("offer")
@@ -107,16 +109,16 @@ export function GuestImport() {
               <div className="min-w-0 flex-1">
                 <p className="text-[13.5px] font-medium text-[var(--pk-ink)]">
                   {pending.length === 1
-                    ? "1 link is saved on this device only"
-                    : `${pending.length} links are saved on this device only`}
+                    ? t.guestImport.pendingTitle(1)
+                    : t.guestImport.pendingTitle(pending.length)}
                 </p>
                 <p className="pk-meta mt-0.5">
-                  They were saved before you signed in. Move them into your account to keep them across devices.
+                  {t.guestImport.pendingBody}
                 </p>
               </div>
               <button
                 onClick={dismiss}
-                aria-label="Not now"
+                aria-label={t.account.notNow}
                 className="flex size-7 shrink-0 items-center justify-center rounded-[var(--pk-r-sm)] text-[var(--pk-ink-3)] transition-colors hover:bg-[var(--pk-sunken)]"
               >
                 <X className="size-4" />
@@ -126,15 +128,11 @@ export function GuestImport() {
               <button
                 onClick={dismiss}
                 className="h-9 rounded-[var(--pk-r-sm)] px-3 text-[13px] text-[var(--pk-ink-3)] transition-colors hover:text-[var(--pk-ink)]"
-              >
-                Not now
-              </button>
+              >{t.guestImport.notNow}</button>
               <button
                 onClick={runImport}
                 className="h-9 rounded-full bg-[var(--pk-accent)] px-4 text-[13px] font-medium text-[var(--pk-accent-ink)] transition-opacity hover:opacity-90"
-              >
-                Move to my account
-              </button>
+              >{t.guestImport.moveToAccount}</button>
             </div>
           </>
         )}
@@ -158,7 +156,7 @@ export function GuestImport() {
               )}
               <div className="min-w-0 flex-1">
                 <p className="text-[13.5px] font-medium text-[var(--pk-ink)]">
-                  {outcome.moved === 1 ? "1 link moved to your account" : `${outcome.moved} links moved to your account`}
+                  {outcome.moved === 1 ? t.guestImport.moved(1) : t.guestImport.moved(outcome.moved)}
                 </p>
                 {outcome.failed.length > 0 && (
                   <>
@@ -167,8 +165,8 @@ export function GuestImport() {
                         and the local copy is still there to retry. */}
                     <p className="pk-meta mt-1">
                       {outcome.failed.length === 1
-                        ? "1 link stayed on this device:"
-                        : `${outcome.failed.length} links stayed on this device:`}
+                        ? t.guestImport.stayed(1)
+                        : t.guestImport.stayed(outcome.failed.length)}
                     </p>
                     <ul className="mt-1.5 space-y-1">
                       {outcome.failed.map((f) => (
@@ -192,7 +190,7 @@ export function GuestImport() {
                   }}
                   className="h-9 rounded-[var(--pk-r-sm)] px-3 text-[13px] text-[var(--pk-ink-3)] transition-colors hover:text-[var(--pk-ink)]"
                 >
-                  Try again
+                  {t.common.tryAgain}
                 </button>
               )}
               <button

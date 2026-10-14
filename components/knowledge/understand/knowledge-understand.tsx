@@ -48,11 +48,12 @@ import { KnowledgeIntro } from "./intro/knowledge-intro"
 import { KnowledgeHeader, type ChapterLink } from "./shell/knowledge-header"
 import { Chapter } from "./shell/section"
 import { KnowledgeSignals } from "./signals/knowledge-signals"
+import { useT } from "../i18n"
 
 const CHAPTERS: ChapterLink[] = [
-  { id: "signals", label: "Signals" },
-  { id: "connections", label: "Connections" },
-  { id: "explorer", label: "Explorer" },
+  { id: "signals", labelKey: "signals" },
+  { id: "connections", labelKey: "connections" },
+  { id: "explorer", labelKey: "explorer" },
 ]
 
 /**
@@ -80,6 +81,7 @@ export function KnowledgeUnderstand({
   explorerError = false,
   initialConceptId = null,
 }: UnderstandProps = {}) {
+  const t = useT()
   const overview = useKnowledgeOverview(liveOverview)
   const concepts = useKnowledgeConcepts(explorer?.concepts)
   const connections = useKnowledgeConnections(explorer?.objects, explorer?.concepts)
@@ -172,9 +174,9 @@ export function KnowledgeUnderstand({
         <Chapter
           id="connections"
           index={1}
-          eyebrow="How it connects"
-          title="The ideas that keep showing up together"
-          lede="Every line here is a count, not a guess: two concepts are connected when the same saved items discuss both. Select one to see what joins it, and to which pieces."
+          eyebrow={t.understand.connectionsEyebrow}
+          title={t.understand.connectionsTitle}
+          lede={t.understand.connectionsLede}
           bleed
         >
           <KnowledgeGraph
@@ -188,9 +190,9 @@ export function KnowledgeUnderstand({
         <Chapter
           id="explorer"
           index={2}
-          eyebrow="Find it"
-          title="Everything, plainly"
-          lede="The part where you look something up."
+          eyebrow={t.understand.explorerEyebrow}
+          title={t.understand.explorerTitle}
+          lede={t.understand.explorerLede}
           bleed
         >
           <KnowledgeExplorer
@@ -217,8 +219,8 @@ export function KnowledgeUnderstand({
               their items — so there is nothing left to disclaim. */}
           <p className="mt-2 max-w-[56ch] text-[12.5px] leading-relaxed text-[var(--kp-ink-faint)]">
             {isLive
-              ? "Everything on this page is read from your library."
-              : "Signed out, so this shows a fixed sample library rather than an account. Sign in to see your own."}
+              ? t.understand.footerLive
+              : t.understand.footerSample}
           </p>
         </div>
       </footer>

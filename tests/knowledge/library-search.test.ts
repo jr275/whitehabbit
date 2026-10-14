@@ -28,6 +28,7 @@ import { EMBEDDING_DIMENSIONS, type EmbeddingProvider } from "@/lib/ai/embedding
 import { embedItemChunks, indexItem } from "@/lib/knowledge/indexing"
 import { EVIDENCE_MIN_SIMILARITY, boundedParam, searchLibrary } from "@/lib/knowledge/search/library"
 import * as repo from "@/lib/knowledge/repo"
+import { DICTIONARIES } from "@/lib/knowledge/i18n/dictionary"
 
 let owner: TestTenant
 /** Same organization, different person — the attacker an org_id-only
@@ -464,7 +465,10 @@ describe("the search result row", () => {
     // effect never re-ran and the button did nothing: a reader whose
     // search failed had no way back except editing the query text. The
     // retry now counts the attempt, and the effect depends on the count.
-    assert.match(list, /onClick: \(\) => setSearchAttempt\(\(n\) => n \+ 1\)/)
+    // The parameter name is not the guarantee — `n` is now the locale
+    // number formatter in this scope, so the callback binds `attempt`.
+    // What matters is that the retry increments the counter.
+    assert.match(list, /onClick: \(\) => setSearchAttempt\(\((\w+)\) => \1 \+ 1\)/)
     assert.match(list, /\}, \[query, searching, searchAttempt\]\)/)
     assert.doesNotMatch(list, /setQuery\(\(q\) => q\)/, "a retry that re-sets the same value is a no-op")
   })
@@ -475,6 +479,15 @@ describe("the search result row", () => {
   })
 
   it("builds the question deterministically — no model is asked to phrase it", () => {
-    assert.match(reader, /What are the main ideas in/)
+    // The wording is now the dictionary's, so that the question a
+    // Portuguese reader sends is Portuguese. What this guards is
+    // unchanged: the reader TEMPLATES the question from the title, and
+    // no model is asked to phrase it.
+    assert.match(reader, /askAboutHref\(t\.reader\.askMainIdeas\(doc\.title\)\)/)
+    for (const [locale, d] of Object.entries(DICTIONARIES)) {
+      const asked = d.reader.askMainIdeas("Why chunking projects fail")
+      assert.match(asked, /Why chunking projects fail/, `${locale} must quote the title it was given`)
+      assert.ok(asked.length > "Why chunking projects fail".length + 8, `${locale} must ask something, not just echo the title`)
+    }
   })
 })

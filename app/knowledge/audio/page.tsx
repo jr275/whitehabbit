@@ -1,23 +1,28 @@
 import { Headphones } from "lucide-react"
 import { ComingSoon } from "@/components/knowledge/coming-soon"
+import { getTranslations } from "@/lib/knowledge/i18n/server"
 
-export const metadata = {
-  title: "Listen · Knowledge",
-  description: "Listen to your saves like a podcast.",
+/* The tab, the bookmark and the share preview are read as often as
+ * the page, so they come from the dictionary too. This page already
+ * resolves the locale for its own content, so nothing here makes it
+ * any more dynamic than it was. */
+export async function generateMetadata() {
+  const { t } = await getTranslations()
+  return {
+    title: t.meta.listenTitle,
+    description: t.meta.listenDescription,
+  }
 }
 
-export default function AudioPage() {
+export default async function AudioPage() {
+  const { t } = await getTranslations()
   return (
     <ComingSoon
-      eyebrow="Audio"
-      title="Listen to your saves like a podcast."
-      description="Turn saved articles into narrated audio and play them as a queue."
+      eyebrow={t.comingSoon.audioEyebrow}
+      title={t.comingSoon.audioTitle}
+      description={t.comingSoon.audioBody}
       icon={Headphones}
-      bullets={[
-        "Text-to-speech narration of extracted article text",
-        "A continuous listening queue built from your unread saves",
-        "Playback speed and resume-where-you-left-off",
-      ]}
+      bullets={t.comingSoon.audioBullets}
     />
   )
 }

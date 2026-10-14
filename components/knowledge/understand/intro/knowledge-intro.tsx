@@ -38,24 +38,39 @@
 import type { KnowledgeOverview } from "@/lib/knowledge/understand/types"
 import { useCountUp, useReveal } from "@/lib/knowledge/understand/use-reveal"
 import { Reveal } from "../shell/section"
+import { useLocale, useT } from "../../i18n"
 
 export function KnowledgeIntro({ overview, onExplore }: { overview: KnowledgeOverview; onExplore: () => void }) {
+  const { locale, n } = useLocale()
+  const t = useT()
   const { ref, revealed } = useReveal<HTMLDivElement>({ threshold: 0.05 })
   const saved = useCountUp(overview.savedCount, revealed, 1100)
+
+  /* The figure is accented, so the sentence is SPLIT around it rather
+   * than assembled from an English-shaped "You saved" + number +
+   * "things." Each language writes its own clause order, and the
+   * number is still one styled span. A translation that moved the
+   * figure elsewhere, or dropped it, renders the sentence plainly
+   * instead of breaking — never a half-sentence. */
+  const figure = n(saved)
+  const headline = t.understand.savedThings(figure)
+  const figureAt = headline.indexOf(figure)
 
   const since =
     overview.since === null
       ? null
-      : new Date(overview.since).toLocaleDateString(undefined, { month: "long", year: "numeric" })
+      : new Date(overview.since).toLocaleDateString(locale, { month: "long", year: "numeric" })
 
   // What Keeply can honestly say it found. Themes and open questions
   // are not derived from anything yet, so a live library names only the
   // measures that exist — the sentence gets shorter rather than
   // carrying a number nobody computed.
   const found: string[] = [
-    `${overview.conceptCount.toLocaleString()} ${overview.conceptCount === 1 ? "concept" : "concepts"}`,
-    ...(overview.themeCount !== null ? [`${overview.themeCount} themes`] : []),
-    ...(overview.questionCount !== null ? [`${overview.questionCount} questions`] : []),
+    t.understand.concepts_n(overview.conceptCount, n(overview.conceptCount)),
+    ...(overview.themeCount !== null ? [t.understand.themes_n(overview.themeCount, n(overview.themeCount))] : []),
+    ...(overview.questionCount !== null
+      ? [t.understand.questions_n(overview.questionCount, n(overview.questionCount))]
+      : []),
   ]
 
   return (
@@ -69,7 +84,7 @@ export function KnowledgeIntro({ overview, onExplore }: { overview: KnowledgeOve
           <div className="lg:col-span-7 xl:col-span-8">
             <Reveal>
               <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--kp-accent)]">
-                Your knowledge
+                {t.understand.yourKnowledgeEyebrow}
               </p>
             </Reveal>
 
@@ -78,8 +93,15 @@ export function KnowledgeIntro({ overview, onExplore }: { overview: KnowledgeOve
                 id="intro-title"
                 className="mt-5 max-w-[16ch] text-balance font-[family-name:var(--font-fraunces)] text-[clamp(2.6rem,7vw,5rem)] font-medium leading-[0.98] tracking-[-0.03em]"
               >
-                You saved{" "}
-                <span className="kp-tnum tabular-nums text-[var(--kp-accent)]">{saved.toLocaleString()}</span> things.
+                {figureAt < 0 ? (
+                  headline
+                ) : (
+                  <>
+                    {headline.slice(0, figureAt)}
+                    <span className="kp-tnum tabular-nums text-[var(--kp-accent)]">{figure}</span>
+                    {headline.slice(figureAt + figure.length)}
+                  </>
+                )}
               </h1>
             </Reveal>
 
@@ -88,19 +110,18 @@ export function KnowledgeIntro({ overview, onExplore }: { overview: KnowledgeOve
              *  it, one step down the type scale. */}
             <Reveal delay={150}>
               <p className="mt-5 max-w-[44ch] text-[clamp(1.1rem,1.8vw,1.4rem)] leading-[1.45] tracking-[-0.01em] text-[var(--kp-ink-soft)]">
-                But your library is more interesting than a number.
+                {t.understand.moreThanANumber}
               </p>
             </Reveal>
 
             <Reveal delay={220}>
               <p className="mt-7 max-w-[46ch] text-[clamp(1.05rem,1.6vw,1.25rem)] leading-[1.5]">
                 {overview.savedCount === 0 ? (
-                  <>Save something and Keeply will start finding what it is about.</>
+                  <>{t.understand.introEmpty}</>
                 ) : overview.conceptCount === 0 ? (
-                  <>Keeply hasn&rsquo;t finished reading it yet — concepts will appear here as it does.</>
+                  <>{t.understand.introPending}</>
                 ) : overview.themeCount !== null && overview.questionCount !== null ? (
-                  <>
-                    Keeply found <strong className="font-medium text-[var(--kp-accent)]">{found[0]}</strong> hiding
+                  <>{t.understand.keeplyFound}<strong className="font-medium text-[var(--kp-accent)]">{found[0]}</strong> hiding
                     across it, clustered into{" "}
                     <strong className="font-medium text-[var(--kp-accent)]">{found[1]}</strong>, circling{" "}
                     <strong className="font-medium text-[var(--kp-accent)]">{found[2]}</strong> you haven&rsquo;t
@@ -122,7 +143,7 @@ export function KnowledgeIntro({ overview, onExplore }: { overview: KnowledgeOve
                   onClick={onExplore}
                   className="group inline-flex items-center gap-3 rounded-full bg-[var(--kp-ink)] px-6 py-3 text-[14px] font-medium text-[var(--kp-paper)] transition-colors duration-[var(--kp-fast)] hover:bg-[var(--kp-accent)]"
                 >
-                  Explore your knowledge
+                  {t.understand.explore}
                   <span
                     aria-hidden
                     className="transition-transform duration-[var(--kp-fast)] group-hover:translate-y-0.5"
@@ -143,9 +164,7 @@ export function KnowledgeIntro({ overview, onExplore }: { overview: KnowledgeOve
               <aside className="border-l border-[var(--kp-rule-strong)] pl-6 lg:pl-8">
                 {since && (
                   <>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--kp-ink-faint)]">
-                      Collecting since
-                    </p>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--kp-ink-faint)]">{t.understand.collectingSince}</p>
                     <p className="kp-tnum mt-2 text-[clamp(1.25rem,1.8vw,1.6rem)] font-medium leading-none tracking-[-0.02em]">
                       {since}
                     </p>
@@ -159,8 +178,7 @@ export function KnowledgeIntro({ overview, onExplore }: { overview: KnowledgeOve
                       (since ? "mt-6 border-t border-[var(--kp-rule)] pt-5" : "")
                     }
                   >
-                    These figures are a fixed sample library, not your account — this page shows how Keeply would
-                    present a real one.
+                    {t.understand.demoNotice}
                   </p>
                 )}
               </aside>

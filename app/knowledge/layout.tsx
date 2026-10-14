@@ -1,23 +1,28 @@
 import type { Metadata } from "next"
-import { cookies, headers } from "next/headers"
+import { cookies } from "next/headers"
 import { KnowledgeShell } from "@/components/knowledge/knowledge-shell"
 import { KN_THEME_COOKIE, parseKnowledgeTheme } from "@/lib/knowledge/theme"
-import { KN_LOCALE_COOKIE, resolveLocale } from "@/lib/knowledge/i18n/locale"
+import { getLocale, getTranslations } from "@/lib/knowledge/i18n/server"
 
-export const metadata: Metadata = {
-  title: "Keeply",
-  description:
-    "Your personal knowledge library. Save anything worth remembering and let Keeply understand, organize and connect it for you.",
+/* The tab, the bookmark and the share preview are read as often as
+ * the page, so they come from the dictionary too. This page already
+ * resolves the locale for its own content, so nothing here makes it
+ * any more dynamic than it was. */
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getTranslations()
+  return {
+    title: t.meta.appTitle,
+    description: t.meta.appDescription,
+  }
 }
 
 export default async function KnowledgeLayout({ children }: { children: React.ReactNode }) {
-  const jar = await cookies()
-  const theme = parseKnowledgeTheme(jar.get(KN_THEME_COOKIE)?.value)
+  const theme = parseKnowledgeTheme((await cookies()).get(KN_THEME_COOKIE)?.value)
   /* Both the theme and the language are resolved HERE so the first
    * paint is already the reader's — a language chosen on the client
-   * renders English and then repaints. With no stored choice, the
-   * browser's own Accept-Language decides; see lib/knowledge/i18n. */
-  const locale = resolveLocale(jar.get(KN_LOCALE_COOKIE)?.value, (await headers()).get("accept-language"))
+   * renders English and then repaints. getLocale() is the one resolver
+   * server pages share, so a page and its chrome can never disagree. */
+  const locale = await getLocale()
 
   return (
     <KnowledgeShell initialTheme={theme} initialLocale={locale}>
