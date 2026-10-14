@@ -27,8 +27,19 @@ import "server-only"
  * so explicitly — see SYSTEM_PROMPT.
  * ================================================================== */
 
+import { randomUUID } from "node:crypto"
 import { callLlm, type LlmCallDeps } from "@/lib/ai/llm"
 import { logger } from "@/lib/observability/logger"
+import {
+  ASK_CUSTOM,
+  custom,
+  stepFinished,
+  stepStarted,
+  textDelta,
+  textEnd,
+  textStart,
+  type AskEventSink,
+} from "./agui"
 import { assembleKnowledgeContext, DEFAULT_CONTEXT_TOKENS } from "./search/context"
 import { extractCitationIds, type KnowledgeCitation } from "./search/citations"
 import { searchKnowledge, type SearchDeps } from "./search"
@@ -117,6 +128,16 @@ export type {
  *  lib/knowledge for the same reason AiSummaryUpstreamError is — the
  *  api-error module imports next/server, which this file stays free of
  *  so the plain-Node test runner can import it. */
+/** The caller cancelled before the provider replied. NOT a failure of
+ *  generation: nothing went wrong, someone stopped waiting. Kept
+ *  separate so a cancelled run is never logged or shown as an error. */
+export class KnowledgeAnswerCancelledError extends Error {
+  constructor(message = "The answer was cancelled before it finished.") {
+    super(message)
+    this.name = "KnowledgeAnswerCancelledError"
+  }
+}
+
 export class KnowledgeAnswerUpstreamError extends Error {
   constructor(message: string) {
     super(message)
@@ -142,7 +163,34 @@ export interface AnswerInput {
   maxContextTokens?: number
 }
 
-export interface AnswerDeps extends SearchDeps, LlmCallDeps {}
+export interface AnswerDeps extends SearchDeps, LlmCallDeps {
+  /**
+   * Observe the pipeline's real stages as AG-UI events (lib/knowledge/agui.ts).
+   *
+   * OPTIONAL, AND OBSERVATION ONLY. Absent, this function behaves
+   * exactly as it did before streaming existed — which is what keeps
+   * POST /api/knowledge/ai and its tests unchanged. The sink cannot
+   * alter the answer: it is called synchronously, never awaited, and
+   * its return value is discarded. A sink that throws must not be able
+   * to turn a good answer into a 500, so every call goes through
+   * emitTo() below.
+   *
+   * Run-scoped events (RUN_STARTED / RUN_FINISHED / RUN_ERROR) are NOT
+   * emitted here. Run identity belongs to the caller that owns the
+   * stream, not to the pipeline.
+   */
+  onEvent?: AskEventSink
+}
+
+/** Emit without letting the observer break the thing being observed. */
+function emitTo(sink: AskEventSink | undefined, event: Parameters<AskEventSink>[0]): void {
+  if (!sink) return
+  try {
+    sink(event)
+  } catch (err) {
+    logger.warn("knowledge_answer_sink_failed", { message: err instanceof Error ? err.message : String(err) })
+  }
+}
 
 /** The refusal. Deliberately a plain sentence rather than an error:
  *  "nothing in your library covers this" is a correct, useful answer,
@@ -154,7 +202,9 @@ const NO_EVIDENCE_ANSWER =
 export async function answerFromKnowledge(input: AnswerInput, deps: AnswerDeps = {}): Promise<KnowledgeAnswer> {
   const startedAt = Date.now()
   const question = input.question.trim().slice(0, MAX_QUESTION_CHARS)
+  const sink = deps.onEvent
 
+  emitTo(sink, stepStarted("retrieval"))
   const t0 = Date.now()
   const search = await searchKnowledge(
     {
@@ -172,6 +222,21 @@ export async function answerFromKnowledge(input: AnswerInput, deps: AnswerDeps =
   )
   const retrievalMs = Date.now() - t0
 
+  // What retrieval did, reported before anything judges it. These are
+  // the search's own numbers, not a recount.
+  emitTo(
+    sink,
+    custom(ASK_CUSTOM.retrieval, {
+      mode: search.mode,
+      executed: search.executed,
+      semanticSearch: search.semanticSearch,
+      candidates: search.candidates,
+      chunksRetrieved: search.chunks.length,
+    }),
+  )
+  emitTo(sink, stepFinished("retrieval"))
+
+  emitTo(sink, stepStarted("evidence"))
   const admissible = search.chunks.filter((c) => isAdmissibleEvidence(c))
 
   const context = assembleKnowledgeContext({
@@ -196,7 +261,25 @@ export async function answerFromKnowledge(input: AnswerInput, deps: AnswerDeps =
   }
 
   // RULE 1. No sources, no call — see this file's header.
-  if (context.passages.length === 0) {
+  const refused = context.passages.length === 0
+
+  emitTo(
+    sink,
+    custom(ASK_CUSTOM.evidence, {
+      chunksUsed: retrieval.chunksUsed,
+      chunksRejected: retrieval.chunksRejected,
+      droppedChunks: retrieval.droppedChunks,
+      contextTokens: retrieval.contextTokens,
+      refused,
+    }),
+  )
+  emitTo(sink, stepFinished("evidence"))
+
+  if (refused) {
+    // The refusal is an outcome, not an error, and the stream says so
+    // explicitly: no generation step is ever started, so a client can
+    // show "no model was asked" as a fact rather than an inference.
+    emitTo(sink, custom(ASK_CUSTOM.refusal, { answer: NO_EVIDENCE_ANSWER, chunksRejected: retrieval.chunksRejected }))
     return {
       status: "no_evidence",
       question,
@@ -208,6 +291,7 @@ export async function answerFromKnowledge(input: AnswerInput, deps: AnswerDeps =
     }
   }
 
+  emitTo(sink, stepStarted("generation"))
   const t1 = Date.now()
   const result = await callLlm(
     {
@@ -215,11 +299,26 @@ export async function answerFromKnowledge(input: AnswerInput, deps: AnswerDeps =
       prompt: `Sources:\n\n${context.text}\n\n---\n\nQuestion: ${question}`,
       maxTokens: MAX_ANSWER_TOKENS,
     },
-    { fetchImpl: deps.fetchImpl },
+    // The signal reaches the provider's own fetch, so cancelling the
+    // run really cancels the HTTP request rather than just ignoring
+    // its result. See lib/ai/llm/types.ts (LlmCallDeps.signal).
+    { fetchImpl: deps.fetchImpl, signal: deps.signal },
   )
   const generationMs = Date.now() - t1
 
   if (!result.ok) {
+    // DELIBERATELY NO stepFinished("generation") HERE. The step did not
+    // finish, and saying it did would be the stream's first lie. A
+    // consumer sees generation started and then the RUN_ERROR its
+    // caller emits — which is what actually happened. "Started, never
+    // finished, run errored" is how a failed step is read; there is no
+    // STEP_ERROR in AG-UI 1.0 to emit instead.
+    if (result.reason === "aborted") {
+      // Not warn: nothing failed. An operator chasing warnings should
+      // not be shown someone closing a tab.
+      logger.info("knowledge_answer_cancelled", { generationMs })
+      throw new KnowledgeAnswerCancelledError()
+    }
     logger.warn("knowledge_answer_failed", { reason: result.reason, message: result.message })
     if (result.reason === "not_configured") {
       throw new KnowledgeAnswerNotConfiguredError(result.message)
@@ -229,7 +328,35 @@ export async function answerFromKnowledge(input: AnswerInput, deps: AnswerDeps =
 
   const answer = result.output.text.trim()
 
+  /* The answer text, as AG-UI text-message events bracketing the
+   * generation step that produced it.
+   *
+   * ONE DELTA, NOT MANY, AND THAT IS NOT A SHORTCUT. callLlm has no
+   * streaming path (lib/ai/llm), so the provider hands back one
+   * complete string. Emitting it as a single delta is the honest
+   * representation of that. Chopping it into fake chunks would invent
+   * progress the provider never reported — the failure
+   * lib/knowledge/use-knowledge-ai.ts exists to prevent. The delta is
+   * the TRIMMED text, identical to what this function returns, so the
+   * stream and the stored record cannot disagree. */
+  const messageId = randomUUID()
+  emitTo(sink, textStart(messageId))
+  emitTo(sink, textDelta(messageId, answer))
+  emitTo(sink, textEnd(messageId))
+  emitTo(sink, stepFinished("generation"))
+
+  emitTo(
+    sink,
+    custom(ASK_CUSTOM.usage, {
+      provider: result.output.provider,
+      model: result.output.model,
+      inputTokens: result.output.inputTokens,
+      outputTokens: result.output.outputTokens,
+    }),
+  )
+
   // RULE 2. Resolve every marker the model produced.
+  emitTo(sink, stepStarted("verification"))
   const referenced = extractCitationIds(answer)
   const known = new Map(context.citations.map((c) => [c.citationId, c]))
   const unresolvedCitationIds = referenced.filter((id) => !known.has(id))
@@ -241,11 +368,19 @@ export async function answerFromKnowledge(input: AnswerInput, deps: AnswerDeps =
   }
 
   const used = new Set(referenced)
+  const citations = context.citations.map((c) => ({ ...c, used: used.has(c.citationId) }))
+
+  // The citations as verified, including the markers that resolved to
+  // nothing. A consumer that hides the unresolved ones is choosing to;
+  // it is not being kept from them.
+  emitTo(sink, custom(ASK_CUSTOM.citations, { citations, unresolvedCitationIds }))
+  emitTo(sink, stepFinished("verification"))
+
   return {
     status: "answered",
     question,
     answer,
-    citations: context.citations.map((c) => ({ ...c, used: used.has(c.citationId) })),
+    citations,
     unresolvedCitationIds,
     retrieval,
     usage: {

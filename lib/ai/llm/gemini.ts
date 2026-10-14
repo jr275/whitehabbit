@@ -61,6 +61,16 @@ function classifyGeminiFailure(httpStatus: number, providerStatus: string | unde
   return "provider_error"
 }
 
+/* Combines the caller's cancellation with the provider's own timeout
+ * so BOTH remain in force: a caller that cancels stops the request,
+ * and a caller that never cancels still cannot hang past the timeout.
+ * AbortSignal.any is Node 20.3+; this repo runs 22 (package.json
+ * engines: >=22.5.0). */
+function requestSignal(deps: { signal?: AbortSignal }, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs)
+  return deps.signal ? AbortSignal.any([timeout, deps.signal]) : timeout
+}
+
 async function call(input: LlmCallInput, deps: LlmCallDeps = {}): Promise<LlmResult> {
   const started = Date.now()
   const fetchImpl = deps.fetchImpl ?? fetch
@@ -82,7 +92,7 @@ async function call(input: LlmCallInput, deps: LlmCallDeps = {}): Promise<LlmRes
         contents: [{ role: "user", parts: [{ text: input.prompt }] }],
         generationConfig: { maxOutputTokens: input.maxTokens ?? 2000 },
       }),
-      signal: AbortSignal.timeout(60_000),
+      signal: requestSignal(deps, 60_000),
     })
 
     if (!res.ok) {
@@ -136,6 +146,18 @@ async function call(input: LlmCallInput, deps: LlmCallDeps = {}): Promise<LlmRes
       durationMs: Date.now() - started,
     }
   } catch (err) {
+    /* A caller's cancellation is not a provider fault. Distinguished
+     * by asking the caller's own signal rather than by matching the
+     * error's name: the provider's timeout also aborts the request,
+     * and that one IS a provider failure. */
+    if (deps.signal?.aborted) {
+      return {
+        ok: false,
+        reason: "aborted",
+        message: "The request was cancelled before the provider replied.",
+        durationMs: Date.now() - started,
+      }
+    }
     return {
       ok: false,
       reason: "provider_error",

@@ -19,13 +19,20 @@
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
+import type { Dictionary } from "@/lib/knowledge/i18n/dictionary"
+import { useT } from "../../i18n"
 
 export interface ChapterLink {
   id: string
-  label: string
+  /** The KEY of the chapter's name, never the name. A hard-coded label
+   *  here cannot be translated: the list that fills it is a
+   *  module-level const, which has no hook to read the dictionary
+   *  with. `keyof` makes a typo a compile error, not a blank tab. */
+  labelKey: keyof Dictionary["understand"]["chapters"]
 }
 
 export function KnowledgeHeader({ chapters }: { chapters: ChapterLink[] }) {
+  const t = useT()
   const [activeId, setActiveId] = useState<string | null>(chapters[0]?.id ?? null)
 
   useEffect(() => {
@@ -52,7 +59,7 @@ export function KnowledgeHeader({ chapters }: { chapters: ChapterLink[] }) {
     <header className="sticky top-0 z-40 border-b border-[var(--pk-rule)] bg-[color-mix(in_oklab,var(--pk-ground)_88%,transparent)] backdrop-blur-md">
       <div className="kp-scroll-x">
         <div className="mx-auto flex w-full max-w-[var(--kp-page)] items-center px-[var(--kp-gutter)]">
-          <nav aria-label="Sections of this page">
+          <nav aria-label={t.understand.sectionsOfThisPage}>
             <ul className="flex items-center gap-1">
               {chapters.map((c) => (
                 <li key={c.id}>
@@ -66,7 +73,7 @@ export function KnowledgeHeader({ chapters }: { chapters: ChapterLink[] }) {
                         : "border-transparent hover:text-[var(--pk-ink-2)]",
                     )}
                   >
-                    {c.label}
+                    {t.understand.chapters[c.labelKey]}
                   </a>
                 </li>
               ))}

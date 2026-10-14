@@ -5,6 +5,7 @@ import { signOut, useSession } from "next-auth/react"
 import Link from "next/link"
 import { IndexingPanel } from "./indexing-panel"
 import { PageContainer, PageHeader } from "./page-header"
+import { useT } from "./i18n"
 
 /** Settings for the standalone Knowledge product. The account section is
  *  real — it reflects the signed-in user and can sign them out. The
@@ -12,20 +13,21 @@ import { PageContainer, PageHeader } from "./page-header"
  *  will live here without fabricating controls that do nothing. No
  *  underlying platform/organization architecture is exposed. */
 export function SettingsView() {
+  const t = useT()
   const { data: session, status } = useSession()
   const isGuest = status === "unauthenticated"
   const email = session?.user?.email ?? ""
-  const name = isGuest ? "Guest" : session?.user?.name || email.split("@")[0] || "Your account"
+  const name = isGuest ? t.account.guest : session?.user?.name || email.split("@")[0] || t.account.yourAccount
   const initial = (name || "Y").charAt(0).toUpperCase()
 
   return (
     <PageContainer>
-      <PageHeader eyebrow="Settings" title="Your account" subtitle="Manage how Keeply works for you." />
+      <PageHeader eyebrow={t.settings.eyebrow} title={t.settings.title} subtitle={t.settings.subtitle} />
 
       <div className="mt-12 max-w-[34rem]">
         {/* Account — real (reflects guest vs. signed-in honestly) */}
         <section className="border-t border-[var(--pk-rule)] py-6">
-          <p className="pk-label mb-4">Signed in as</p>
+          <p className="pk-label mb-4">{t.settings.signedInAs}</p>
           <div className="flex items-center gap-3.5">
             <span className="flex size-9 items-center justify-center rounded-full bg-[var(--pk-sunken)] text-[13px] font-medium text-[var(--pk-ink-2)]">
               {initial}
@@ -33,7 +35,7 @@ export function SettingsView() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-[15px] font-medium text-[var(--pk-ink)]">{name}</p>
               <p className="pk-meta truncate">
-                {isGuest ? "Not signed in — your library is saved on this device" : email || "Signed in"}
+                {isGuest ? t.settings.notSignedIn : email || t.settings.signedIn}
               </p>
             </div>
           </div>
@@ -43,7 +45,7 @@ export function SettingsView() {
               className="mt-5 inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--pk-accent)] px-5 text-[13.5px] font-medium text-[var(--pk-accent-ink)] transition-opacity hover:opacity-90"
             >
               <LogIn className="size-4" />
-              Sign in to save permanently
+              {t.settings.signInPermanently}
             </Link>
           ) : (
             <button
@@ -51,7 +53,7 @@ export function SettingsView() {
               className="mt-5 inline-flex items-center gap-1.5 text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
             >
               <LogOut className="size-3.5" />
-              Sign out
+              {t.settings.signOut}
             </button>
           )}
         </section>
@@ -66,12 +68,12 @@ export function SettingsView() {
             a column is four times the announcement one line makes, and
             the icons were decoration for labels that already read. */}
         <section className="mt-6">
-          <p className="pk-label mb-1">Not built yet</p>
+          <p className="pk-label mb-1">{t.settings.notBuiltYet}</p>
           <ul className="pk-rows">
-            <SettingRow title="Profile" description="Your display name, avatar and reading preferences." />
-            <SettingRow title="Appearance" description="Reading themes, typography and layout density." />
-            <SettingRow title="Privacy" description="Control what Keeply remembers and how it is used." />
-            <SettingRow title="Your data" description="Export or permanently delete everything you've saved." />
+            <SettingRow title={t.settings.profile} description={t.settings.profileBody} />
+            <SettingRow title={t.settings.appearance} description={t.settings.appearanceBody} />
+            <SettingRow title={t.settings.privacy} description={t.settings.privacyBody} />
+            <SettingRow title={t.settings.yourData} description={t.settings.yourDataBody} />
           </ul>
         </section>
       </div>

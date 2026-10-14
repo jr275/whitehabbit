@@ -59,19 +59,25 @@ import "server-only"
  * is preserved on `.detail` for server-side logging only.
  * ================================================================== */
 
-import { lookup as dnsLookup } from "node:dns/promises"
-import { isIP } from "node:net"
 import http from "node:http"
 import https from "node:https"
-import { assertSafeUrl, UnsafeUrlError } from "./ssrf-guard"
+import {
+  MAX_RESOLVED_ADDRESSES,
+  resolveSafeUrl,
+  UnsafeUrlError,
+  type AddressResolver,
+  type ResolvedAddress,
+  type SafeUrl,
+} from "./ssrf-guard"
 
 /** Deliberately small. A legitimate shortener chain is one or two
  * hops; a long chain is either a loop or someone probing. */
 export const MAX_REDIRECTS = 5
 
-/** How many addresses of a single hostname are considered. A hostname
- * answering with hundreds of records is not a page we need to read. */
-export const MAX_ADDRESSES = 8
+/** How many addresses of a single hostname are considered.
+ *  Re-exported from the guard, which enforces it, so there is one
+ *  definition rather than two that can drift. */
+export const MAX_ADDRESSES = MAX_RESOLVED_ADDRESSES
 
 export type SafeFetchFailureCode =
   | "invalid_url"
@@ -104,16 +110,9 @@ export class SafeFetchError extends Error {
   }
 }
 
-/** One address, as returned by DNS. */
-export interface ResolvedAddress {
-  address: string
-  family: number
-}
-
-/** Resolve a hostname to every address it answers with. Injectable so
- * the pin can be tested; it cannot weaken the guard, because whatever
- * it returns is validated by assertSafeUrl before being used. */
-export type AddressResolver = (hostname: string) => Promise<ResolvedAddress[]>
+/** Re-exported so existing callers and tests keep one import site.
+ *  Both are defined by the guard, which is what validates them. */
+export type { AddressResolver, ResolvedAddress }
 
 export interface RawResponse {
   status: number
@@ -160,73 +159,12 @@ export interface SafeFetchResult {
   redirects: number
 }
 
-const defaultResolver: AddressResolver = async (hostname) => {
-  const addresses = await dnsLookup(hostname, { all: true })
-  return addresses.map((a) => ({ address: a.address, family: a.family }))
-}
-
-/** Wrap a bare address so the shared guard sees it as an IP literal
- * and validates the range without performing any DNS of its own. */
-function addressAsUrl(address: string, protocol: string): string {
-  const host = address.includes(":") ? `[${address}]` : address
-  return `${protocol}//${host}/`
-}
-
-/**
- * Resolve once, validate everything, return the address to pin to.
- *
- * If ANY address a hostname answers with is private, the whole
- * hostname is refused — matching assertSafeUrl, which does the same.
- * Picking a safe address out of a mixed answer would let a hostname
- * with one public and one private record through, and which one you
- * get is the attacker's choice, not yours.
+/* defaultResolver, addressAsUrl and resolveAndPin used to live here.
+ * They are gone because the guard now RETURNS the addresses it
+ * validated (resolveSafeUrl), so this module no longer performs a
+ * second resolution of its own in order to pin a socket. One lookup
+ * per hop, validated, and that same answer is what the socket uses.
  */
-async function resolveAndPin(url: URL, resolver: AddressResolver): Promise<ResolvedAddress> {
-  // url.hostname keeps the brackets on an IPv6 literal.
-  const hostname = url.hostname.replace(/^\[|\]$/g, "")
-
-  // A literal needs no DNS at all, so there is no window to close:
-  // assertSafeUrl has already validated this exact address.
-  if (isIP(hostname)) {
-    return { address: hostname, family: isIP(hostname) }
-  }
-
-  let addresses: ResolvedAddress[]
-  try {
-    addresses = await resolver(hostname)
-  } catch (err) {
-    throw new SafeFetchError(
-      "blocked",
-      "We couldn't reach that address.",
-      `dns lookup failed for ${hostname}: ${err instanceof Error ? err.message : String(err)}`,
-    )
-  }
-
-  if (addresses.length === 0) {
-    throw new SafeFetchError("blocked", "We couldn't reach that address.", `${hostname} resolved to no address`)
-  }
-  if (addresses.length > MAX_ADDRESSES) {
-    throw new SafeFetchError(
-      "blocked",
-      "We couldn't reach that address.",
-      `${hostname} returned ${addresses.length} addresses, over the ${MAX_ADDRESSES} limit`,
-    )
-  }
-
-  for (const candidate of addresses) {
-    try {
-      await assertSafeUrl(addressAsUrl(candidate.address, url.protocol))
-    } catch (err) {
-      throw new SafeFetchError(
-        "blocked",
-        "We couldn't reach that address.",
-        `${hostname} resolves to ${candidate.address}: ${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
-  }
-
-  return addresses[0]
-}
 
 /**
  * One hop over a socket pinned to `address`.
@@ -329,7 +267,6 @@ export function resolveRedirectTarget(location: string, from: URL): string {
  * connection to an address the shared guard has approved.
  */
 export async function safeFetch(rawUrl: string, options: SafeFetchOptions): Promise<SafeFetchResult> {
-  const resolver = options.resolver ?? defaultResolver
   const transport = options.transport ?? nodeTransport
   const maxRedirects = options.maxRedirects ?? MAX_REDIRECTS
   const deadline = Date.now() + options.timeoutMs
@@ -343,18 +280,24 @@ export async function safeFetch(rawUrl: string, options: SafeFetchOptions): Prom
     // Scheme, blocked hostnames, IP literals and resolved ranges. Not
     // reimplemented here — there is one definition of "unsafe address"
     // in this repository and it lives in ssrf-guard.ts.
-    let url: URL
+    let safe: SafeUrl
     try {
-      url = await assertSafeUrl(current)
+      // ONE resolution for this hop. The guard validates the scheme,
+      // blocked names, IP literals and every address the hostname
+      // answered with, and returns those addresses so the socket below
+      // connects to an answer that was actually checked.
+      safe = await resolveSafeUrl(current, { resolver: options.resolver })
     } catch (err) {
       if (err instanceof UnsafeUrlError) {
-        throw new SafeFetchError("blocked", "We couldn't reach that address.", err.message)
+        // The DNS failure itself is kept for the log via `cause`; the
+        // message the caller sees stays generic either way.
+        const because = err.cause instanceof Error ? `: ${err.cause.message}` : ""
+        throw new SafeFetchError("blocked", "We couldn't reach that address.", `${err.message}${because}`)
       }
       throw new SafeFetchError("invalid_url", "That doesn't look like a valid URL.", String(err))
     }
-
-    // ---- gate 2: resolve once, validate, and pin.
-    const pinned = await resolveAndPin(url, resolver)
+    const url = safe.url
+    const pinned = safe.addresses[0]
 
     const remaining = deadline - Date.now()
     if (remaining <= 0) {

@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 import { saveUrl } from "@/lib/knowledge/client"
 import type { KnowledgeItem } from "@/lib/knowledge/types"
+import { useT } from "./i18n"
 
 interface SaveDialogProps {
   open: boolean
@@ -14,6 +15,7 @@ interface SaveDialogProps {
 type Stage = "input" | "saving" | "done" | "duplicate" | "error"
 
 export function SaveDialog({ open, onClose }: SaveDialogProps) {
+  const t = useT()
   const [url, setUrl] = useState("")
   const [stage, setStage] = useState<Stage>("input")
   const [message, setMessage] = useState<string | null>(null)
@@ -51,7 +53,7 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
       setStage("done")
       setTimeout(() => onClose(), 1600)
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Something went wrong. Please try again.")
+      setMessage(err instanceof Error ? err.message : t.saveDialog.genericError)
       setStage("error")
     }
   }
@@ -63,17 +65,17 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
       className="fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[16vh]"
       role="dialog"
       aria-modal="true"
-      aria-label="Save to your library"
+      aria-label={t.saveDialog.dialogLabel}
     >
-      <button aria-label="Close" className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <button aria-label={t.common.close} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="kn-rise relative w-full max-w-md overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl">
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-            <Link2 className="size-4 text-primary" /> Save to library
+            <Link2 className="size-4 text-primary" /> {t.saveDialog.heading}
           </span>
           <button
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t.common.close}
             className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
           >
             <X className="size-4" />
@@ -84,7 +86,7 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
           {(stage === "input" || stage === "error") && (
             <>
               <label htmlFor="save-url" className="mb-2 block text-sm font-medium text-foreground">
-                Paste anything worth remembering
+                {t.saveDialog.field}
               </label>
               <input
                 id="save-url"
@@ -106,7 +108,7 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
               ) : (
                 <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Sparkles className="size-3 text-[var(--kn-ai)]" />
-                  We&apos;ll fetch the page and pull out its title, author and readable text.
+                  {t.saveDialog.hint}
                 </p>
               )}
               <div className="mt-4 flex justify-end gap-2">
@@ -114,14 +116,14 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
                   onClick={onClose}
                   className="h-9 rounded-lg px-3 text-sm text-muted-foreground hover:text-foreground"
                 >
-                  Cancel
+                  {t.common.cancel}
                 </button>
                 <button
                   onClick={handleSave}
                   disabled={!url.trim()}
                   className="h-9 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-40"
                 >
-                  {stage === "error" ? "Try again" : "Save"}
+                  {stage === "error" ? t.common.tryAgain : t.common.save}
                 </button>
               </div>
             </>
@@ -130,7 +132,7 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
           {stage === "saving" && (
             <div className="flex items-center gap-3 py-6">
               <Loader2 className="size-5 animate-spin text-[var(--kn-ai)]" />
-              <p className="text-sm text-foreground">Saving to your library…</p>
+              <p className="text-sm text-foreground">{t.saveDialog.saving}</p>
             </div>
           )}
 
@@ -140,9 +142,9 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
                 <Check className="size-5" strokeWidth={3} />
               </span>
               <div>
-                <p className="text-sm font-medium text-foreground">Saved</p>
+                <p className="text-sm font-medium text-foreground">{t.saveDialog.saved}</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Fetching the page and extracting its content now — your card will update as it progresses.
+                  {t.saveDialog.savedHint}
                 </p>
               </div>
             </div>
@@ -155,7 +157,7 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
                   <Check className="size-4.5" strokeWidth={2.5} />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground">Already in your library</p>
+                  <p className="text-sm font-medium text-foreground">{t.saveDialog.duplicate}</p>
                   <p className="mt-0.5 truncate text-xs text-muted-foreground">{existing.title || existing.url}</p>
                 </div>
               </div>
@@ -164,14 +166,14 @@ export function SaveDialog({ open, onClose }: SaveDialogProps) {
                   onClick={onClose}
                   className="h-9 rounded-lg px-3 text-sm text-muted-foreground hover:text-foreground"
                 >
-                  Close
+                  {t.common.close}
                 </button>
                 <Link
                   href={`/knowledge/read/${existing.id}`}
                   onClick={onClose}
                   className="flex h-9 items-center gap-1.5 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
                 >
-                  Open <ArrowRight className="size-3.5" />
+                  {t.saveDialog.open} <ArrowRight className="size-3.5" />
                 </Link>
               </div>
             </div>

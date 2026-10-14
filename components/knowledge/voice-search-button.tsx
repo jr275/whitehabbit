@@ -3,6 +3,7 @@
 import { Loader2, Mic, MicOff } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { UseVoiceSearchResult } from "@/lib/knowledge/use-voice-search"
+import { useT } from "./i18n"
 
 /** The mic control itself — one button, its appearance IS the state.
  *  Click behavior: idle/success/permission-denied/error/unsupported →
@@ -20,23 +21,24 @@ export function VoiceSearchButton({
   voice: UseVoiceSearchResult
   className?: string
 }) {
+  const t = useT()
   const { state } = voice
   const canCancel = state === "requesting" || state === "listening"
 
   const label =
     state === "unsupported"
-      ? "Voice search isn't supported in this browser"
+      ? t.voiceSearch.unsupported
       : state === "requesting"
-        ? "Requesting microphone permission…"
+        ? t.voiceSearch.requesting
         : state === "listening"
-          ? "Listening — tap to stop"
+          ? t.voiceSearch.listening
           : state === "processing"
-            ? "Processing voice input"
+            ? t.voiceSearch.processing
             : state === "permission-denied"
-              ? "Microphone permission denied — tap to try again"
+              ? t.voiceSearch.denied
               : state === "error"
-                ? "Voice search error — tap to try again"
-                : "Search by voice"
+                ? t.voiceSearch.error
+                : t.voiceSearch.idle
 
   const Icon =
     state === "processing" ? Loader2 : state === "permission-denied" || state === "error" || state === "unsupported" ? MicOff : Mic

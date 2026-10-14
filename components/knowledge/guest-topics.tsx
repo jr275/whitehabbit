@@ -13,8 +13,11 @@ import { PageContainer, PageHeader } from "./page-header"
 import { fetchLibrary } from "@/lib/knowledge/client"
 import { askAboutHref } from "@/lib/knowledge/config"
 import type { KnowledgeItem, Topic } from "@/lib/knowledge/types"
+import { useLocale, useT } from "./i18n"
 
 export function GuestTopics() {
+  const t = useT()
+  const { n } = useLocale()
   const [items, setItems] = useState<KnowledgeItem[] | null>(null)
 
   useEffect(() => {
@@ -36,14 +39,14 @@ export function GuestTopics() {
       .sort((a, b) => b.count - a.count)
   }, [items])
 
-  const max = topics.reduce((m, t) => Math.max(m, t.count), 1)
+  const max = topics.reduce((m, topic) => Math.max(m, topic.count), 1)
 
   return (
     <PageContainer>
       <PageHeader
-        eyebrow="Topics"
-        title="The themes running through your library."
-        subtitle="Topics surface automatically from what you save. Larger means stronger presence."
+        eyebrow={t.topicsPage.eyebrow}
+        title={t.topicsPage.title}
+        subtitle={t.topicsPage.subtitle}
       />
 
       {items === null ? (
@@ -54,32 +57,32 @@ export function GuestTopics() {
         </div>
       ) : topics.length === 0 ? (
         <div className="mt-10 rounded-3xl border border-dashed border-[var(--kn-edge)] bg-[var(--kn-paper)] px-6 py-16 text-center">
-          <p className="text-sm text-foreground">No topics yet.</p>
+          <p className="text-sm text-foreground">{t.empty.noTopicsYet}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Save a few things and topics will start to appear here.
+            {t.topicsPage.emptyBody}
           </p>
         </div>
       ) : (
         <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {topics.map((t) => (
+          {topics.map((topic) => (
             <div
-              key={t.id}
+              key={topic.id}
               className="flex flex-col gap-3 rounded-2xl border border-[var(--kn-edge)] bg-[var(--kn-paper)] p-5"
             >
               <div className="flex items-baseline justify-between gap-2">
-                <span className="font-serif text-2xl font-medium tracking-tight text-foreground">{t.label}</span>
+                <span className="font-serif text-2xl font-medium tracking-tight text-foreground">{topic.label}</span>
                 <span className="font-mono text-[11px] text-muted-foreground">
-                  {t.count} {t.count === 1 ? "piece" : "pieces"}
+                  {t.topicsPage.pieces(topic.count, n(topic.count))}
                 </span>
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
-                <div className="h-full rounded-full bg-[var(--kn-ai)]/70" style={{ width: `${(t.count / max) * 100}%` }} />
+                <div className="h-full rounded-full bg-[var(--kn-ai)]/70" style={{ width: `${(topic.count / max) * 100}%` }} />
               </div>
               <Link
-                href={askAboutHref(`What have I saved about ${t.label}?`)}
+                href={askAboutHref(t.topicsPage.askQuestion(topic.label))}
                 className="inline-flex items-center gap-1.5 rounded text-[12.5px] font-medium text-[var(--kn-ai)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--kn-ai)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--kn-paper)]"
               >
-                <Sparkles className="size-3.5" /> Ask about this topic
+                <Sparkles className="size-3.5" /> {t.topicsPage.askAboutTopic}
               </Link>
             </div>
           ))}

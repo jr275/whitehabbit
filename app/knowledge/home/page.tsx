@@ -1,8 +1,16 @@
 import { KnowledgeHome } from "@/components/knowledge/knowledge-home"
+import { getTranslations } from "@/lib/knowledge/i18n/server"
 
-export const metadata = {
-  title: "Home · Keeply",
-  description: "Your personal knowledge library — pick up where you left off, or save something new.",
+/* The tab, the bookmark and the share preview are read as often as
+ * the page, so they come from the dictionary too. This page already
+ * resolves the locale for its own content, so nothing here makes it
+ * any more dynamic than it was. */
+export async function generateMetadata() {
+  const { t } = await getTranslations()
+  return {
+    title: t.meta.homeTitle,
+    description: t.meta.homeDescription,
+  }
 }
 
 /* The original library home, which used to be /knowledge. It is a real,

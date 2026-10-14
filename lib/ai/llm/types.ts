@@ -49,7 +49,10 @@ export interface LlmCallOutput {
  *  Three values because callers act differently on each: the first is
  *  a deployment problem to surface, the second is a key to replace,
  *  the third is worth retrying. */
-export type LlmFailureReason = "not_configured" | "invalid_credential" | "provider_error"
+/** "aborted" is distinct from "provider_error" on purpose: a caller
+ *  that cancelled is not a provider that failed, and conflating them
+ *  turns an ordinary cancellation into an error someone investigates. */
+export type LlmFailureReason = "not_configured" | "invalid_credential" | "provider_error" | "aborted"
 
 export type LlmResult =
   | { ok: true; output: LlmCallOutput; durationMs: number }
@@ -59,6 +62,16 @@ export interface LlmCallDeps {
   /** Test seam. Every test in this repository that exercises a provider
    *  uses it, so no unit test can reach a real endpoint or spend money. */
   fetchImpl?: typeof fetch
+  /**
+   * Cancels the in-flight provider request.
+   *
+   * Providers already pass an AbortSignal for their own timeout; this
+   * is combined with it rather than replacing it, so a caller's
+   * cancellation and the timeout both remain in force. Optional
+   * everywhere: a caller that does not supply one behaves exactly as
+   * before.
+   */
+  signal?: AbortSignal
 }
 
 export interface LlmProvider {

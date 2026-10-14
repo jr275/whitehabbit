@@ -83,5 +83,8 @@ export async function callLlm(input: LlmCallInput, options: CallLlmOptions = {})
   if (!provider.isConfigured()) {
     return { ok: false, reason: "not_configured", message: provider.notConfiguredReason(), durationMs: 0 }
   }
-  return provider.call(input, { fetchImpl: options.fetchImpl })
+  // Forward the whole dep set, named explicitly. Rebuilding it by hand
+  // is how deps.signal was silently dropped the first time: the call
+  // compiled, the control test passed, and only an abort test noticed.
+  return provider.call(input, { fetchImpl: options.fetchImpl, signal: options.signal })
 }

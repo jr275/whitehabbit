@@ -14,6 +14,8 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { describe, it } from "node:test"
 
+import { DICTIONARIES } from "@/lib/knowledge/i18n/dictionary"
+
 const panel = readFileSync("components/knowledge/indexing-panel.tsx", "utf8")
 const client = readFileSync("lib/knowledge/client.ts", "utf8")
 const settings = readFileSync("components/knowledge/settings-view.tsx", "utf8")
@@ -65,10 +67,26 @@ describe("it reports, never estimates", () => {
   it("repeats the server's own outcome rather than a cheerful paraphrase", () => {
     // "Queued 40", "already queued" and "nothing to queue" are three
     // different facts and the person asked a question that deserves
-    // whichever one is true.
+    // whichever one is true. The wording now lives in the dictionary so
+    // it can be read in either language; what must not collapse is the
+    // branching, so the three distinct outcomes are asserted here and
+    // their distinctness in both languages below.
     assert.match(panel, /result\.enqueued > 0/)
     assert.match(panel, /result\.alreadyQueued > 0/)
-    assert.match(panel, /Nothing to queue/)
+    assert.match(panel, /t\.indexing\.queued\(result\.enqueued\)/)
+    assert.match(panel, /t\.indexing\.alreadyQueued\(result\.alreadyQueued\)/)
+    assert.match(panel, /t\.indexing\.nothingToQueue/)
+  })
+
+  it("keeps the three outcomes distinct in every language", () => {
+    // A translation that rendered two of them the same string would
+    // undo the branching above without failing any other check.
+    for (const [locale, d] of Object.entries(DICTIONARIES)) {
+      const said = [d.indexing.queued(40), d.indexing.alreadyQueued(40), d.indexing.nothingToQueue]
+      assert.equal(new Set(said).size, 3, `${locale} must say three different things, said: ${said.join(" | ")}`)
+      assert.match(d.indexing.queued(40), /40/, `${locale} must report the server's count`)
+      assert.match(d.indexing.alreadyQueued(40), /40/, `${locale} must report the server's count`)
+    }
   })
 
   it("surfaces the model identity and never a credential", () => {

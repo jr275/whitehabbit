@@ -25,10 +25,12 @@
 import { Loader2 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { fetchIndexingStatus, startBackfill, type IndexingStatus, type ReadinessCheck } from "@/lib/knowledge/client"
+import { useT } from "./i18n"
 
 type Phase = "loading" | "ready" | "error"
 
 export function IndexingPanel() {
+  const t = useT()
   const [status, setStatus] = useState<IndexingStatus | null>(null)
   const [phase, setPhase] = useState<Phase>("loading")
   const [queueing, setQueueing] = useState(false)
@@ -59,14 +61,14 @@ export function IndexingPanel() {
       // asked a question that deserves whichever one is true.
       setQueued(
         result.enqueued > 0
-          ? `Queued ${result.enqueued} ${result.enqueued === 1 ? "piece" : "pieces"}.`
+          ? t.indexing.queued(result.enqueued)
           : result.alreadyQueued > 0
-            ? `Already queued — ${result.alreadyQueued} waiting.`
-            : "Nothing to queue: everything has been read.",
+            ? t.indexing.alreadyQueued(result.alreadyQueued)
+            : t.indexing.nothingToQueue,
       )
       setAttempt((n) => n + 1)
     } catch (err) {
-      setQueued(err instanceof Error ? err.message : "Couldn't queue the work.")
+      setQueued(err instanceof Error ? err.message : t.indexing.queueFailed)
     } finally {
       setQueueing(false)
     }
@@ -87,14 +89,14 @@ export function IndexingPanel() {
     return (
       <Section>
         <p className="text-[14px] leading-[1.65] text-[var(--pk-ink-3)]">
-          Couldn&apos;t read what Keeply has processed.
+          {t.indexing.readFailed}
         </p>
         <button
           type="button"
           onClick={() => setAttempt((n) => n + 1)}
           className="mt-3 text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4"
         >
-          Try again
+          {t.common.tryAgain}
         </button>
       </Section>
     )
@@ -112,23 +114,23 @@ export function IndexingPanel() {
           symptom. */}
       {!status.deployment.ready && (
         <div className="mb-7">
-          <p className="pk-label mb-3 text-[var(--pk-evidence)]">This deployment isn&rsquo;t finished</p>
+          <p className="pk-label mb-3 text-[var(--pk-evidence)]">{t.indexing.deploymentUnfinished}</p>
           <ul className="flex flex-col">
             {status.deployment.checks.map((check) => (
               <Check key={check.id} check={check} />
             ))}
           </ul>
           <p className="pk-meta mt-3 max-w-[54ch]">
-            Set these on the server and redeploy. This page is how you confirm it worked.
+            {t.indexing.deploymentHint}
           </p>
         </div>
       )}
 
       <dl className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
-        <Fact label="Read" value={jobs.done} />
-        <Fact label="Waiting" value={pending} />
-        <Fact label="In the queue" value={working} />
-        {jobs.failed > 0 && <Fact label="Failed" value={jobs.failed} tone="danger" />}
+        <Fact label={t.indexing.read} value={jobs.done} />
+        <Fact label={t.indexing.waiting} value={pending} />
+        <Fact label={t.indexing.inTheQueue} value={working} />
+        {jobs.failed > 0 && <Fact label={t.indexing.failed} value={jobs.failed} tone="danger" />}
       </dl>
 
       {/* The breakdown only earns its space when there IS a backlog,
@@ -137,11 +139,11 @@ export function IndexingPanel() {
         <ul className="mt-6 flex flex-col">
           {(
             [
-              ["Never read", backlog.neverIndexed],
-              ["Text changed since", backlog.staleChunks],
-              ["No ideas extracted yet", backlog.neverAnalyzed],
-              ["No summary yet", backlog.neverSummarized],
-              ["Missing embeddings", backlog.missingVectors],
+              [t.indexing.neverRead, backlog.neverIndexed],
+              [t.indexing.textChanged, backlog.staleChunks],
+              [t.indexing.noIdeas, backlog.neverAnalyzed],
+              [t.indexing.noSummary, backlog.neverSummarized],
+              [t.indexing.missingEmbeddings, backlog.missingVectors],
             ] as const
           )
             .filter(([, n]) => n > 0)
@@ -165,7 +167,7 @@ export function IndexingPanel() {
           className="inline-flex items-center gap-1.5 text-[14px] text-[var(--pk-ink)] underline decoration-[var(--pk-rule-2)] underline-offset-4 transition-colors hover:decoration-[var(--pk-ink)] disabled:cursor-not-allowed disabled:text-[var(--pk-ink-4)] disabled:no-underline"
         >
           {queueing && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
-          {queueing ? "Queueing…" : pending === 0 ? "Nothing waiting" : "Read what's waiting"}
+          {queueing ? t.indexing.queueing : pending === 0 ? t.indexing.nothingWaiting : t.indexing.readWhatsWaiting}
         </button>
         {queued && (
           <span role="status" className="pk-meta">
@@ -185,9 +187,10 @@ export function IndexingPanel() {
 }
 
 function Section({ children }: { children: React.ReactNode }) {
+  const t = useT()
   return (
     <section className="border-t border-[var(--pk-rule)] py-6">
-      <p className="pk-label mb-5">What Keeply has read</p>
+      <p className="pk-label mb-5">{t.indexing.heading}</p>
       {children}
     </section>
   )
@@ -197,6 +200,7 @@ function Section({ children }: { children: React.ReactNode }) {
  *  that only shows failures cannot tell "this is fine" from "this was
  *  never checked", and the point of the screen is to answer that. */
 function Check({ check }: { check: ReadinessCheck }) {
+  const t = useT()
   return (
     <li className="flex items-baseline gap-3 border-b border-[var(--pk-rule)] py-2.5 last:border-b-0">
       <span
@@ -218,7 +222,7 @@ function Check({ check }: { check: ReadinessCheck }) {
           </>
         )}
       </span>
-      <span className="sr-only">{check.ok ? "configured" : "not configured"}</span>
+      <span className="sr-only">{check.ok ? t.indexing.configured : t.indexing.notConfigured}</span>
     </li>
   )
 }

@@ -13,6 +13,7 @@
 import type { KnowledgeOverview } from "@/lib/knowledge/understand/types"
 import { useCountUp, useReveal } from "@/lib/knowledge/understand/use-reveal"
 import { Reveal } from "../shell/section"
+import { useT } from "../../i18n"
 
 interface Signal {
   value: number
@@ -38,6 +39,7 @@ function KnowledgeMetric({ signal, index, revealed }: { signal: Signal; index: n
 }
 
 export function KnowledgeSignals({ overview }: { overview: KnowledgeOverview }) {
+  const t = useT()
   const { ref, revealed } = useReveal<HTMLDivElement>()
 
   // A measure with no value is LEFT OUT, not rendered as zero. Themes
@@ -48,17 +50,23 @@ export function KnowledgeSignals({ overview }: { overview: KnowledgeOverview }) 
   // The row still reads left-to-right as raw → understood; it is
   // simply shorter while fewer measures exist.
   const signals: Signal[] = [
-    { value: overview.savedCount, label: "things saved", note: "articles, videos, PDFs and your own notes" },
+    { value: overview.savedCount, label: t.understand.signals.thingsSaved, note: t.understand.signals.thingsSavedNote },
     // The note describes what is actually counted. "ideas that recur
     // across more than one source" was true of the sample library and
     // is not true of the measure: this is DISTINCT concepts, including
     // ones found in a single piece.
-    { value: overview.conceptCount, label: "concepts", note: "distinct ideas Keeply named across your sources" },
+    { value: overview.conceptCount, label: t.understand.signals.concepts, note: t.understand.signals.conceptsNote },
     ...(overview.themeCount !== null
-      ? [{ value: overview.themeCount, label: "themes", note: "concepts that cluster into a subject you follow" }]
+      ? [{ value: overview.themeCount, label: t.understand.signals.themes, note: t.understand.signals.themesNote }]
       : []),
     ...(overview.questionCount !== null
-      ? [{ value: overview.questionCount, label: "open questions", note: "raised repeatedly, resolved nowhere" }]
+      ? [
+          {
+            value: overview.questionCount,
+            label: t.understand.signals.openQuestions,
+            note: t.understand.signals.openQuestionsNote,
+          },
+        ]
       : []),
   ]
 
@@ -71,10 +79,10 @@ export function KnowledgeSignals({ overview }: { overview: KnowledgeOverview }) 
       <div ref={ref} className="mx-auto w-full max-w-[var(--kp-page)] px-[var(--kp-gutter)]">
         <Reveal>
           <h2 id="signals-title" className="sr-only">
-            What Keeply found in your library
+            {t.understand.whatKeeplyFound}
           </h2>
           <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--kp-ink-faint)]">
-            What&rsquo;s actually in there
+            {t.understand.whatsInThere}
           </p>
         </Reveal>
 

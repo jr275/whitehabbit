@@ -11,6 +11,7 @@ import type { KnowledgeItem, KnowledgeKind, PrimaryFilter, SearchEvidence } from
 import { EmptyLibrary } from "./empty-state"
 import { ItemRow, ItemRows } from "./item-row"
 import { VoiceSearchButton } from "./voice-search-button"
+import { useLocale, useT } from "./i18n"
 
 /* Lightweight session persistence so returning from the Reader keeps the
  * user's place: view mode, type filter and search. Scoped to sessionStorage
@@ -36,13 +37,10 @@ function ssSet(key: string, value: string): void {
   }
 }
 
-const KIND_FILTERS: { id: KnowledgeKind; label: string }[] = [
-  { id: "article", label: "Articles" },
-  { id: "video", label: "Videos" },
-  { id: "pdf", label: "PDFs" },
-  { id: "podcast", label: "Podcasts" },
-  { id: "document", label: "Notes" },
-]
+/* The kinds offered as filters, in order. The NAMES live in the
+ * dictionary (`library.filters`), keyed by the same KnowledgeKind, so
+ * this list cannot carry one English chip into a Portuguese row. */
+const KIND_FILTERS: KnowledgeKind[] = ["article", "video", "pdf", "podcast", "document"]
 
 interface LibraryViewProps {
   /** Locks the primary filter (e.g. Favorites page) and hides the filter row. */
@@ -57,11 +55,17 @@ interface LibraryViewProps {
 
 export function LibraryView({
   lockedFilter,
-  title = "Library",
+  title,
   eyebrow,
-  subtitle = "Everything you've saved.",
+  subtitle,
   initialQuery = "",
 }: LibraryViewProps) {
+  const t = useT()
+  const { n } = useLocale()
+  /* Defaulted HERE rather than in the parameter list: a default needs
+   * the dictionary, and the dictionary needs a hook. */
+  const heading = title ?? t.library.title
+  const lede = subtitle ?? t.library.subtitle
   // Initialise to SSR-safe defaults so the server-rendered HTML and the
   // first client render match exactly. The persisted view mode / filter /
   // search are restored from sessionStorage AFTER mount (effect below),
@@ -210,7 +214,7 @@ export function LibraryView({
         <h1 className="pk-display mt-4 text-[var(--pk-ink)]">{title}</h1>
         <p className="pk-meta mt-4">
           {subtitle}
-          {!searching && status === "ready" && total > 0 && ` · ${total.toLocaleString()} saved`}
+          {!searching && status === "ready" && total > 0 && ` · ${t.library.savedCount(n(total))}`}
         </p>
 
         <div className="mt-8 max-w-[38rem]">
@@ -220,19 +224,19 @@ export function LibraryView({
               type="search"
               value={
                 voiceBusy
-                  ? voice.interimTranscript || (voice.state === "listening" ? "Listening…" : "Processing…")
+                  ? voice.interimTranscript || (voice.state === "listening" ? t.palette.listening : t.palette.processing)
                   : query
               }
               onChange={(e) => setQuery(e.target.value)}
               readOnly={voiceBusy}
-              placeholder="Search your knowledge"
-              aria-label="Search your knowledge"
+              placeholder={t.library.searchPlaceholder}
+              aria-label={t.library.searchPlaceholder}
               className={cn("[&::-webkit-search-cancel-button]:appearance-none", voiceBusy && "text-[var(--pk-ink-3)]")}
             />
             {query && !voiceBusy && (
               <button
                 onClick={() => setQuery("")}
-                aria-label="Clear search"
+                aria-label={t.library.clearSearch}
                 className="flex size-6 shrink-0 items-center justify-center rounded-full text-[var(--pk-ink-4)] transition-colors hover:text-[var(--pk-ink)]"
               >
                 <X className="size-3.5" />
@@ -252,20 +256,18 @@ export function LibraryView({
       {/* ── Type filter — words, not pills ──────────────────────── */}
       <div className="mt-9 flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-[var(--pk-rule)] pb-4">
         <TypeChip active={kind === null} onClick={() => setKind(null)}>
-          All
+          {t.library.all}
         </TypeChip>
         {KIND_FILTERS.map((k) => (
-          <TypeChip key={k.id} active={kind === k.id} onClick={() => setKind(kind === k.id ? null : k.id)}>
-            {k.label}
+          <TypeChip key={k} active={kind === k} onClick={() => setKind(kind === k ? null : k)}>
+            {t.library.filters[k]}
           </TypeChip>
         ))}
       </div>
 
       <div className="mt-2">
         {searching && searchStatus === "ready" && shownSearch.length > 0 && (
-          <p className="pk-label py-4">
-            {shownSearch.length} {shownSearch.length === 1 ? "result" : "results"} · {query.trim()}
-          </p>
+          <p className="pk-label py-4">{t.library.results(shownSearch.length, query.trim())}</p>
         )}
 
         {searching ? (
@@ -273,14 +275,14 @@ export function LibraryView({
             <LoadingRows />
           ) : searchStatus === "error" ? (
             <Notice
-              title="That search didn’t complete."
-              body="Something went wrong on our end."
-              action={{ label: "Try again", onClick: () => setSearchAttempt((n) => n + 1) }}
+              title={t.library.searchFailedTitle}
+              body={t.library.serverProblem}
+              action={{ label: t.common.tryAgain, onClick: () => setSearchAttempt((attempt) => attempt + 1) }}
             />
           ) : shownSearch.length === 0 ? (
             <Notice
-              title={`Nothing matches “${query.trim()}”.`}
-              body="Try a different word, or check the spelling."
+              title={t.library.noMatchTitle(query.trim())}
+              body={t.library.noMatchBody}
             />
           ) : (
             <ItemRows>
@@ -298,9 +300,9 @@ export function LibraryView({
           <LoadingRows />
         ) : status === "error" ? (
           <Notice
-            title="We couldn’t load your library."
-            body={error ?? "Something went wrong on our end."}
-            action={{ label: "Try again", onClick: reload }}
+            title={t.library.loadFailedTitle}
+            body={error ?? t.library.serverProblem}
+            action={{ label: t.common.tryAgain, onClick: reload }}
           />
         ) : items.length === 0 ? (
           <div className="pt-10">
@@ -322,7 +324,7 @@ export function LibraryView({
                   className="flex h-9 items-center gap-2 text-[13.5px] text-[var(--pk-ink-2)] underline decoration-[var(--pk-rule-2)] underline-offset-4 transition-colors hover:text-[var(--pk-ink)] disabled:opacity-50"
                 >
                   {loadingMore && <Loader2 className="size-3.5 animate-spin" />}
-                  {loadingMore ? "Loading…" : "Load more"}
+                  {loadingMore ? t.common.loading : t.library.loadMore}
                 </button>
               </div>
             )}
@@ -337,9 +339,10 @@ export function LibraryView({
  *  the evidence rule — the one colour in Keeply that means "this is the
  *  text your result came from", never decoration. */
 function Evidence({ evidence }: { evidence: SearchEvidence }) {
+  const t = useT()
   return (
     <>
-      <span className="pk-label mb-1.5 block text-[var(--pk-evidence)]">Matched passage</span>
+      <span className="pk-label mb-1.5 block text-[var(--pk-evidence)]">{t.library.matchedPassage}</span>
       <p className="line-clamp-3">{evidence.snippet}</p>
     </>
   )

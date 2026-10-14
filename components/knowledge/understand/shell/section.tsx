@@ -64,7 +64,7 @@ export function Chapter({
     <section
       id={id}
       aria-labelledby={`${id}-title`}
-      className={cn("border-t border-[var(--kp-rule)] py-[clamp(3.5rem,8vw,7rem)]", className)}
+      className={cn("border-t border-[var(--kp-rule)] py-[clamp(3rem,5.5vw,5rem)]", className)}
     >
       <div className="mx-auto w-full max-w-[var(--kp-page)] px-[var(--kp-gutter)]">
         <Reveal>
@@ -98,7 +98,7 @@ export function Chapter({
           </Reveal>
         )}
 
-        <div className={cn("mt-[clamp(2.5rem,5vw,4rem)]", !bleed && "max-w-[var(--kp-page)]")}>{children}</div>
+        <div className={cn("mt-[clamp(2rem,3.5vw,3rem)]", !bleed && "max-w-[var(--kp-page)]")}>{children}</div>
       </div>
     </section>
   )

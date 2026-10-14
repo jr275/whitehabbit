@@ -13,7 +13,7 @@ import "server-only"
 
 import { randomUUID } from "node:crypto"
 import { safeFetch, SafeFetchError, type SafeFetchOptions } from "@/lib/security/safe-fetch"
-import { assertSafeUrl, UnsafeUrlError } from "@/lib/security/ssrf-guard"
+import { resolveSafeUrl, UnsafeUrlError, type AddressResolver } from "@/lib/security/ssrf-guard"
 import { logger } from "@/lib/observability/logger"
 import { runIndexJob } from "./indexing"
 import { AiSummaryUpstreamError, isAiSummaryConfigured, summarizeText, type AiSummaryDeps } from "./ai-summary"
@@ -37,6 +37,20 @@ const FETCH_HEADERS = { "user-agent": USER_AGENT, accept: "text/html,application
  * an oracle: repeat them over a wordlist and you have mapped an
  * internal network without ever getting a page back.
  */
+export interface SaveDeps {
+  /**
+   * Test seam only. Defaults to real DNS.
+   *
+   * It cannot weaken the guard: every address it returns is validated
+   * by resolveSafeUrl under the same rules, so a resolver that answers
+   * with a loopback or private address causes a REFUSAL, not a save.
+   * tests/knowledge/dedup.test.ts asserts exactly that.
+   *
+   * Not reachable from a request: saveUrl's HTTP callers pass no deps.
+   */
+  resolver?: AddressResolver
+}
+
 export interface FetchDeps {
   /** Test seam only. The SSRF guard runs OUTSIDE the transport, on
    * every hop, so substituting it cannot weaken any check — it only
@@ -140,12 +154,15 @@ export interface SaveResult {
  * Unless the same page (by canonical dedup key) is already saved, in
  * which case the existing item is returned untouched with
  * duplicate=true and no job is enqueued. */
-export async function saveUrl(params: { orgId: string; userId: string | null; url: string }): Promise<SaveResult> {
+export async function saveUrl(
+  params: { orgId: string; userId: string | null; url: string },
+  deps: SaveDeps = {},
+): Promise<SaveResult> {
   const normalized = normalizeUrl(params.url)
   // Fail fast on obviously-unsafe URLs before we even persist, so the
   // user gets an immediate 400 rather than a row that will fail async.
   try {
-    await assertSafeUrl(normalized)
+    await resolveSafeUrl(normalized, { resolver: deps.resolver })
   } catch (err) {
     if (err instanceof UnsafeUrlError) {
       // Generic on purpose. The guard's own message names the address a

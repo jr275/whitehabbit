@@ -20,10 +20,11 @@ import { PageContainer, PageHeader } from "../page-header"
 import { useKnowledgeResearch } from "@/lib/knowledge/use-knowledge-research"
 import type { AskFailure } from "@/lib/knowledge/client"
 import { MAX_OBJECTIVE_CHARS, MIN_OBJECTIVE_CHARS, type ResearchBrief } from "@/lib/knowledge/research-contract"
+import { useLocale, useT } from "../i18n"
 
-const PLACEHOLDER = "I want to understand how companies use AI for payment reconciliation."
 
 export function ResearchView() {
+  const t = useT()
   const { state, research } = useKnowledgeResearch()
   const [draft, setDraft] = useState("")
   const busy = state.phase === "loading"
@@ -31,14 +32,14 @@ export function ResearchView() {
   return (
     <PageContainer>
       <PageHeader
-        eyebrow="Deep work"
-        title="What do you want to research?"
+        eyebrow={t.research.eyebrow}
+        title={t.research.title}
         /* The brief's copy said "search the web". This searches the
            user's own library, so that sentence would be false in the
            product's own header — see lib/knowledge/research.ts for why
            the library is the corpus. The promise is otherwise
            unchanged: an objective in, grounded evidence out. */
-        subtitle="Give Keeply an objective and it will search everything you've saved, understand the sources and build an evidence-grounded brief."
+        subtitle={t.research.subtitle}
       />
 
       <form
@@ -55,8 +56,8 @@ export function ResearchView() {
             disabled={busy}
             rows={4}
             maxLength={MAX_OBJECTIVE_CHARS}
-            placeholder={PLACEHOLDER}
-            aria-label="Research objective"
+            placeholder={t.research.placeholder}
+            aria-label={t.research.objectiveLabel}
             className="w-full resize-y bg-transparent text-[15px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
           />
         </div>
@@ -67,7 +68,7 @@ export function ResearchView() {
             className="flex h-11 items-center gap-2 rounded-full bg-primary px-6 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-40"
           >
             {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-            Research
+            {t.research.submit}
           </button>
         </div>
       </form>
@@ -86,28 +87,31 @@ export function ResearchView() {
 }
 
 function LoadingState() {
+  const t = useT()
   return (
     <div className="flex flex-col items-center gap-3 rounded-3xl border border-dashed border-[var(--kn-edge)] bg-[var(--kn-paper)] px-6 py-14 text-center">
       <Loader2 className="size-5 animate-spin text-[var(--kn-ai)]" />
-      <p className="text-[15px] font-medium text-foreground">Researching your objective…</p>
+      <p className="text-[15px] font-medium text-foreground">{t.research.loading}</p>
       <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-        Searching relevant sources and synthesizing the evidence.
+        {t.research.loadingBody}
       </p>
     </div>
   )
 }
 
 function BriefResult({ brief }: { brief: ResearchBrief }) {
+  const t = useT()
+  const { n } = useLocale()
   if (brief.status === "no_evidence") {
     return (
       <div className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-[var(--kn-edge)] bg-[var(--kn-paper)] px-6 py-14 text-center">
         <div className="max-w-md space-y-2">
-          <p className="text-[15px] font-medium text-foreground">Nothing in your library covers this yet.</p>
+          <p className="text-[15px] font-medium text-foreground">{t.research.nothingCovers}</p>
           <p className="text-sm leading-relaxed text-muted-foreground">{brief.summary}</p>
         </div>
         <SemanticNotice status={brief.retrieval.semanticSearch} />
         <Link href="/knowledge/library" className="text-sm text-muted-foreground underline underline-offset-4">
-          Browse your library
+          {t.research.browseLibrary}
         </Link>
       </div>
     )
@@ -116,7 +120,7 @@ function BriefResult({ brief }: { brief: ResearchBrief }) {
   return (
     <article className="space-y-10">
       <section>
-        <h2 className="text-[13px] font-medium text-primary">Research answer</h2>
+        <h2 className="text-[13px] font-medium text-primary">{t.research.answerHeading}</h2>
         {brief.unresolvedCitationIds.length > 0 ? (
           <div className="mt-3 flex items-start gap-3 rounded-2xl border border-[var(--kn-edge)] bg-secondary/50 px-4 py-3">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
@@ -142,7 +146,7 @@ function BriefResult({ brief }: { brief: ResearchBrief }) {
 
       {brief.discoveries.length > 0 ? (
         <section>
-          <h2 className="text-[13px] font-medium text-primary">Key discoveries</h2>
+          <h2 className="text-[13px] font-medium text-primary">{t.research.keyDiscoveries}</h2>
           <ol className="mt-4 space-y-5">
             {brief.discoveries.map((d) => (
               <li key={`${d.importance}-${d.title}`} className="flex gap-4">
@@ -207,8 +211,7 @@ function BriefResult({ brief }: { brief: ResearchBrief }) {
       <footer className="space-y-3 border-t border-[var(--kn-edge)] pt-4">
         <SemanticNotice status={brief.retrieval.semanticSearch} />
         <p className="text-[12px] text-muted-foreground">
-          {brief.retrieval.chunksUsed} {brief.retrieval.chunksUsed === 1 ? "passage" : "passages"} across{" "}
-          {brief.retrieval.itemsCovered} {brief.retrieval.itemsCovered === 1 ? "saved piece" : "saved pieces"}
+          {t.ask.passages(brief.retrieval.chunksUsed)} · {t.research.pieces(brief.retrieval.itemsCovered, n(brief.retrieval.itemsCovered))}
         </p>
       </footer>
     </article>
@@ -218,11 +221,12 @@ function BriefResult({ brief }: { brief: ResearchBrief }) {
 /** Semantic search failing open to lexical is correct and dangerous:
  *  the brief still arrives, so nothing looks wrong. */
 function SemanticNotice({ status }: { status: ResearchBrief["retrieval"]["semanticSearch"] }) {
+  const t = useT()
   if (status.enabled || status.reason === "not_requested") return null
   const copy =
     status.reason === "provider_not_configured"
-      ? "Meaning-based search is not configured on this deployment, so this searched exact words only. Sources phrased differently from your objective may have been missed."
-      : "Meaning-based search is temporarily unavailable, so this searched exact words only. Try again later for fuller coverage."
+      ? t.research.lexicalOnlyUnconfigured
+      : t.research.lexicalOnlyUnavailable
   return (
     <div className="flex max-w-xl items-start gap-2.5 rounded-xl bg-secondary/50 px-3 py-2.5">
       <Info className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
@@ -232,14 +236,16 @@ function SemanticNotice({ status }: { status: ResearchBrief["retrieval"]["semant
 }
 
 function ErrorState({ failure, onRetry }: { failure: AskFailure; onRetry: () => void }) {
-  const copy = FAILURE_COPY[failure.kind]
+  const t = useT()
+  const icon = FAILURE_ICON[failure.kind]
+  const title = t.research.failure[failure.kind]
   return (
     <div className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-[var(--kn-edge)] bg-[var(--kn-paper)] px-6 py-14 text-center">
       <span className="flex size-12 items-center justify-center rounded-2xl bg-secondary text-muted-foreground">
-        {copy.icon}
+        {icon}
       </span>
       <div className="max-w-md space-y-2">
-        <p className="text-[15px] font-medium text-foreground">{copy.title}</p>
+        <p className="text-[15px] font-medium text-foreground">{title}</p>
         {/* The server's own message, not a rewrite of it. */}
         <p className="text-sm leading-relaxed text-muted-foreground">{failure.message}</p>
       </div>
@@ -248,29 +254,32 @@ function ErrorState({ failure, onRetry }: { failure: AskFailure; onRetry: () => 
           onClick={onRetry}
           className="flex h-10 items-center rounded-full border border-border px-5 text-sm text-foreground hover:bg-secondary"
         >
-          Try again
+          {t.common.tryAgain}
         </button>
       ) : failure.kind === "unauthorized" ? (
         <Link
           href="/login?callbackUrl=/knowledge/home"
           className="flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground"
         >
-          Sign in <ArrowRight className="size-4" />
+          {t.common.signIn} <ArrowRight className="size-4" />
         </Link>
       ) : null}
     </div>
   )
 }
 
-const FAILURE_COPY: Record<AskFailure["kind"], { title: string; icon: React.ReactNode }> = {
-  unauthorized: { title: "Sign in to research.", icon: <ShieldAlert className="size-6" /> },
-  invalid_request: { title: "That objective can't be researched.", icon: <AlertTriangle className="size-6" /> },
-  rate_limited: { title: "Too many research runs just now.", icon: <Clock className="size-6" /> },
-  provider_unavailable: { title: "Research isn't configured.", icon: <ShieldAlert className="size-6" /> },
-  provider_error: { title: "Couldn't reach the model.", icon: <AlertTriangle className="size-6" /> },
-  malformed_response: { title: "Unreadable response.", icon: <AlertTriangle className="size-6" /> },
-  network: { title: "You appear to be offline.", icon: <WifiOff className="size-6" /> },
-  unknown: { title: "Something went wrong.", icon: <AlertTriangle className="size-6" /> },
+/* The icon only. The sentence lives in the dictionary, keyed by the
+ * same `AskFailure["kind"]`, so a new failure kind cannot ship with an
+ * English sentence baked in beside its icon. */
+const FAILURE_ICON: Record<AskFailure["kind"], React.ReactNode> = {
+  unauthorized: <ShieldAlert className="size-6" />,
+  invalid_request: <AlertTriangle className="size-6" />,
+  rate_limited: <Clock className="size-6" />,
+  provider_unavailable: <ShieldAlert className="size-6" />,
+  provider_error: <AlertTriangle className="size-6" />,
+  malformed_response: <AlertTriangle className="size-6" />,
+  network: <WifiOff className="size-6" />,
+  unknown: <AlertTriangle className="size-6" />,
 }
 
 /** Display-only. A URL that will not parse is shown verbatim rather

@@ -18,10 +18,23 @@
  * a local server is itself a private address, so it doubles as proof
  * that loopback is refused for real, not just in a stub.
  *
- * NETWORK DEPENDENCY: the DNS group resolves example.com, because gate
- * 1 legitimately performs DNS for any hostname and there is no honest
- * way to test a hostname without one. Those tests fail loudly rather
- * than skipping if DNS is unavailable.
+ * NO NETWORK DEPENDENCY. This file used to say there was "no honest
+ * way to test a hostname without" real DNS, and the DNS group really
+ * did resolve example.com — so five tests here failed in any
+ * environment without public resolution, for reasons that had nothing
+ * to do with the code under test.
+ *
+ * That assumption was wrong, and the reason it was wrong is the point:
+ * the guard performed DNS but did not RETURN what it resolved, so
+ * safe-fetch had to resolve a second time to pin its socket. Two
+ * lookups per hop, of which only the injected one was observable.
+ * resolveSafeUrl now hands back the addresses it validated, safe-fetch
+ * reuses them, and the resolver is injectable at the single remaining
+ * resolution — so these tests control DNS exactly and need no network.
+ *
+ * That also makes "resolves a hostname exactly ONCE" below a real
+ * assertion rather than a coincidence: previously it counted only the
+ * injected resolver and could not see the real lookup underneath.
  * ================================================================== */
 
 import { after, before, describe, it } from "node:test"
@@ -346,6 +359,17 @@ describe("DNS answers", () => {
         return true
       },
     )
+  })
+
+  it("accepts an answer with EXACTLY the limit", async () => {
+    // The boundary in the permitted direction. Without this, an
+    // off-by-one that refused at the limit would pass the test below
+    // and quietly break hostnames with eight records.
+    const exactly = Array.from({ length: MAX_ADDRESSES }, (_, i) => [`93.184.216.${i + 1}`, 4] as [string, number])
+    const { transport, seen } = scriptedTransport({ "*": { status: 200 } })
+    const res = await safeFetch("http://example.com/x", { ...OPTS, resolver: resolving(...exactly), transport })
+    assert.equal(res.status, 200)
+    assert.equal(seen[0].address, "93.184.216.1", "pins the first of the validated answers")
   })
 
   it("refuses an answer with more addresses than the limit", async () => {

@@ -10,9 +10,11 @@ import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
 import { fetchDocument, KnowledgeApiError } from "@/lib/knowledge/client"
 import type { KnowledgeDocument } from "@/lib/knowledge/types"
+import { useT } from "./i18n"
 import { ReaderView } from "./reader-view"
 
 export function GuestReader({ id }: { id: string }) {
+  const t = useT()
   const [doc, setDoc] = useState<KnowledgeDocument | null>(null)
   const [status, setStatus] = useState<"loading" | "ready" | "missing">("loading")
 
@@ -56,13 +58,13 @@ export function GuestReader({ id }: { id: string }) {
   if (status === "missing" || !doc) {
     return (
       <div className="mx-auto flex max-w-2xl flex-col items-start px-5 py-24">
-        <p className="font-serif text-3xl font-medium tracking-tight text-foreground">This piece isn&apos;t here.</p>
-        <p className="mt-2 text-muted-foreground">It may have been removed from your library.</p>
+        <p className="font-serif text-3xl font-medium tracking-tight text-foreground">{t.empty.pieceNotHere}</p>
+        <p className="mt-2 text-muted-foreground">{t.empty.mayHaveBeenRemoved}</p>
         <Link
           href="/knowledge/library"
           className="mt-6 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground"
         >
-          <ArrowLeft className="size-4" /> Back to your library
+          <ArrowLeft className="size-4" /> {t.empty.backToLibrary}
         </Link>
       </div>
     )

@@ -1,14 +1,21 @@
 import type { Metadata } from "next"
+import { getTranslations } from "@/lib/knowledge/i18n/server"
 import { KnowledgeUnderstand } from "@/components/knowledge/understand/knowledge-understand"
 import type { KnowledgeOverview } from "@/lib/knowledge/understand/types"
 import { liveExplorer, liveOverview, type LiveExplorer } from "@/lib/knowledge/understand/live"
 import { logger } from "@/lib/observability/logger"
 import { requireSession, StaleSessionError, UnauthenticatedError } from "@/lib/session"
 
-export const metadata: Metadata = {
-  title: "Keeply",
-  description:
-    "An interactive view of what your saved library actually contains — themes, concepts, connections and the questions they raise.",
+/* The tab, the bookmark and the share preview are read as often as
+ * the page, so they come from the dictionary too. This page already
+ * resolves the locale for its own content, so nothing here makes it
+ * any more dynamic than it was. */
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getTranslations()
+  return {
+    title: t.meta.connectionsTitle,
+    description: t.meta.connectionsDescription,
+  }
 }
 
 /* Per-request by necessity: the headline counts below are one person's

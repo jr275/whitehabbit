@@ -18,27 +18,18 @@ import { askAboutConceptHref } from "@/lib/knowledge/links"
 import { useMemo, useState } from "react"
 import type { KnowledgeConcept, KnowledgeObject, KnowledgeObjectKind } from "@/lib/knowledge/understand/types"
 import { cn } from "@/lib/utils"
+import type { Dictionary } from "@/lib/knowledge/i18n/dictionary"
+import { useLocale, useT } from "../../i18n"
 
 type Filter = "all" | KnowledgeObjectKind
 type Sort = "recent" | "relevant" | "revisited"
 
-const FILTERS: { id: Filter; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "article", label: "Articles" },
-  { id: "video", label: "Videos" },
-  { id: "pdf", label: "PDFs" },
-  { id: "podcast", label: "Podcasts" },
-  { id: "social", label: "Posts" },
-  { id: "document", label: "Notes" },
-]
+/* The same filter names the Library shows, read from one place: two
+ * tables of the same six words drift the moment one is translated. */
+const FILTERS: Filter[] = ["all", "article", "video", "pdf", "podcast", "social", "document"]
 
-const KIND_LABEL: Record<KnowledgeObjectKind, string> = {
-  article: "Article",
-  video: "Video",
-  pdf: "PDF",
-  podcast: "Podcast",
-  social: "Post",
-  document: "Note",
+function filterLabel(t: Dictionary, filter: Filter): string {
+  return filter === "all" ? t.library.all : t.library.filters[filter]
 }
 
 /* Only offer a sort the data can actually perform. "Relevant" and
@@ -47,10 +38,12 @@ const KIND_LABEL: Record<KnowledgeObjectKind, string> = {
  * last-read timestamp, which is a different thing). Offering them over
  * live data would produce a control that reorders nothing, which reads
  * as a bug rather than as an absence. */
-const ALL_SORTS: { id: Sort; label: string; needs: keyof KnowledgeObject | null }[] = [
-  { id: "recent", label: "Recent", needs: null },
-  { id: "relevant", label: "Relevant", needs: "relevance" },
-  { id: "revisited", label: "Most revisited", needs: "revisits" },
+/* Keys, not labels — this list is a module-level const and has no
+ * hook to read the dictionary with. */
+const ALL_SORTS: { id: Sort; labelKey: keyof Dictionary["explorer"]["sorts"]; needs: keyof KnowledgeObject | null }[] = [
+  { id: "recent", labelKey: "recent", needs: null },
+  { id: "relevant", labelKey: "relevant", needs: "relevance" },
+  { id: "revisited", labelKey: "revisited", needs: "revisits" },
 ]
 
 export interface ExplorerProps {
@@ -87,6 +80,8 @@ export function KnowledgeExplorer({
   error = false,
   live = false,
 }: ExplorerProps) {
+  const t = useT()
+  const { n } = useLocale()
   const [filter, setFilter] = useState<Filter>("all")
   const [sort, setSort] = useState<Sort>("recent")
   const [query, setQuery] = useState("")
@@ -140,7 +135,7 @@ export function KnowledgeExplorer({
   if (error) {
     return (
       <p className="py-16 text-center text-[15px] text-[var(--kp-ink-faint)]">
-        Your library could not be loaded just now. Nothing has been lost — reload to try again.
+        {t.explorer.loadFailed}
       </p>
     )
   }
@@ -148,7 +143,7 @@ export function KnowledgeExplorer({
   if (live && objects.length === 0) {
     return (
       <p className="py-16 text-center text-[15px] text-[var(--kp-ink-faint)]">
-        Nothing saved yet. Save a link and it will appear here.
+        {t.explorer.nothingSaved}
       </p>
     )
   }
@@ -156,21 +151,21 @@ export function KnowledgeExplorer({
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-4 border-y border-[var(--kp-rule)] py-3">
-        <div role="group" aria-label="Filter by type" className="kp-scroll-x flex items-center gap-1">
+        <div role="group" aria-label={t.explorer.filterByType} className="kp-scroll-x flex items-center gap-1">
           {FILTERS.map((f) => (
             <button
-              key={f.id}
+              key={f}
               type="button"
-              onClick={() => setFilter(f.id)}
-              aria-pressed={filter === f.id}
+              onClick={() => setFilter(f)}
+              aria-pressed={filter === f}
               className={cn(
                 "whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors duration-[var(--kp-fast)]",
-                filter === f.id
+                filter === f
                   ? "bg-[var(--kp-ink)] text-[var(--kp-paper)]"
                   : "text-[var(--kp-ink-faint)] hover:text-[var(--kp-ink)]",
               )}
             >
-              {f.label}
+              {filterLabel(t, f)}
             </button>
           ))}
         </div>
@@ -178,20 +173,18 @@ export function KnowledgeExplorer({
         <div className="flex flex-1 items-center justify-end gap-4">
           <div className="min-w-0 flex-1 sm:max-w-[240px]">
             <label htmlFor="kp-explorer-search" className="sr-only">
-              Search your library
+              {t.explorer.searchYourLibrary}
             </label>
             <input
               id="kp-explorer-search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search"
+              placeholder={t.common.search}
               className="w-full border-b border-[var(--kp-rule)] bg-transparent py-1.5 text-[14px] placeholder:text-[var(--kp-ink-faint)] focus:border-[var(--kp-accent)] focus:outline-none"
             />
           </div>
           <div>
-            <label htmlFor="kp-explorer-sort" className="sr-only">
-              Sort by
-            </label>
+            <label htmlFor="kp-explorer-sort" className="sr-only">{t.explorer.sortBy}</label>
             <select
               id="kp-explorer-sort"
               value={activeSort}
@@ -200,7 +193,7 @@ export function KnowledgeExplorer({
             >
               {sorts.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.label}
+                  {t.explorer.sorts[s.labelKey]}
                 </option>
               ))}
             </select>
@@ -218,15 +211,13 @@ export function KnowledgeExplorer({
           {rail.length === 0 ? (
             <p className="text-[12.5px] leading-relaxed text-[var(--kp-ink-faint)]">
               {live
-                ? "Keeply hasn’t read these yet. The ideas it finds will appear here as it does."
-                : "No concepts in this sample."}
+                ? t.explorer.notReadYet
+                : t.explorer.noConceptsInSample}
             </p>
           ) : (
             <>
-              <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--kp-ink-faint)]">
-                Ideas in your library
-              </p>
-              <ul className="kp-scroll-x mt-2.5 flex flex-wrap gap-1.5" aria-label="Filter by concept">
+              <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--kp-ink-faint)]">{t.explorer.ideasInYourLibrary}</p>
+              <ul className="kp-scroll-x mt-2.5 flex flex-wrap gap-1.5" aria-label={t.explorer.filterByConcept}>
                 {rail.map((concept) => {
                   const active = concept.id === selectedConceptId
                   return (
@@ -258,10 +249,10 @@ export function KnowledgeExplorer({
 
       <div className="mt-4 flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <p className="text-[12.5px] text-[var(--kp-ink-faint)]" aria-live="polite">
-          {visible.length} of {objects.length} shown
-          {selectedConcept && <> · filtered by {selectedConcept.label}</>}
+          {t.explorer.shown(visible.length, objects.length)}
+          {selectedConcept && <> · {t.explorer.filteredBy(selectedConcept.label)}</>}
           {typeof total === "number" && total > objects.length && (
-            <> · showing the {objects.length} most recent of {total} saved</>
+            <> · {t.explorer.showingMostRecent(objects.length, n(total))}</>
           )}
         </p>
         {/* When a concept IS the subject, it can be asked about. Same
@@ -273,7 +264,7 @@ export function KnowledgeExplorer({
             href={askAboutConceptHref(selectedConcept.label)}
             className="text-[12.5px] font-medium text-[var(--kp-accent)] underline underline-offset-4 hover:opacity-80"
           >
-            Ask about this concept
+            {t.explorer.askAboutConcept}
           </Link>
         )}
       </div>
@@ -286,9 +277,9 @@ export function KnowledgeExplorer({
             // The concept exists and is real; nothing under it matches
             // the OTHER filters. Saying "nothing matches" without
             // naming which filter did it leaves someone stuck.
-            <>Nothing here is both {selectedConcept.label} and {KIND_LABEL[filter as KnowledgeObjectKind] ?? filter}.</>
+            <>{t.explorer.nothingBoth(selectedConcept.label, t.kinds[filter as KnowledgeObjectKind] ?? filter)}</>
           ) : (
-            <>Nothing to show with these filters.</>
+            <>{t.understand.nothingWithFilters}</>
           )}
         </p>
       ) : (
@@ -310,7 +301,7 @@ export function KnowledgeExplorer({
                   <p className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12.5px] text-[var(--kp-ink-faint)]">
                     <span>{object.source}</span>
                     <span aria-hidden>·</span>
-                    <span>{KIND_LABEL[object.kind]}</span>
+                    <span>{t.kinds[object.kind]}</span>
                     <span aria-hidden>·</span>
                     <time dateTime={object.savedAt}>
                       {new Date(object.savedAt).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}
@@ -421,17 +412,17 @@ export function KnowledgeExplorer({
                   )}
                   <button
                     type="button"
-                    onClick={() => onAsk(`What did I learn from “${object.title}”?`)}
+                    onClick={() => onAsk(t.explorer.whatDidILearn(object.title))}
                     className="text-[12.5px] font-medium text-[var(--kp-ink-soft)] hover:text-[var(--kp-accent)]"
                   >
-                    Ask about this
+                    {t.explorer.askAboutThis}
                   </button>
                   <button
                     type="button"
                     onClick={onExploreConnections}
                     className="text-[12.5px] font-medium text-[var(--kp-ink-soft)] hover:text-[var(--kp-accent)]"
                   >
-                    Connections
+                    {t.nav.connections}
                   </button>
                 </div>
               </div>

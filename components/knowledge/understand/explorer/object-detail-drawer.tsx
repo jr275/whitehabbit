@@ -23,6 +23,7 @@ import Link from "next/link"
 import { useCallback, useEffect, useRef } from "react"
 import type { KnowledgeConcept, KnowledgeObject } from "@/lib/knowledge/understand/types"
 import { Label } from "../shell/section"
+import { useT } from "../../i18n"
 
 export function ObjectDetailDrawer({
   object,
@@ -47,6 +48,7 @@ export function ObjectDetailDrawer({
    *  a page you are already on. */
   onSelectConcept?: (conceptId: string | null) => void
 }) {
+  const t = useT()
   const panelRef = useRef<HTMLDivElement>(null)
   const restoreTo = useRef<HTMLElement | null>(null)
   const conceptById = new Map(concepts.map((c) => [c.id, c]))
@@ -98,7 +100,7 @@ export function ObjectDetailDrawer({
     <div className="fixed inset-0 z-50">
       <button
         type="button"
-        aria-label="Close detail"
+        aria-label={t.explorer.closeDetail}
         onClick={onClose}
         className="absolute inset-0 bg-[oklch(0.19_0.012_260_/_28%)] backdrop-blur-[2px]"
       />
@@ -113,7 +115,7 @@ export function ObjectDetailDrawer({
         className="kp-understand absolute inset-x-0 bottom-0 top-16 overflow-y-auto rounded-t-2xl bg-[var(--kp-paper-raised)] shadow-[0_-8px_40px_oklch(0.19_0.012_260_/_18%)] focus:outline-none sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-[min(30rem,92vw)] sm:rounded-none sm:shadow-[-8px_0_40px_oklch(0.19_0.012_260_/_12%)]"
       >
         <div className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-[var(--kp-rule)] bg-[var(--kp-paper-raised)] px-6 py-3.5">
-          <Label>Saved item</Label>
+          <Label>{t.explorer.savedItem}</Label>
           <button
             type="button"
             onClick={onClose}
@@ -136,11 +138,11 @@ export function ObjectDetailDrawer({
               {new Date(object.savedAt).toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })}
             </time>
             {object.author && ` · ${object.author}`}
-            {object.revisits !== undefined && object.revisits > 0 && ` · revisited ${object.revisits}×`}
+            {object.revisits !== undefined && object.revisits > 0 && ` · ${t.explorer.revisitedTimes(object.revisits)}`}
           </p>
 
           <section className="mt-9">
-            <Label>What Keeply understood</Label>
+            <Label>{t.explorer.whatKeeplyUnderstood}</Label>
             <ul className="mt-3 flex flex-wrap gap-1.5">
               {object.conceptIds.map((id) => {
                 const label = conceptById.get(id)?.label
@@ -172,7 +174,7 @@ export function ObjectDetailDrawer({
               so nothing is clamped here. */}
           {object.summary && (
             <section className="mt-9">
-              <Label>In short</Label>
+              <Label>{t.explorer.inShort}</Label>
               <p className="mt-3 text-pretty text-[14.5px] leading-relaxed text-[var(--kp-ink-soft)]">
                 {object.summary}
               </p>
@@ -184,7 +186,7 @@ export function ObjectDetailDrawer({
               reads as something that failed to load. */}
           {object.insight && (
             <section className="mt-9">
-              <Label>Why it matters</Label>
+              <Label>{t.explorer.whyItMatters}</Label>
               <p className="mt-3 border-l-2 border-[var(--kp-accent)] pl-4 font-[family-name:var(--font-fraunces)] text-[16px] leading-[1.55]">
                 {object.insight}
               </p>
@@ -196,29 +198,25 @@ export function ObjectDetailDrawer({
               one. */}
           {object.url && (
             <section className="mt-9">
-              <Label>The piece itself</Label>
+              <Label>{t.explorer.thePieceItself}</Label>
               <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
                 <Link
                   href={`/knowledge/read/${object.id}`}
                   className="text-[13.5px] font-medium text-[var(--kp-ink)] underline underline-offset-4 hover:text-[var(--kp-accent)]"
-                >
-                  Read it in Keeply
-                </Link>
+                >{t.explorer.readItInKeeply}</Link>
                 <a
                   href={object.url}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[13.5px] font-medium text-[var(--kp-ink-soft)] underline underline-offset-4 hover:text-[var(--kp-accent)]"
-                >
-                  Open the original
-                </a>
+                >{t.explorer.openTheOriginal}</a>
               </div>
             </section>
           )}
 
           {related.length > 0 && (
             <section className="mt-9">
-              <Label>Connected knowledge</Label>
+              <Label>{t.explorer.connectedKnowledge}</Label>
               <ul className="mt-3 divide-y divide-[var(--kp-rule)] border-y border-[var(--kp-rule)]">
                 {related.map((r) => (
                   <li key={r.id}>
@@ -248,11 +246,9 @@ export function ObjectDetailDrawer({
           <div className="mt-10 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => onAsk(`What did I learn from “${object.title}”?`)}
+              onClick={() => onAsk(t.explorer.whatDidILearn(object.title))}
               className="rounded-full bg-[var(--kp-ink)] px-4 py-2 text-[13px] font-medium text-[var(--kp-paper)] transition-colors hover:bg-[var(--kp-accent)]"
-            >
-              Ask about this
-            </button>
+            >{t.explorer.askAboutThis}</button>
             <button
               type="button"
               onClick={() => {
@@ -260,9 +256,7 @@ export function ObjectDetailDrawer({
                 onExploreConnections()
               }}
               className="rounded-full border border-[var(--kp-rule-strong)] px-4 py-2 text-[13px] font-medium transition-colors hover:border-[var(--kp-accent)] hover:text-[var(--kp-accent)]"
-            >
-              Explore connections
-            </button>
+            >{t.explorer.exploreConnections}</button>
           </div>
         </div>
       </div>
